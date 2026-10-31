@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Bumped on any incompatible change to the message types below.
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// Upper bound on a single frame. Protects both sides from unbounded
 /// allocations caused by a corrupt or hostile length prefix.
@@ -177,22 +177,32 @@ pub enum ClientMessage {
     },
     ListSessions,
     CreateSession(CreateSession),
-    /// Attach to a session, replacing any existing attachment on this
-    /// connection. Input control is taken if it is free, or always when
-    /// `force` is set (the previous controller then gets `ControlLost`).
-    /// Otherwise the client observes.
+    /// Attach to a session, in addition to any others this connection is
+    /// attached to (one per visible pane). Re-attaching to the same session
+    /// refreshes it without releasing control. Input control is taken if it
+    /// is free, or always when `force` is set (the previous controller then
+    /// gets `ControlLost`). Otherwise the client observes.
     Attach {
         session: SessionId,
         size: TermSize,
         force: bool,
     },
-    Detach,
-    /// Raw bytes for the attached session's PTY. Ignored unless this client
-    /// holds input control.
-    Input(Vec<u8>),
-    /// New size for the attached session. Ignored unless this client holds
-    /// input control.
-    Resize(TermSize),
+    /// Detach from one session, or from all when `None`.
+    Detach {
+        session: Option<SessionId>,
+    },
+    /// Raw bytes for an attached session's PTY. Ignored unless this client
+    /// holds its input control.
+    Input {
+        session: SessionId,
+        data: Vec<u8>,
+    },
+    /// New size for an attached session. Ignored unless this client holds
+    /// its input control.
+    Resize {
+        session: SessionId,
+        size: TermSize,
+    },
     /// Terminate (if running) and remove a session.
     KillSession(SessionId),
     /// Change a session's label. An empty label resets it to the agent name.
@@ -374,11 +384,17 @@ mod tests {
                 protocol_version: PROTOCOL_VERSION,
                 client: "test".into(),
             },
-            ClientMessage::Input(b"\x1b[A hello".to_vec()),
-            ClientMessage::Resize(TermSize {
-                rows: 40,
-                cols: 120,
-            }),
+            ClientMessage::Input {
+                session: 1,
+                data: b"\x1b[A hello".to_vec(),
+            },
+            ClientMessage::Resize {
+                session: 1,
+                size: TermSize {
+                    rows: 40,
+                    cols: 120,
+                },
+            },
         ];
         let mut wire = Vec::new();
         for m in &msgs {

@@ -27,8 +27,24 @@ Goal (user, 2026-10-30): "match the control and stuff of herdr better… it shou
 | Sidebar toggle resizes the agent | `toggling_the_sidebar_gives_the_agent_the_full_width`; tmux: leader `b` → panel full width |
 | Docs | user guide key tables, global chords, mouse, agent status; `examples/config.toml` (validated by test) |
 
+## Step D: split panes and tabs ✅
+Design: [[ADR-0018 Tabs of split panes over multi-attach]].
+| Criterion | Evidence |
+|---|---|
+| One connection mirrors several sessions at their own sizes | daemon test `one_client_mirrors_several_sessions_at_their_own_sizes`; all 24 daemon tests green |
+| Splits share the panel; input to the focused pane; zoom; close | app test `splits_share_the_panel_and_route_input_to_the_focused_pane` (exact sizes, `Input{session}`, click focus, zoom/unzoom resizes, close detaches but keeps the session); layout tests (3) |
+| Tabs keep their panes; hidden tabs detached | app test `tabs_keep_their_own_panes` (incl. the daemon's `Detached` reply leaving the hidden tab intact) |
+| Ended sessions give space back, both message orders | `a_split_pane_that_ends_gives_its_space_back` (Detached before SessionRemoved), kill test (after) |
+| Live | tmux 120×30, isolated daemon: leader `v` → two titled panes, `echo` lands in the focused one; `z`/`z` zoom and restore; `o` moves focus (header follows); `t` → tab bar ` 1:shell  2:shell `; `[`/`]` switch with panes intact; `X` closes a pane, the other fills the tab |
+| Gate | fmt, clippy `-D warnings`, `cargo test --workspace` green; protocol bumped to v6 |
+
+Bugs found in manual testing:
+- Replies to the TUI's own detaches emptied hidden tabs (the tab bar never appeared). Fixed and regression-tested.
+- The shared-directory warning still said "Leader n, then w". It now names the bound `new_worktree_session` key.
+
 ## Next
-- (D) panes + tabs (multi-attach protocol).
+- Optional Obsidian notes integration (off by default).
+- Persist the pane/tab layout across `hive` restarts (not done).
 - Offer truss a Hive reporter (mirror of its herdr one, using `HIVE_SESSION_ID`/`HIVE_BIN_PATH`). Ask first: user's repo.
 - Website: say the install one-liner alone is enough (Download is optional).
 

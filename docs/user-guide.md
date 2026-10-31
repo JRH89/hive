@@ -67,6 +67,12 @@ Everything you type goes to the agent, except the **leader** key (`Ctrl+Space`) 
 | `1`–`9` | Jump to a session |
 | `s` | Focus the sidebar (`↑↓`, `enter`, `n`, `x`, `esc`) |
 | `b` | Show or hide the sidebar |
+| `v` or `%` / `-` or `"` | Split: new session to the right / below |
+| `o` | Focus the next pane (or click it) |
+| `z` | Zoom the focused pane; again to restore |
+| `X` | Close the pane (the session keeps running) |
+| `t` | New session in a new tab |
+| `]` / `[` | Next / previous tab |
 | `w` | Workspaces |
 | `r` | Rename session |
 | `x` | Terminate session (asks first; offers to remove a clean worktree) |
@@ -85,9 +91,13 @@ A few chords work **without the leader**, even while typing to an agent:
 
 If an agent needs one of these, rebind or unbind it under `[keys.global]` (see [Keys](#keys)).
 
+### Panes and tabs
+
+Split the panel to watch several agents at once. Each pane is its own terminal at its own size, with a title row showing the session and its status. Keys go to the focused pane. Switching to a session that is already in a pane focuses that pane (and its tab); otherwise the session replaces the focused pane. With more than one tab, the header shows the tab bar. Hidden tabs cost nothing: Hive only mirrors what is on screen. The layout lasts until you quit `hive`; sessions keep running either way.
+
 ### Mouse
 
-Click a session in the sidebar to open it, or a workspace name to open its first session. The wheel scrolls the sidebar. In the terminal panel, clicks and the wheel go to agents that use the mouse; full-screen apps without mouse support scroll with the wheel. Hold `Shift` to select text with your terminal as usual. Turn the mouse off with `[terminal] mouse_support = false`.
+Click a pane to focus it, a session in the sidebar to open it, or a workspace name to open its first session. The wheel scrolls the sidebar. In the terminal panel, clicks and the wheel go to agents that use the mouse; full-screen apps without mouse support scroll with the wheel. Hold `Shift` to select text with your terminal as usual. Turn the mouse off with `[terminal] mouse_support = false`.
 
 ### Agent status
 

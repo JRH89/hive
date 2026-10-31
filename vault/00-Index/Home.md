@@ -24,7 +24,7 @@ Knowledge base for building **Hive**, a terminal multiplexer for AI coding agent
 - [[ADR-0004 Lagging clients resync from snapshot]]
 - [[ADR-0005 Daemon answers terminal queries]]
 - [[ADR-0006 Leader key Ctrl+Space]]
-- [[ADR-0007 Switching re-attaches]]
+- [[ADR-0007 Switching re-attaches]] (superseded by ADR-0018)
 - [[ADR-0008 Session events published under the session lock]]
 - [[ADR-0009 Persist session metadata, mark lost sessions]]
 - [[ADR-0010 Attach observes unless control is free or forced]]
@@ -35,6 +35,7 @@ Knowledge base for building **Hive**, a terminal multiplexer for AI coding agent
 - [[ADR-0015 Static musl binaries via draft GitHub releases]]
 - [[ADR-0016 Agent detection from process and herdr manifests]]
 - [[ADR-0017 herdr-style keys, global chords and mouse]]
+- [[ADR-0018 Tabs of split panes over multi-attach]]
 
 ## Ongoing
 - [[Website Design]]: approved website direction, branding, scope and acceptance

@@ -23,9 +23,11 @@ use hive_protocol::{
     AgentStatus, ClientMessage, CreateSession, NewWorktree, ServerMessage, SessionId, SessionInfo,
     SessionState, TermSize, WorkspaceId, WorkspaceInfo,
 };
+use ratatui::layout::Rect;
 
 use crate::keymap::{Command, Global, Keymap};
 use crate::keys;
+use crate::layout::{Dir, PaneArea, Tab};
 
 /// Sidebar width including its 1-column border.
 pub const SIDEBAR_WIDTH: u16 = 26;
@@ -174,6 +176,15 @@ pub enum SidebarHit {
     Workspace(WorkspaceId),
 }
 
+/// Where the next session created from the UI goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Place {
+    /// The focused pane (or a new tab if none).
+    Replace,
+    Split(Dir),
+    NewTab,
+}
+
 /// Lines a wheel notch scrolls in a full-screen app without mouse support.
 const WHEEL_LINES: usize = 3;
 
@@ -190,7 +201,14 @@ pub struct App {
     pub config_path: Option<String>,
     pub sessions: BTreeMap<SessionId, SessionInfo>,
     pub workspaces: BTreeMap<WorkspaceId, WorkspaceInfo>,
-    pub view: Option<View>,
+    /// Mirrors of the sessions in the active tab's panes, by session.
+    pub views: BTreeMap<SessionId, View>,
+    /// Tabs of split panes (client-side layout). A session is in at most
+    /// one pane.
+    pub tabs: Vec<Tab>,
+    /// Index of the active tab.
+    pub tab: usize,
+    place: Place,
     pub mode: Mode,
     pub focus: Focus,
     /// Sidebar selection. Follows the attached session unless moved.
@@ -306,7 +324,10 @@ impl App {
             config_path: None,
             sessions: BTreeMap::new(),
             workspaces: BTreeMap::new(),
-            view: None,
+            views: BTreeMap::new(),
+            tabs: Vec::new(),
+            tab: 0,
+            place: Place::Replace,
             mode: Mode::Normal,
             focus: Focus::Terminal,
             cursor: None,
@@ -355,7 +376,171 @@ impl App {
     }
 
     pub fn current(&self) -> Option<&SessionInfo> {
-        self.view.as_ref().and_then(|v| self.sessions.get(&v.id))
+        self.focused().and_then(|id| self.sessions.get(&id))
+    }
+
+    /// The session keys go to: the active tab's focused pane.
+    pub fn focused(&self) -> Option<SessionId> {
+        self.tabs.get(self.tab).map(|t| t.focus)
+    }
+
+    /// The focused pane's mirror, once attached.
+    pub fn view(&self) -> Option<&View> {
+        self.focused().and_then(|id| self.views.get(&id))
+    }
+
+    pub fn active_tab(&self) -> Option<&Tab> {
+        self.tabs.get(self.tab)
+    }
+
+    /// Sessions in the active tab (attached even when zoomed away).
+    fn tab_sessions(&self) -> Vec<SessionId> {
+        self.active_tab()
+            .map(|t| t.root.panes())
+            .unwrap_or_default()
+    }
+
+    /// The terminal panel on screen.
+    pub fn panel_rect(&self) -> Rect {
+        let (x, y) = self.panel_origin();
+        Rect::new(x, y, self.panel.cols, self.panel.rows)
+    }
+
+    /// Where each drawn pane is, plus the separators between them.
+    pub fn pane_areas(&self) -> (Vec<PaneArea>, Vec<(Rect, Dir)>) {
+        match self.active_tab() {
+            Some(t) => t.areas(self.panel_rect()),
+            None => (Vec::new(), Vec::new()),
+        }
+    }
+
+    /// The size a session's pane gives it, if drawn.
+    fn pane_size(&self, id: SessionId) -> Option<TermSize> {
+        self.pane_areas()
+            .0
+            .into_iter()
+            .find(|p| p.session == id)
+            .map(|p| {
+                TermSize {
+                    rows: p.body.height,
+                    cols: p.body.width,
+                }
+                .clamped()
+            })
+    }
+
+    /// Brings the daemon in line with the active tab: detaches what left it,
+    /// attaches new panes and resizes the rest to their panes.
+    fn sync_panes(&mut self, before: Vec<SessionId>) -> Vec<ClientMessage> {
+        let now = self.tab_sessions();
+        let mut out = Vec::new();
+        for id in before.iter().filter(|id| !now.contains(id)) {
+            self.views.remove(id);
+            out.push(ClientMessage::Detach { session: Some(*id) });
+        }
+        for &id in &now {
+            if !self.views.contains_key(&id) {
+                out.push(self.attach(id));
+            }
+        }
+        out.extend(self.resize_panes());
+        out
+    }
+
+    /// Resize requests for controlled panes whose size changed.
+    fn resize_panes(&self) -> Vec<ClientMessage> {
+        self.views
+            .values()
+            .filter(|v| v.controller)
+            .filter_map(|v| {
+                let size = self.pane_size(v.id)?;
+                let (rows, cols) = v.parser.screen().size();
+                (size.rows != rows.get() || size.cols != cols.get()).then_some(
+                    ClientMessage::Resize {
+                        session: v.id,
+                        size,
+                    },
+                )
+            })
+            .collect()
+    }
+
+    /// Shows `id`: focuses its pane if a tab has it, otherwise puts it in
+    /// the focused pane (or a first tab).
+    fn show(&mut self, id: SessionId) -> Vec<ClientMessage> {
+        let before = self.tab_sessions();
+        if let Some(i) = self.tabs.iter().position(|t| t.root.contains(id)) {
+            self.tab = i;
+            self.tabs[i].focus = id;
+        } else if let Some(t) = self.tabs.get_mut(self.tab) {
+            t.replace_focused(id);
+        } else {
+            self.tabs.push(Tab::new(id));
+            self.tab = self.tabs.len() - 1;
+        }
+        self.cursor = Some(id);
+        self.done.remove(&id);
+        self.sync_panes(before)
+    }
+
+    /// Places a newly created session according to `self.place`.
+    fn place_new(&mut self, id: SessionId) -> Vec<ClientMessage> {
+        let place = std::mem::replace(&mut self.place, Place::Replace);
+        let before = self.tab_sessions();
+        match (place, self.tabs.get_mut(self.tab)) {
+            (Place::Split(dir), Some(t)) => t.split_focused(id, dir),
+            (Place::NewTab, _) | (Place::Split(_), None) => {
+                self.tabs.push(Tab::new(id));
+                self.tab = self.tabs.len() - 1;
+            }
+            (Place::Replace, _) => return self.show(id),
+        }
+        self.cursor = Some(id);
+        self.sync_panes(before)
+    }
+
+    /// Takes a session out of the layout (it ended or was removed). An
+    /// emptied active tab shows another session instead.
+    fn drop_pane(&mut self, id: SessionId) -> Vec<ClientMessage> {
+        self.views.remove(&id);
+        let Some(i) = self.tabs.iter().position(|t| t.root.contains(id)) else {
+            return Vec::new();
+        };
+        let active = i == self.tab;
+        let before = self.tab_sessions();
+        if self.tabs[i].remove(id) {
+            if !active {
+                return Vec::new();
+            }
+            self.cursor = self.focused();
+            return self.sync_panes(before);
+        }
+        self.tabs.remove(i);
+        if i < self.tab || self.tab >= self.tabs.len() {
+            self.tab = self.tab.saturating_sub(1);
+        }
+        if !active {
+            return Vec::new();
+        }
+        if self.tabs.is_empty() {
+            return match self.pick_session(Some(id)) {
+                Some(next) => self.show(next),
+                None => {
+                    self.focus = Focus::Sidebar;
+                    Vec::new()
+                }
+            };
+        }
+        self.cursor = self.focused();
+        self.sync_panes(Vec::new())
+    }
+
+    /// Input for the focused session.
+    fn input(&self, data: Vec<u8>) -> Vec<ClientMessage> {
+        match self.focused() {
+            Some(session) => vec![ClientMessage::Input { session, data }],
+            None => Vec::new(),
+        }
     }
 
     /// Workspaces in sidebar order (creation order), including any that
@@ -410,7 +595,7 @@ impl App {
     }
 
     fn viewing(&self, id: SessionId) -> bool {
-        self.view.as_ref().is_some_and(|v| v.id == id)
+        self.tab_sessions().contains(&id)
     }
 
     /// Tracks "done" and rings the bell when a session you aren't viewing
@@ -446,17 +631,15 @@ impl App {
             id.and_then(|id| self.sessions.get(&id))
                 .map(|s| s.workspace)
         };
-        of(self.view.as_ref().map(|v| v.id))
-            .or_else(|| of(self.cursor))
-            .or_else(|| {
-                let cwd = std::env::current_dir().ok()?;
-                let key = hive_workspace::workspace_key(&cwd);
-                let roots = self
-                    .workspaces
-                    .values()
-                    .map(|w| (w.id, std::path::Path::new(&w.root)));
-                hive_workspace::best_match(roots, &key)
-            })
+        of(self.focused()).or_else(|| of(self.cursor)).or_else(|| {
+            let cwd = std::env::current_dir().ok()?;
+            let key = hive_workspace::workspace_key(&cwd);
+            let roots = self
+                .workspaces
+                .values()
+                .map(|w| (w.id, std::path::Path::new(&w.root)));
+            hive_workspace::best_match(roots, &key)
+        })
     }
 
     /// Other running sessions in exactly the same directory (not isolated
@@ -486,10 +669,16 @@ impl App {
     pub fn on_connect(&mut self) -> Vec<ClientMessage> {
         let mut out = vec![ClientMessage::ListWorkspaces, ClientMessage::ListSessions];
         match self.start.take() {
-            Some(Start::Attach(id)) => out.push(self.attach(id)),
+            Some(Start::Attach(id)) => {
+                self.tabs = vec![Tab::new(id)];
+                self.tab = 0;
+                self.cursor = Some(id);
+                out.push(self.attach(id));
+            }
             Some(Start::Create(mut req)) => {
                 req.size = self.panel;
                 self.awaiting_create = true;
+                self.place = Place::Replace;
                 out.push(ClientMessage::CreateSession(req));
             }
             Some(Start::Auto) => self.start = Some(Start::Auto),
@@ -502,7 +691,7 @@ impl App {
     fn attach(&self, id: SessionId) -> ClientMessage {
         ClientMessage::Attach {
             session: id,
-            size: self.panel,
+            size: self.pane_size(id).unwrap_or(self.panel),
             force: false,
         }
     }
@@ -510,7 +699,7 @@ impl App {
     fn take_control(&self, id: SessionId) -> ClientMessage {
         ClientMessage::Attach {
             session: id,
-            size: self.panel,
+            size: self.pane_size(id).unwrap_or(self.panel),
             force: true,
         }
     }
@@ -541,9 +730,7 @@ impl App {
             return;
         }
         self.cursor = self
-            .view
-            .as_ref()
-            .map(|v| v.id)
+            .focused()
             .filter(|id| self.sessions.contains_key(id))
             .or_else(|| self.sessions.keys().next().copied());
     }
@@ -567,15 +754,34 @@ impl App {
                 self.sessions = list.into_iter().map(|s| (s.id, s)).collect();
                 if matches!(self.start, Some(Start::Auto)) {
                     self.start = None;
-                    let preferred = self
-                        .prefer
-                        .take()
-                        .filter(|id| self.sessions.contains_key(id) && !self.is_lost(*id));
-                    match preferred.or_else(|| self.pick_session(None)) {
-                        Some(id) => out.push(self.attach(id)),
-                        None => {
-                            self.view = None;
-                            self.focus = Focus::Sidebar;
+                    // After a reconnect the daemon has forgotten our
+                    // attachments: keep the tabs whose sessions survived and
+                    // attach their panes again.
+                    self.views.clear();
+                    let gone: Vec<SessionId> = self
+                        .tabs
+                        .iter()
+                        .flat_map(|t| t.root.panes())
+                        .filter(|id| !self.sessions.contains_key(id) || self.is_lost(*id))
+                        .collect();
+                    for id in gone {
+                        if let Some(i) = self.tabs.iter().position(|t| t.root.contains(id))
+                            && !self.tabs[i].remove(id)
+                        {
+                            self.tabs.remove(i);
+                        }
+                    }
+                    self.tab = self.tab.min(self.tabs.len().saturating_sub(1));
+                    if !self.tabs.is_empty() {
+                        out.extend(self.sync_panes(Vec::new()));
+                    } else {
+                        let preferred = self
+                            .prefer
+                            .take()
+                            .filter(|id| self.sessions.contains_key(id) && !self.is_lost(*id));
+                        match preferred.or_else(|| self.pick_session(None)) {
+                            Some(id) => out.extend(self.show(id)),
+                            None => self.focus = Focus::Sidebar,
                         }
                     }
                 }
@@ -586,16 +792,20 @@ impl App {
                 // (e.g. an instant exit) may already be here and is newer.
                 self.sessions.entry(id).or_insert(info);
                 if std::mem::take(&mut self.awaiting_create) {
-                    out.push(self.attach(id));
+                    out.extend(self.place_new(id));
                     self.focus = Focus::Terminal;
                     self.status = None;
                     let shared = self.sharing_dir(id);
                     if !shared.is_empty() {
                         let ids: Vec<_> = shared.iter().map(|i| format!("#{i}")).collect();
+                        let fix = match self.keymap.hint(Command::NewWorktreeSession) {
+                            Some(k) => format!(" Leader {k} starts one in its own worktree."),
+                            None => String::new(),
+                        };
                         self.set_status(
                             Tone::Warning,
                             format!(
-                                "Same directory as {}: agents may overwrite each other. Leader n, then w, isolates one in a worktree.",
+                                "Same directory as {}: agents may overwrite each other.{fix}",
                                 ids.join(", ")
                             ),
                         );
@@ -607,27 +817,40 @@ impl App {
                 snapshot,
                 controller,
             } => {
-                self.view = Some(View {
-                    id: session.id,
-                    parser: new_parser(session.size, &snapshot),
-                    controller,
-                });
-                self.cursor = Some(session.id);
-                self.done.remove(&session.id);
-                self.sessions.insert(session.id, session);
-                if !controller {
-                    self.set_status(Tone::Warning, OBSERVING);
-                } else if self.status_is_control_notice() {
-                    self.status = None;
+                let id = session.id;
+                if !self.tab_sessions().contains(&id) {
+                    // Arrived after its pane went away.
+                    out.push(ClientMessage::Detach { session: Some(id) });
+                } else {
+                    self.views.insert(
+                        id,
+                        View {
+                            id,
+                            parser: new_parser(session.size, &snapshot),
+                            controller,
+                        },
+                    );
+                    self.done.remove(&id);
+                    if self.focused() == Some(id) {
+                        self.cursor = Some(id);
+                        if !controller {
+                            self.set_status(Tone::Warning, OBSERVING);
+                        } else if self.status_is_control_notice() {
+                            self.status = None;
+                        }
+                    }
+                    // The pane may have changed size since the request.
+                    out.extend(self.resize_panes());
                 }
+                self.sessions.insert(id, session);
             }
             ServerMessage::Output { session, data } => {
-                if let Some(v) = self.view.as_mut().filter(|v| v.id == session) {
+                if let Some(v) = self.views.get_mut(&session) {
                     v.parser.process(&data);
                 }
             }
             ServerMessage::Resized { session, size } => {
-                if let Some(v) = self.view.as_mut().filter(|v| v.id == session) {
+                if let Some(v) = self.views.get_mut(&session) {
                     v.parser.set_size(nz(size.rows), nz(size.cols));
                 }
             }
@@ -636,32 +859,28 @@ impl App {
                 size,
                 snapshot,
             } => {
-                if let Some(v) = self.view.as_mut().filter(|v| v.id == session) {
+                if let Some(v) = self.views.get_mut(&session) {
                     v.parser = new_parser(size, &snapshot);
                 }
             }
             ServerMessage::Detached { session } => {
-                if self.view.as_ref().is_some_and(|v| v.id == session) {
-                    self.view = None;
-                    if let Some(next) = self.pick_session(Some(session)) {
-                        out.push(self.attach(next));
-                    } else {
-                        self.focus = Focus::Sidebar;
-                    }
+                // Unprompted only when the session is removed, which may be
+                // announced before or after this. Otherwise it answers our
+                // own detach of a hidden pane, which stays in its tab.
+                if !self.sessions.contains_key(&session) {
+                    out.extend(self.drop_pane(session));
                 }
             }
             ServerMessage::ControlLost { session } => {
-                if let Some(v) = self.view.as_mut().filter(|v| v.id == session) {
+                if let Some(v) = self.views.get_mut(&session) {
                     v.controller = false;
-                    self.set_status(Tone::Warning, CONTROL_LOST);
+                    if self.focused() == Some(session) {
+                        self.set_status(Tone::Warning, CONTROL_LOST);
+                    }
                 }
             }
             ServerMessage::ControlReleased { session } => {
-                if self
-                    .view
-                    .as_ref()
-                    .is_some_and(|v| v.id == session && !v.controller)
-                {
+                if self.focused() == Some(session) && self.view().is_some_and(|v| !v.controller) {
                     self.set_status(Tone::Info, CONTROL_FREE);
                 }
             }
@@ -673,6 +892,7 @@ impl App {
             ServerMessage::SessionRemoved(id) => {
                 self.sessions.remove(&id);
                 self.done.remove(&id);
+                out.extend(self.drop_pane(id));
                 if matches!(&self.status, Some((Tone::Info, m)) if *m == terminating(id)) {
                     self.status = None;
                 }
@@ -731,21 +951,18 @@ impl App {
                     input.extend(text.chars().filter(|c| !c.is_control()));
                     return Vec::new();
                 }
-                match &self.view {
-                    Some(v) if self.can_type() => vec![ClientMessage::Input(keys::encode_paste(
+                match self.view() {
+                    Some(v) if self.can_type() => self.input(keys::encode_paste(
                         &text,
                         v.parser.screen().bracketed_paste(),
-                    ))],
+                    )),
                     _ => Vec::new(),
                 }
             }
             Event::Mouse(m) => self.on_mouse(m),
             Event::Resize(cols, rows) => {
                 self.set_terminal_size((cols, rows));
-                match &self.view {
-                    Some(v) if v.controller => vec![ClientMessage::Resize(self.panel)],
-                    _ => Vec::new(),
-                }
+                self.resize_panes()
             }
             _ => Vec::new(),
         }
@@ -794,23 +1011,32 @@ impl App {
                 _ => Vec::new(),
             };
         }
-        let inside = m.column >= px
-            && m.row >= py
-            && m.column - px < self.panel.cols
-            && m.row - py < self.panel.rows;
-        if !inside {
-            return Vec::new();
-        }
-        if matches!(m.kind, MouseEventKind::Down(_)) && self.view.is_some() {
-            self.focus = Focus::Terminal;
-        }
-        if !self.can_type() {
-            return Vec::new();
-        }
-        let Some(screen) = self.view.as_ref().map(|v| v.parser.screen()) else {
+        let at = ratatui::layout::Position::new(m.column, m.row);
+        let Some(pane) = self
+            .pane_areas()
+            .0
+            .into_iter()
+            .find(|p| p.title.contains(at) || p.body.contains(at))
+        else {
             return Vec::new();
         };
-        let pos = (m.column - px, m.row - py);
+        if matches!(m.kind, MouseEventKind::Down(_)) {
+            self.focus = Focus::Terminal;
+            if let Some(t) = self.tabs.get_mut(self.tab) {
+                t.focus = pane.session;
+            }
+            self.cursor = Some(pane.session);
+            if pane.title.contains(at) {
+                return Vec::new();
+            }
+        }
+        if !self.can_type() || self.focused() != Some(pane.session) || !pane.body.contains(at) {
+            return Vec::new();
+        }
+        let Some(screen) = self.view().map(|v| v.parser.screen()) else {
+            return Vec::new();
+        };
+        let pos = (m.column - pane.body.x, m.row - pane.body.y);
         let mode = screen.mouse_protocol_mode();
         if mode != vt100::MouseProtocolMode::None {
             return keys::encode_mouse(
@@ -820,7 +1046,7 @@ impl App {
                 mode,
                 screen.mouse_protocol_encoding(),
             )
-            .map(|b| vec![ClientMessage::Input(b)])
+            .map(|b| self.input(b))
             .unwrap_or_default();
         }
         // Like xterm's alternate-scroll mode: a full-screen app without mouse
@@ -837,7 +1063,7 @@ impl App {
             &KeyEvent::new(arrow, KeyModifiers::NONE),
             screen.application_cursor(),
         )
-        .map(|b| vec![ClientMessage::Input(b.repeat(WHEEL_LINES))])
+        .map(|b| self.input(b.repeat(WHEEL_LINES)))
         .unwrap_or_default()
     }
 
@@ -846,7 +1072,7 @@ impl App {
         self.link == Link::Connected
             && self.mode == Mode::Normal
             && self.focus == Focus::Terminal
-            && self.view.as_ref().is_some_and(|v| v.controller)
+            && self.view().is_some_and(|v| v.controller)
             && self.current().is_some_and(|s| s.state.is_alive())
     }
 
@@ -913,11 +1139,10 @@ impl App {
             }
             Mode::Normal if self.can_type() => {
                 let app_cursor = self
-                    .view
-                    .as_ref()
+                    .view()
                     .is_some_and(|v| v.parser.screen().application_cursor());
                 keys::encode(&key, app_cursor)
-                    .map(|b| vec![ClientMessage::Input(b)])
+                    .map(|b| self.input(b))
                     .unwrap_or_default()
             }
             Mode::Normal => self.on_sidebar_key(key),
@@ -939,11 +1164,11 @@ impl App {
                 };
             }
             KeyCode::Esc | KeyCode::Tab => {
-                if self.view.is_some() {
+                if self.view().is_some() {
                     self.focus = Focus::Terminal;
                 }
             }
-            KeyCode::Char('n') => self.open_picker(None),
+            KeyCode::Char('n') => self.open_picker_for(Place::Replace),
             KeyCode::Char('w') => self.open_workspaces(),
             KeyCode::Char('p') => self.open_palette(false),
             KeyCode::Char('/') => self.open_palette(true),
@@ -968,11 +1193,10 @@ impl App {
         if self.keymap.is_leader(&key) {
             // Leader twice sends the leader key itself to the agent.
             let app_cursor = self
-                .view
-                .as_ref()
+                .view()
                 .is_some_and(|v| v.parser.screen().application_cursor());
             return match keys::encode(&self.keymap.leader.event(), app_cursor) {
-                Some(bytes) if self.can_type() => vec![ClientMessage::Input(bytes)],
+                Some(bytes) if self.can_type() => self.input(bytes),
                 _ => Vec::new(),
             };
         }
@@ -987,13 +1211,45 @@ impl App {
 
     /// Runs a command from a leader key or the palette.
     pub fn run(&mut self, cmd: Command) -> Vec<ClientMessage> {
-        let current = self.view.as_ref().map(|v| v.id);
+        let current = self.focused();
         match cmd {
             Command::Palette => self.open_palette(false),
             Command::SearchSessions => self.open_palette(true),
-            Command::NewSession => self.open_picker(None),
+            Command::NewSession => self.open_picker_for(Place::Replace),
+            Command::SplitRight => self.open_picker_for(Place::Split(Dir::Right)),
+            Command::SplitDown => self.open_picker_for(Place::Split(Dir::Down)),
+            Command::NewTab => self.open_picker_for(Place::NewTab),
+            Command::NextTab | Command::PrevTab if self.tabs.len() > 1 => {
+                let before = self.tab_sessions();
+                let delta = if cmd == Command::NextTab { 1 } else { -1 };
+                self.tab =
+                    (self.tab as isize + delta).rem_euclid(self.tabs.len() as isize) as usize;
+                self.cursor = self.focused();
+                self.focus = Focus::Terminal;
+                return self.sync_panes(before);
+            }
+            Command::NextTab | Command::PrevTab => {}
+            Command::FocusNextPane => {
+                if let Some(t) = self.tabs.get_mut(self.tab) {
+                    t.cycle_focus(1);
+                    self.cursor = Some(t.focus);
+                    self.focus = Focus::Terminal;
+                }
+            }
+            Command::Zoom => {
+                if let Some(t) = self
+                    .tabs
+                    .get_mut(self.tab)
+                    .filter(|t| t.root.panes().len() > 1)
+                {
+                    t.zoomed = !t.zoomed;
+                    return self.resize_panes();
+                }
+            }
+            Command::ClosePane => return self.close_pane(),
+            Command::CloseTab => return self.close_tab(),
             Command::NewWorktreeSession => {
-                self.open_picker(None);
+                self.open_picker_for(Place::Replace);
                 if self.picker_can_worktree() {
                     if let Mode::NewSession { worktree, .. } = &mut self.mode {
                         *worktree = true;
@@ -1027,13 +1283,11 @@ impl App {
             Command::PrevWorkspace => return self.switch_workspace(-1),
             Command::ToggleSidebar => {
                 self.sidebar_hidden = !self.sidebar_hidden;
-                if self.sidebar_hidden && self.focus == Focus::Sidebar && self.view.is_some() {
+                if self.sidebar_hidden && self.focus == Focus::Sidebar && self.view().is_some() {
                     self.focus = Focus::Terminal;
                 }
                 self.set_terminal_size(self.terminal);
-                if self.view.as_ref().is_some_and(|v| v.controller) {
-                    return vec![ClientMessage::Resize(self.panel)];
-                }
+                return self.resize_panes();
             }
             Command::Sidebar => {
                 self.focus = Focus::Sidebar;
@@ -1220,10 +1474,43 @@ impl App {
             return Vec::new();
         }
         self.focus = Focus::Terminal;
-        match &self.view {
-            Some(v) if v.id == id && v.controller => Vec::new(),
-            _ => vec![self.attach(id)],
+        let mut out = self.show(id);
+        // Showing an observed session again tries to take control if free.
+        if self.views.get(&id).is_some_and(|v| !v.controller) {
+            out.push(self.attach(id));
         }
+        out
+    }
+
+    /// Takes the focused pane out of its tab; the session keeps running.
+    /// The last pane of a tab closes the tab, unless it is the only one.
+    fn close_pane(&mut self) -> Vec<ClientMessage> {
+        let Some(id) = self.focused() else {
+            return Vec::new();
+        };
+        let before = self.tab_sessions();
+        if before.len() > 1 {
+            self.tabs[self.tab].remove(id);
+            self.cursor = self.focused();
+            return self.sync_panes(before);
+        }
+        self.close_tab()
+    }
+
+    /// Closes the active tab; its sessions keep running.
+    fn close_tab(&mut self) -> Vec<ClientMessage> {
+        if self.tabs.len() < 2 {
+            self.set_status(
+                Tone::Info,
+                "This is the only tab. Sessions keep running; detach to leave.",
+            );
+            return Vec::new();
+        }
+        let before = self.tab_sessions();
+        self.tabs.remove(self.tab);
+        self.tab = self.tab.min(self.tabs.len() - 1);
+        self.cursor = self.focused();
+        self.sync_panes(before)
     }
 
     fn switch_nth(&mut self, n: usize) -> Vec<ClientMessage> {
@@ -1260,12 +1547,12 @@ impl App {
         let order: Vec<SessionId> = self
             .order()
             .into_iter()
-            .filter(|&id| !self.is_lost(id) || Some(id) == self.view.as_ref().map(|v| v.id))
+            .filter(|&id| !self.is_lost(id) || Some(id) == self.focused())
             .collect();
         if order.is_empty() {
             return Vec::new();
         }
-        let from = self.view.as_ref().map(|v| v.id).or(self.cursor);
+        let from = self.focused().or(self.cursor);
         let idx = from
             .and_then(|c| order.iter().position(|&id| id == c))
             .map(|i| i as isize + delta)
@@ -1309,7 +1596,7 @@ impl App {
         self.link = Link::Reconnecting { attempt: 0, reason };
         self.mode = Mode::Normal;
         self.awaiting_create = false;
-        self.prefer = self.view.as_ref().map(|v| v.id).or(self.prefer);
+        self.prefer = self.focused().or(self.prefer);
     }
 
     pub fn on_reconnect_attempt(&mut self) {
@@ -1474,6 +1761,11 @@ impl App {
         }
     }
 
+    fn open_picker_for(&mut self, place: Place) {
+        self.place = place;
+        self.open_picker(None);
+    }
+
     fn open_picker(&mut self, workspace: Option<WorkspaceId>) {
         let path = std::env::var_os("PATH").unwrap_or_default();
         // Known agents are offered only when installed; configured ones (and
@@ -1589,9 +1881,9 @@ impl App {
 
     fn detach(&mut self) -> Vec<ClientMessage> {
         self.exit = Some(Outcome::Detached {
-            session: self.view.as_ref().map(|v| v.id),
+            session: self.focused(),
         });
-        vec![ClientMessage::Detach]
+        vec![ClientMessage::Detach { session: None }]
     }
 }
 
@@ -1651,7 +1943,9 @@ mod tests {
         key(KeyCode::Char(' '), KeyModifiers::CONTROL)
     }
 
+    /// Shows `id` (as switching would) and delivers its `Attached` reply.
     fn attached(app: &mut App, id: SessionId) {
+        let _ = app.show(id);
         app.on_server(ServerMessage::Attached {
             session: info(id, SessionState::Running),
             snapshot: b"hello".to_vec(),
@@ -1668,6 +1962,13 @@ mod tests {
         ));
         attached(&mut app, 1);
         app
+    }
+
+    /// Requests other than detaching the pane being replaced.
+    fn attaches(out: Vec<ClientMessage>) -> Vec<ClientMessage> {
+        out.into_iter()
+            .filter(|m| !matches!(m, ClientMessage::Detach { .. }))
+            .collect()
     }
 
     fn attach_msg(app: &App, id: SessionId) -> Vec<ClientMessage> {
@@ -1709,7 +2010,7 @@ mod tests {
             .extend([(3, SidebarHit::Session(2)), (4, SidebarHit::Session(2))]);
         let click = MouseEventKind::Down(MouseButton::Left);
         assert_eq!(
-            app.on_terminal_event(mouse(click, 2, 4)),
+            attaches(app.on_terminal_event(mouse(click, 2, 4))),
             attach_msg(&app, 2)
         );
 
@@ -1726,7 +2027,10 @@ mod tests {
         });
         assert_eq!(
             app.on_terminal_event(mouse(MouseEventKind::ScrollDown, px + 1, py)),
-            vec![ClientMessage::Input(b"\x1b[B\x1b[B\x1b[B".to_vec())]
+            vec![ClientMessage::Input {
+                session: 2,
+                data: b"\x1b[B\x1b[B\x1b[B".to_vec()
+            }]
         );
         // An app that enables SGR mouse gets panel-relative coordinates.
         app.on_server(ServerMessage::Output {
@@ -1735,7 +2039,10 @@ mod tests {
         });
         assert_eq!(
             app.on_terminal_event(mouse(click, px + 4, py + 2)),
-            vec![ClientMessage::Input(b"\x1b[<0;5;3M".to_vec())]
+            vec![ClientMessage::Input {
+                session: 2,
+                data: b"\x1b[<0;5;3M".to_vec()
+            }]
         );
         // The status bar is outside the panel.
         assert!(
@@ -1749,19 +2056,22 @@ mod tests {
         let mut app = app();
         let alt = |code| key(code, KeyModifiers::ALT);
         assert_eq!(
-            app.on_terminal_event(alt(KeyCode::Char('3'))),
+            attaches(app.on_terminal_event(alt(KeyCode::Char('3')))),
             attach_msg(&app, 3)
         );
         attached(&mut app, 3);
         assert_eq!(
-            app.on_terminal_event(alt(KeyCode::Right)),
+            attaches(app.on_terminal_event(alt(KeyCode::Right))),
             attach_msg(&app, 1)
         );
         // Plain digits still reach the agent.
         attached(&mut app, 1);
         assert_eq!(
             app.on_terminal_event(ch('3')),
-            vec![ClientMessage::Input(b"3".to_vec())]
+            vec![ClientMessage::Input {
+                session: 1,
+                data: b"3".to_vec()
+            }]
         );
     }
 
@@ -1773,12 +2083,180 @@ mod tests {
         let out = app.on_terminal_event(ch('b'));
         assert!(!app.sidebar_visible);
         assert_eq!(app.panel.cols, 100);
-        assert_eq!(out, vec![ClientMessage::Resize(app.panel)]);
+        assert_eq!(
+            out,
+            vec![ClientMessage::Resize {
+                session: 1,
+                size: app.panel
+            }]
+        );
         app.on_terminal_event(Event::Resize(120, 30));
         assert!(!app.sidebar_visible, "stays hidden across resizes");
         app.on_terminal_event(leader());
         app.on_terminal_event(ch('b'));
         assert_eq!(app.panel.cols, 120 - SIDEBAR_WIDTH);
+    }
+
+    /// Runs a leader command that opens the picker and launches `shell`;
+    /// returns the CreateSession size.
+    fn launch_via(app: &mut App, key: char) -> TermSize {
+        app.config.general.default_agent = "shell".into();
+        app.on_terminal_event(leader());
+        app.on_terminal_event(ch(key));
+        let out = app.on_terminal_event(self::key(KeyCode::Enter, KeyModifiers::NONE));
+        match out.as_slice() {
+            [ClientMessage::CreateSession(req)] => req.size,
+            other => panic!("expected CreateSession, got {other:?}"),
+        }
+    }
+
+    fn sizes(out: &[ClientMessage]) -> Vec<(SessionId, TermSize)> {
+        out.iter()
+            .filter_map(|m| match m {
+                ClientMessage::Attach { session, size, .. }
+                | ClientMessage::Resize { session, size } => Some((*session, *size)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn splits_share_the_panel_and_route_input_to_the_focused_pane() {
+        let mut app = app();
+        let full = app.panel;
+        launch_via(&mut app, 'v');
+        let out = app.on_server(ServerMessage::SessionCreated(info(
+            4,
+            SessionState::Running,
+        )));
+        // Two columns with a separator, each losing a row to its title.
+        let half = TermSize {
+            rows: full.rows - 1,
+            cols: (full.cols - 1) / 2,
+        };
+        let right = TermSize {
+            rows: full.rows - 1,
+            cols: full.cols - 1 - half.cols,
+        };
+        assert_eq!(sizes(&out), vec![(4, right), (1, half)]);
+        assert_eq!(app.focused(), Some(4));
+        attached(&mut app, 4);
+        app.on_server(ServerMessage::Resized {
+            session: 1,
+            size: half,
+        });
+        assert_eq!(
+            app.on_terminal_event(ch('a')),
+            vec![ClientMessage::Input {
+                session: 4,
+                data: b"a".to_vec()
+            }]
+        );
+
+        // Focus moves with leader o and with a click on the other pane.
+        app.on_terminal_event(leader());
+        app.on_terminal_event(ch('o'));
+        assert_eq!(app.focused(), Some(1));
+        let (panes, _) = app.pane_areas();
+        let right_pane = panes.iter().find(|p| p.session == 4).unwrap();
+        app.on_terminal_event(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            right_pane.body.x + 1,
+            right_pane.body.y + 1,
+        ));
+        assert_eq!(app.focused(), Some(4));
+
+        // Zoom gives the focused pane everything; unzoom restores it.
+        app.on_terminal_event(leader());
+        let out = app.on_terminal_event(ch('z'));
+        assert_eq!(sizes(&out), vec![(4, full)]);
+        app.on_server(ServerMessage::Resized {
+            session: 4,
+            size: full,
+        });
+        app.on_terminal_event(leader());
+        assert_eq!(sizes(&app.on_terminal_event(ch('z'))), vec![(4, right)]);
+        app.on_server(ServerMessage::Resized {
+            session: 4,
+            size: right,
+        });
+
+        // Closing a pane detaches it (the session keeps running) and the
+        // other pane takes the whole panel.
+        app.on_terminal_event(leader());
+        let out = app.on_terminal_event(ch('X'));
+        assert_eq!(out[0], ClientMessage::Detach { session: Some(4) });
+        assert_eq!(sizes(&out), vec![(1, full)]);
+        assert!(app.sessions.contains_key(&4));
+    }
+
+    #[test]
+    fn tabs_keep_their_own_panes() {
+        let mut app = app();
+        launch_via(&mut app, 't');
+        let out = app.on_server(ServerMessage::SessionCreated(info(
+            5,
+            SessionState::Running,
+        )));
+        assert_eq!(app.tabs.len(), 2);
+        assert_eq!(app.tab, 1);
+        assert_eq!(out[0], ClientMessage::Detach { session: Some(1) });
+        assert_eq!(sizes(&out), vec![(5, app.panel)]);
+        attached(&mut app, 5);
+
+        // Back to the first tab: its pane comes back, the other goes. The
+        // daemon's reply to that detach leaves the hidden tab alone.
+        app.on_terminal_event(leader());
+        let out = app.on_terminal_event(ch('['));
+        assert_eq!(app.focused(), Some(1));
+        assert_eq!(out[0], ClientMessage::Detach { session: Some(5) });
+        assert_eq!(attaches(out), attach_msg(&app, 1));
+        assert!(
+            app.on_server(ServerMessage::Detached { session: 5 })
+                .is_empty()
+        );
+        assert_eq!(app.tabs.len(), 2);
+
+        // Switching to a session shown in another tab activates that tab.
+        attached(&mut app, 1);
+        app.on_terminal_event(Event::Key(KeyEvent::new(
+            KeyCode::Char('2'),
+            KeyModifiers::ALT,
+        )));
+        assert_eq!(
+            app.tab, 0,
+            "#2 isn't in a tab: it replaces the focused pane"
+        );
+        assert_eq!(app.tabs[0].root.panes(), vec![2]);
+        let out = app.run(Command::NextTab);
+        assert_eq!(app.focused(), Some(5));
+        assert_eq!(attaches(out), attach_msg(&app, 5));
+
+        // A session that ends leaves its tab; an emptied tab closes.
+        attached(&mut app, 5);
+        app.on_server(ServerMessage::SessionRemoved(5));
+        app.on_server(ServerMessage::Detached { session: 5 });
+        assert_eq!(app.tabs.len(), 1);
+        assert_eq!(app.focused(), Some(2));
+    }
+
+    #[test]
+    fn a_split_pane_that_ends_gives_its_space_back() {
+        let mut app = app();
+        launch_via(&mut app, '-');
+        app.on_server(ServerMessage::SessionCreated(info(
+            4,
+            SessionState::Running,
+        )));
+        attached(&mut app, 4);
+        // The forwarder's Detached can beat the removal broadcast.
+        assert!(
+            app.on_server(ServerMessage::Detached { session: 4 })
+                .is_empty()
+        );
+        let out = app.on_server(ServerMessage::SessionRemoved(4));
+        assert_eq!(app.tabs[0].root.panes(), vec![1]);
+        assert_eq!(sizes(&out), vec![(1, app.panel)]);
     }
 
     #[test]
@@ -1806,6 +2284,7 @@ mod tests {
         assert_eq!(app.activity(1), Some(Activity::Idle));
 
         // Looking at a done session clears it.
+        let _ = app.show(2);
         app.on_server(ServerMessage::Attached {
             session: with_status(2, AgentStatus::Idle),
             snapshot: Vec::new(),
@@ -1863,7 +2342,7 @@ mod tests {
                 },
             ),
         ]));
-        assert_eq!(out, attach_msg(&app, 2));
+        assert_eq!(attaches(out), attach_msg(&app, 2));
     }
 
     #[test]
@@ -1871,13 +2350,19 @@ mod tests {
         let mut app = app();
         assert_eq!(
             app.on_terminal_event(ch('a')),
-            vec![ClientMessage::Input(b"a".to_vec())]
+            vec![ClientMessage::Input {
+                session: 1,
+                data: b"a".to_vec()
+            }]
         );
         assert!(app.on_terminal_event(leader()).is_empty());
         assert_eq!(app.mode, Mode::Leader);
         assert_eq!(
             app.on_terminal_event(leader()),
-            vec![ClientMessage::Input(vec![0])]
+            vec![ClientMessage::Input {
+                session: 1,
+                data: vec![0]
+            }]
         );
     }
 
@@ -1885,7 +2370,10 @@ mod tests {
     fn leader_d_detaches_without_killing() {
         let mut app = app();
         app.on_terminal_event(leader());
-        assert_eq!(app.on_terminal_event(ch('d')), vec![ClientMessage::Detach]);
+        assert_eq!(
+            app.on_terminal_event(ch('d')),
+            vec![ClientMessage::Detach { session: None }]
+        );
         assert_eq!(app.exit, Some(Outcome::Detached { session: Some(1) }));
     }
 
@@ -1893,17 +2381,29 @@ mod tests {
     fn leader_j_k_and_digits_switch_sessions() {
         let mut app = app();
         app.on_terminal_event(leader());
-        assert_eq!(app.on_terminal_event(ch('j')), attach_msg(&app, 2));
+        assert_eq!(
+            attaches(app.on_terminal_event(ch('j'))),
+            attach_msg(&app, 2)
+        );
         attached(&mut app, 2);
         app.on_terminal_event(leader());
-        assert_eq!(app.on_terminal_event(ch('k')), attach_msg(&app, 1));
+        assert_eq!(
+            attaches(app.on_terminal_event(ch('k'))),
+            attach_msg(&app, 1)
+        );
         attached(&mut app, 1);
         // Wraps backwards from the first to the last.
         app.on_terminal_event(leader());
-        assert_eq!(app.on_terminal_event(ch('k')), attach_msg(&app, 3));
+        assert_eq!(
+            attaches(app.on_terminal_event(ch('k'))),
+            attach_msg(&app, 3)
+        );
         attached(&mut app, 3);
         app.on_terminal_event(leader());
-        assert_eq!(app.on_terminal_event(ch('2')), attach_msg(&app, 2));
+        assert_eq!(
+            attaches(app.on_terminal_event(ch('2'))),
+            attach_msg(&app, 2)
+        );
         // Out-of-range digit does nothing.
         app.on_terminal_event(leader());
         assert!(app.on_terminal_event(ch('9')).is_empty());
@@ -1924,7 +2424,7 @@ mod tests {
         assert!(app.on_terminal_event(ch('j')).is_empty()); // clamped at the end
         assert_eq!(app.cursor, Some(3));
         assert_eq!(
-            app.on_terminal_event(key(KeyCode::Enter, KeyModifiers::NONE)),
+            attaches(app.on_terminal_event(key(KeyCode::Enter, KeyModifiers::NONE))),
             attach_msg(&app, 3)
         );
         assert_eq!(app.focus, Focus::Terminal);
@@ -1941,7 +2441,7 @@ mod tests {
                 .is_empty()
         );
         assert_eq!(app.focus, Focus::Terminal);
-        assert_eq!(app.view.as_ref().unwrap().id, 1);
+        assert_eq!(app.view().unwrap().id, 1);
     }
 
     #[test]
@@ -2016,7 +2516,7 @@ mod tests {
             7,
             SessionState::Running,
         )));
-        assert_eq!(out, attach_msg(&app, 7));
+        assert_eq!(attaches(out), attach_msg(&app, 7));
     }
 
     #[test]
@@ -2052,9 +2552,12 @@ mod tests {
             app.on_terminal_event(ch('y')),
             vec![ClientMessage::KillSession(1)]
         );
-        app.on_server(ServerMessage::SessionRemoved(1));
-        let out = app.on_server(ServerMessage::Detached { session: 1 });
-        assert_eq!(out, attach_msg(&app, 3));
+        let out = app.on_server(ServerMessage::SessionRemoved(1));
+        assert_eq!(attaches(out), attach_msg(&app, 3));
+        assert!(
+            app.on_server(ServerMessage::Detached { session: 1 })
+                .is_empty()
+        );
     }
 
     #[test]
@@ -2067,7 +2570,7 @@ mod tests {
             app.on_server(ServerMessage::Detached { session: 1 })
                 .is_empty()
         );
-        assert!(app.view.is_none());
+        assert!(app.view().is_none());
         assert_eq!(app.focus, Focus::Sidebar);
         assert_eq!(app.cursor, None);
     }
@@ -2083,7 +2586,7 @@ mod tests {
             session: 1,
             data: b" world".to_vec(),
         });
-        let text = app.view.as_ref().unwrap().parser.screen().contents();
+        let text = app.view().unwrap().parser.screen().contents();
         assert!(text.starts_with("hello world") && !text.contains("NOPE"));
     }
 
@@ -2095,12 +2598,18 @@ mod tests {
             rows: 38,
             cols: 120 - SIDEBAR_WIDTH,
         };
-        assert_eq!(out, vec![ClientMessage::Resize(panel)]);
+        assert_eq!(
+            out,
+            vec![ClientMessage::Resize {
+                session: 1,
+                size: panel
+            }]
+        );
         app.on_server(ServerMessage::Resized {
             session: 1,
             size: panel,
         });
-        let (r, c) = app.view.as_ref().unwrap().parser.screen().size();
+        let (r, c) = app.view().unwrap().parser.screen().size();
         assert_eq!((r.get(), c.get()), (panel.rows, panel.cols));
     }
 
@@ -2132,12 +2641,16 @@ mod tests {
         )));
         assert!(!app.can_type());
         assert!(app.sidebar_keys_active());
-        assert_eq!(app.on_terminal_event(ch('2')), attach_msg(&app, 2));
+        assert_eq!(
+            attaches(app.on_terminal_event(ch('2'))),
+            attach_msg(&app, 2)
+        );
     }
 
     #[test]
     fn attaching_as_observer_explains_how_to_take_control() {
         let mut app = app();
+        let _ = app.show(2);
         app.on_server(ServerMessage::Attached {
             session: info(2, SessionState::Running),
             snapshot: Vec::new(),
@@ -2147,17 +2660,20 @@ mod tests {
         assert!(matches!(&app.status, Some((Tone::Warning, m)) if m.contains("Observing")));
         app.on_server(ServerMessage::ControlReleased { session: 2 });
         assert!(matches!(&app.status, Some((Tone::Info, m)) if m.contains("free")));
+        let _ = app.show(2);
         app.on_server(ServerMessage::Attached {
             session: info(2, SessionState::Running),
             snapshot: Vec::new(),
             controller: true,
         });
         assert_eq!(app.status, None, "control notices clear once controller");
+        let _ = app.show(2);
         app.on_server(ServerMessage::Attached {
             session: info(2, SessionState::Running),
             snapshot: Vec::new(),
             controller: false,
         });
+        let _ = app.show(2);
         app.on_server(ServerMessage::Attached {
             session: info(2, SessionState::Running),
             snapshot: Vec::new(),
@@ -2173,6 +2689,7 @@ mod tests {
     fn disconnect_freezes_input_and_reconnect_reattaches_the_same_session() {
         let mut app = app();
         app.daemon_pid = Some(100);
+        let _ = app.show(2);
         app.on_server(ServerMessage::Attached {
             session: info(2, SessionState::Running),
             snapshot: b"before".to_vec(),
@@ -2194,8 +2711,7 @@ mod tests {
         );
         // The last screen stays visible while reconnecting.
         assert!(
-            app.view
-                .as_ref()
+            app.view()
                 .unwrap()
                 .parser
                 .screen()
@@ -2212,7 +2728,7 @@ mod tests {
         let out = app.on_server(ServerMessage::SessionList(
             (1..=3).map(|i| info(i, SessionState::Running)).collect(),
         ));
-        assert_eq!(out, attach_msg(&app, 2));
+        assert_eq!(attaches(out), attach_msg(&app, 2));
     }
 
     #[test]
@@ -2227,7 +2743,7 @@ mod tests {
             lost(1, "api"),
             info(4, SessionState::Running),
         ]));
-        assert_eq!(out, attach_msg(&app, 4));
+        assert_eq!(attaches(out), attach_msg(&app, 4));
     }
 
     #[test]
@@ -2256,7 +2772,10 @@ mod tests {
         app.on_server(ServerMessage::SessionUpdated(lost(2, "api")));
         // j from #1 skips lost #2 and lands on #3.
         app.on_terminal_event(leader());
-        assert_eq!(app.on_terminal_event(ch('j')), attach_msg(&app, 3));
+        assert_eq!(
+            attaches(app.on_terminal_event(ch('j'))),
+            attach_msg(&app, 3)
+        );
         // Jumping straight to it explains instead of attaching.
         app.on_terminal_event(leader());
         assert!(app.on_terminal_event(ch('2')).is_empty());
@@ -2284,7 +2803,7 @@ mod tests {
             9,
             SessionState::Running,
         )));
-        assert_eq!(out, attach_msg(&app, 9));
+        assert_eq!(attaches(out), attach_msg(&app, 9));
     }
 
     fn ws(id: WorkspaceId, name: &str, is_repo: bool) -> WorkspaceInfo {
@@ -2376,7 +2895,7 @@ mod tests {
         app.on_terminal_event(ch('j'));
         app.on_terminal_event(ch('k'));
         assert_eq!(
-            app.on_terminal_event(key(KeyCode::Enter, KeyModifiers::NONE)),
+            attaches(app.on_terminal_event(key(KeyCode::Enter, KeyModifiers::NONE))),
             attach_msg(&app, 3)
         );
         // `api` has no sessions: the agent picker opens for it.
@@ -2577,7 +3096,10 @@ mod tests {
         app.on_terminal_event(key(KeyCode::Backspace, KeyModifiers::NONE));
         app.on_terminal_event(key(KeyCode::Backspace, KeyModifiers::NONE));
         app.on_terminal_event(key(KeyCode::Char('n'), KeyModifiers::CONTROL));
-        assert_eq!(app.on_terminal_event(enter()), attach_msg(&app, 2));
+        assert_eq!(
+            attaches(app.on_terminal_event(enter())),
+            attach_msg(&app, 2)
+        );
         assert_eq!(app.mode, Mode::Normal);
     }
 
@@ -2595,7 +3117,7 @@ mod tests {
         config.keys.leader = "ctrl+a".into();
         config.keys.bind.insert(
             "kill_session".into(),
-            hive_core::config::KeyList::One("X".into()),
+            hive_core::config::KeyList::One("K".into()),
         );
         let mut app = App::new(config, Start::Attach(1), (100, 26));
         app.on_server(ServerMessage::SessionList(vec![info(
@@ -2606,7 +3128,10 @@ mod tests {
         // Ctrl+Space is no longer special: it goes to the agent as NUL.
         assert_eq!(
             app.on_terminal_event(leader()),
-            vec![ClientMessage::Input(vec![0])]
+            vec![ClientMessage::Input {
+                session: 1,
+                data: vec![0]
+            }]
         );
         let ctrl_a = || key(KeyCode::Char('a'), KeyModifiers::CONTROL);
         assert!(app.on_terminal_event(ctrl_a()).is_empty());
@@ -2614,13 +3139,16 @@ mod tests {
         // Leader twice sends the leader itself (Ctrl+A is 0x01).
         assert_eq!(
             app.on_terminal_event(ctrl_a()),
-            vec![ClientMessage::Input(vec![1])]
+            vec![ClientMessage::Input {
+                session: 1,
+                data: vec![1]
+            }]
         );
         app.on_terminal_event(ctrl_a());
         app.on_terminal_event(ch('x'));
         assert_eq!(app.mode, Mode::Normal, "x is unbound now");
         app.on_terminal_event(ctrl_a());
-        app.on_terminal_event(key(KeyCode::Char('X'), KeyModifiers::SHIFT));
+        app.on_terminal_event(key(KeyCode::Char('K'), KeyModifiers::SHIFT));
         assert_eq!(app.mode, Mode::ConfirmKill(1));
     }
 

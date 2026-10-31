@@ -60,7 +60,8 @@ jump_modifier = "alt"
 # Commands: palette, search_sessions, new_session, new_worktree_session,
 # workspaces, add_workspace, rename_workspace, next_session, prev_session,
 # next_workspace, prev_workspace, sidebar, toggle_sidebar, rename_session,
-# kill_session, take_control, detach, help, settings
+# kill_session, take_control, detach, help, settings, split_right, split_down,
+# focus_next_pane, zoom, close_pane, new_tab, next_tab, prev_tab, close_tab
 palette = [":", "P"]
 new_session = "c"
 next_session = ["n", "j", "down"]

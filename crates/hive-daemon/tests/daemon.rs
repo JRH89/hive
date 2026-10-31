@@ -221,18 +221,19 @@ async fn create(client: &mut Client, req: CreateSession) -> SessionId {
     .unwrap()
 }
 
-/// Mirrors what the TUI does: an emulator fed with the snapshot and stream.
-struct Screen(vt100::Parser);
+/// Mirrors what the TUI does for one pane: an emulator fed with the
+/// snapshot and that session's stream.
+struct Screen(vt100::Parser, SessionId);
 
 impl Screen {
-    fn new(size: TermSize, snapshot: &[u8]) -> Screen {
+    fn new(session: SessionId, size: TermSize, snapshot: &[u8]) -> Screen {
         let mut p = vt100::Parser::new(
             NonZeroU16::new(size.rows).unwrap(),
             NonZeroU16::new(size.cols).unwrap(),
             0,
         );
         p.process(snapshot);
-        Screen(p)
+        Screen(p, session)
     }
 
     fn contents(&self) -> String {
@@ -269,7 +270,7 @@ async fn attach_with(
                 session,
                 snapshot,
                 controller,
-            } => Some((Screen::new(session.size, &snapshot), controller)),
+            } => Some((Screen::new(session.id, session.size, &snapshot), controller)),
             _ => None,
         }),
     )
@@ -278,19 +279,23 @@ async fn attach_with(
     .unwrap()
 }
 
-/// Feeds output into `screen` until its contents contain `needle`.
+/// Feeds the screen's session output into it until its contents contain
+/// `needle`. Output for other attached sessions is skipped.
 async fn wait_for_text(client: &mut Client, screen: &mut Screen, needle: &str) {
+    let id = screen.1;
     let fut = async {
         while !screen.contents().contains(needle) {
             match client.recv().await.unwrap().expect("daemon closed") {
-                ServerMessage::Output { data, .. } => screen.0.process(&data),
-                ServerMessage::Resized { size, .. } => screen.0.set_size(
+                ServerMessage::Output { session, data } if session == id => screen.0.process(&data),
+                ServerMessage::Resized { session, size } if session == id => screen.0.set_size(
                     NonZeroU16::new(size.rows).unwrap(),
                     NonZeroU16::new(size.cols).unwrap(),
                 ),
-                ServerMessage::Resync { size, snapshot, .. } => {
-                    *screen = Screen::new(size, &snapshot)
-                }
+                ServerMessage::Resync {
+                    session,
+                    size,
+                    snapshot,
+                } if session == id => *screen = Screen::new(id, size, &snapshot),
                 _ => {}
             }
         }
@@ -317,9 +322,12 @@ async fn interactive_session_survives_client_disconnect() {
     let mut screen = attach(&mut c1, id, size).await;
     wait_for_text(&mut c1, &mut screen, "ready").await;
 
-    c1.send(&ClientMessage::Input(b"hello\r".to_vec()))
-        .await
-        .unwrap();
+    c1.send(&ClientMessage::Input {
+        session: id,
+        data: b"hello\r".to_vec(),
+    })
+    .await
+    .unwrap();
     wait_for_text(&mut c1, &mut screen, "got:hello").await;
 
     // Frontend goes away without detaching (simulates a crash).
@@ -365,17 +373,30 @@ async fn attach_resizes_pty_to_client_viewport() {
         cols: 120,
     };
     let mut screen = attach(&mut c, id, big).await;
-    c.send(&ClientMessage::Input(b"\r".to_vec())).await.unwrap();
+    c.send(&ClientMessage::Input {
+        session: id,
+        data: b"\r".to_vec(),
+    })
+    .await
+    .unwrap();
     wait_for_text(&mut c, &mut screen, "40 120").await;
 
     // A later resize from the controller reaches the real PTY too.
-    c.send(&ClientMessage::Resize(TermSize {
-        rows: 30,
-        cols: 100,
-    }))
+    c.send(&ClientMessage::Resize {
+        session: id,
+        size: TermSize {
+            rows: 30,
+            cols: 100,
+        },
+    })
     .await
     .unwrap();
-    c.send(&ClientMessage::Input(b"\r".to_vec())).await.unwrap();
+    c.send(&ClientMessage::Input {
+        session: id,
+        data: b"\r".to_vec(),
+    })
+    .await
+    .unwrap();
     wait_for_text(&mut c, &mut screen, "30 100").await;
 }
 
@@ -398,12 +419,18 @@ async fn second_client_takes_input_control() {
     .unwrap();
 
     // Input from the observer is ignored; the controller's arrives.
-    c1.send(&ClientMessage::Input(b"from-one\r".to_vec()))
-        .await
-        .unwrap();
-    c2.send(&ClientMessage::Input(b"from-two\r".to_vec()))
-        .await
-        .unwrap();
+    c1.send(&ClientMessage::Input {
+        session: id,
+        data: b"from-one\r".to_vec(),
+    })
+    .await
+    .unwrap();
+    c2.send(&ClientMessage::Input {
+        session: id,
+        data: b"from-two\r".to_vec(),
+    })
+    .await
+    .unwrap();
     wait_for_text(&mut c2, &mut s2, "from-two").await;
     assert!(!s2.contents().contains("from-one"));
 }
@@ -507,11 +534,19 @@ async fn switching_between_sessions_keeps_both_running() {
     wait_for_text(&mut c, &mut screen, "tick=").await;
     let before = counter(&screen, "tick=");
 
-    // Switch away: the ticker is now unattached, the echo session interactive.
+    // Switch away like the TUI: detach the ticker, attach the echo session.
+    c.send(&ClientMessage::Detach {
+        session: Some(ticker),
+    })
+    .await
+    .unwrap();
     let mut echo_screen = attach(&mut c, echo, size).await;
-    c.send(&ClientMessage::Input(b"first\r".to_vec()))
-        .await
-        .unwrap();
+    c.send(&ClientMessage::Input {
+        session: echo,
+        data: b"first\r".to_vec(),
+    })
+    .await
+    .unwrap();
     wait_for_text(&mut c, &mut echo_screen, "first").await;
     tokio::time::sleep(Duration::from_millis(300)).await;
 
@@ -523,9 +558,12 @@ async fn switching_between_sessions_keeps_both_running() {
     // And the echo session kept its screen and still takes input.
     let mut echo_screen = attach(&mut c, echo, size).await;
     assert!(echo_screen.contents().contains("first"));
-    c.send(&ClientMessage::Input(b"second\r".to_vec()))
-        .await
-        .unwrap();
+    c.send(&ClientMessage::Input {
+        session: echo,
+        data: b"second\r".to_vec(),
+    })
+    .await
+    .unwrap();
     wait_for_text(&mut c, &mut echo_screen, "second").await;
 }
 
@@ -553,9 +591,12 @@ async fn noisy_session_does_not_starve_others() {
     for i in 0..5 {
         let marker = format!("ping{i}");
         let started = std::time::Instant::now();
-        c.send(&ClientMessage::Input(format!("{marker}\r").into_bytes()))
-            .await
-            .unwrap();
+        c.send(&ClientMessage::Input {
+            session: quiet,
+            data: format!("{marker}\r").into_bytes(),
+        })
+        .await
+        .unwrap();
         wait_for_text(&mut c, &mut screen, &marker).await;
         assert!(
             started.elapsed() < Duration::from_secs(1),
@@ -716,12 +757,18 @@ async fn attaching_to_a_controlled_session_observes_until_forced() {
         (24, 80),
         "observers must not resize the PTY"
     );
-    c2.send(&ClientMessage::Input(b"ignored\r".to_vec()))
-        .await
-        .unwrap();
-    c1.send(&ClientMessage::Input(b"typed\r".to_vec()))
-        .await
-        .unwrap();
+    c2.send(&ClientMessage::Input {
+        session: id,
+        data: b"ignored\r".to_vec(),
+    })
+    .await
+    .unwrap();
+    c1.send(&ClientMessage::Input {
+        session: id,
+        data: b"typed\r".to_vec(),
+    })
+    .await
+    .unwrap();
     wait_for_text(&mut c2, &mut s2, "typed").await;
     assert!(!s2.contents().contains("ignored"));
 
@@ -1197,16 +1244,22 @@ async fn an_observers_resize_does_not_change_the_pty() {
     )
     .await;
     assert!(!controller);
-    c2.send(&ClientMessage::Resize(TermSize {
-        rows: 55,
-        cols: 160,
-    }))
+    c2.send(&ClientMessage::Resize {
+        session: id,
+        size: TermSize {
+            rows: 55,
+            cols: 160,
+        },
+    })
     .await
     .unwrap();
 
-    c1.send(&ClientMessage::Input(b"\r".to_vec()))
-        .await
-        .unwrap();
+    c1.send(&ClientMessage::Input {
+        session: id,
+        data: b"\r".to_vec(),
+    })
+    .await
+    .unwrap();
     wait_for_text(&mut c1, &mut screen, "30 100").await;
     assert!(!screen.contents().contains("50 150") && !screen.contents().contains("55 160"));
 }
@@ -1227,7 +1280,9 @@ async fn reattach_restores_a_full_screen_app_exactly() {
     .await;
     let mut screen = attach(&mut c1, id, size).await;
     wait_for_text(&mut c1, &mut screen, "red").await;
-    c1.send(&ClientMessage::Detach).await.unwrap();
+    c1.send(&ClientMessage::Detach { session: None })
+        .await
+        .unwrap();
     drop(c1);
 
     let mut c2 = h.client().await;
@@ -1241,9 +1296,12 @@ async fn reattach_restores_a_full_screen_app_exactly() {
     // When the app quits, the primary screen it hid comes back, even for a
     // client that only ever saw the alternate one.
     let mut again = again;
-    c2.send(&ClientMessage::Input(b"\r".to_vec()))
-        .await
-        .unwrap();
+    c2.send(&ClientMessage::Input {
+        session: id,
+        data: b"\r".to_vec(),
+    })
+    .await
+    .unwrap();
     wait_for_text(&mut c2, &mut again, "primary-after").await;
     wait_for_text(&mut c2, &mut again, "primary-before").await;
     assert!(!again.0.screen().alternate_screen());
@@ -1286,7 +1344,10 @@ async fn many_concurrent_sessions_and_clients_stay_correct() {
                 let mut screen = attach(&mut client, id, size).await;
                 wait_for_text(&mut client, &mut screen, &format!("done-{n}")).await;
                 client
-                    .send(&ClientMessage::Input(b"\r".to_vec()))
+                    .send(&ClientMessage::Input {
+                        session: id,
+                        data: b"\r".to_vec(),
+                    })
                     .await
                     .unwrap();
             }
@@ -1367,9 +1428,12 @@ async fn agents_are_recognised_and_their_status_tracked() {
 
     let mut screen = attach(&mut c, s.id, TermSize::DEFAULT).await;
     wait_for_text(&mut c, &mut screen, "busy").await;
-    c.send(&ClientMessage::Input(b"go\r".to_vec()))
-        .await
-        .unwrap();
+    c.send(&ClientMessage::Input {
+        session: s.id,
+        data: b"go\r".to_vec(),
+    })
+    .await
+    .unwrap();
     wait_presence(&mut c, s.id, "idle claude", |p| {
         p.is_some_and(|p| p.status == AgentStatus::Idle)
     })
@@ -1433,4 +1497,84 @@ async fn a_plain_shell_has_no_agent_presence() {
     // Several detection rounds pass; nothing is ever reported.
     tokio::time::sleep(Duration::from_millis(1200)).await;
     assert_eq!(list(&mut c).await[0].presence, None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn one_client_mirrors_several_sessions_at_their_own_sizes() {
+    let h = Harness::start().await;
+    let mut c = h.client().await;
+    let left = TermSize { rows: 20, cols: 40 };
+    let right = TermSize { rows: 10, cols: 30 };
+    let a = create(&mut c, sh("cat", left)).await;
+    let b = create(&mut c, sh("cat", right)).await;
+    let mut sa = attach(&mut c, a, left).await;
+    let mut sb = attach(&mut c, b, right).await;
+
+    // Input is routed by session and each pane sees only its own output.
+    c.send(&ClientMessage::Input {
+        session: a,
+        data: b"to-a\r".to_vec(),
+    })
+    .await
+    .unwrap();
+    c.send(&ClientMessage::Input {
+        session: b,
+        data: b"to-b\r".to_vec(),
+    })
+    .await
+    .unwrap();
+    timeout(T, async {
+        while !(sa.contents().contains("to-a") && sb.contents().contains("to-b")) {
+            if let ServerMessage::Output { session, data } = c.recv().await.unwrap().unwrap() {
+                for s in [&mut sa, &mut sb] {
+                    if s.1 == session {
+                        s.0.process(&data);
+                    }
+                }
+            }
+        }
+    })
+    .await
+    .expect("both panes received their own output");
+    assert!(!sa.contents().contains("to-b") && !sb.contents().contains("to-a"));
+
+    let sizes: Vec<_> = list(&mut c)
+        .await
+        .into_iter()
+        .map(|s| (s.id, s.size))
+        .collect();
+    assert!(sizes.contains(&(a, left)) && sizes.contains(&(b, right)));
+
+    // Detaching one pane leaves the other attached.
+    c.send(&ClientMessage::Detach { session: Some(a) })
+        .await
+        .unwrap();
+    timeout(
+        T,
+        c.recv_until(|m| {
+            matches!(m, ServerMessage::Detached { session } if session == a).then_some(())
+        }),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    c.send(&ClientMessage::Input {
+        session: b,
+        data: b"still-b\r".to_vec(),
+    })
+    .await
+    .unwrap();
+    wait_for_text(&mut c, &mut sb, "still-b").await;
+    c.send(&ClientMessage::Input {
+        session: a,
+        data: b"ignored\r".to_vec(),
+    })
+    .await
+    .unwrap();
+    let mut fresh = attach(&mut c, a, left).await;
+    wait_for_text(&mut c, &mut fresh, "to-a").await;
+    assert!(
+        !fresh.contents().contains("ignored"),
+        "input after detach is dropped"
+    );
 }

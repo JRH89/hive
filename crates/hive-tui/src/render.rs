@@ -11,6 +11,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use crate::app::{Activity, App, Focus, Link, Mode, SIDEBAR_WIDTH, SidebarHit, Target, Tone};
 use crate::keymap::Command;
+use crate::layout::{Dir, PaneArea};
 use crate::theme::Theme;
 
 pub fn draw(frame: &mut Frame, app: &App, theme: &Theme) {
@@ -34,21 +35,30 @@ pub fn draw(frame: &mut Frame, app: &App, theme: &Theme) {
         body
     };
     let mut agent_cells = None;
-    match &app.view {
-        Some(view) => {
-            draw_terminal(frame.buffer_mut(), panel, view.parser.screen());
-            if theme.glyphs.ascii {
-                agent_cells = Some(snapshot(frame.buffer_mut(), panel));
+    let (panes, gaps) = app.pane_areas();
+    if panes.is_empty() {
+        draw_empty(frame, panel, app, theme);
+    } else {
+        for pane in &panes {
+            if let Some(view) = app.views.get(&pane.session) {
+                draw_terminal(frame.buffer_mut(), pane.body, view.parser.screen());
             }
+        }
+        // Before Hive's own pane chrome, so ASCII mode folds only that.
+        if theme.glyphs.ascii {
+            agent_cells = Some(snapshot(frame.buffer_mut(), panel));
+        }
+        draw_pane_chrome(frame, app, &panes, &gaps, theme);
+        let focused = panes.iter().find(|p| Some(p.session) == app.focused());
+        if let (Some(pane), Some(view)) = (focused, app.view()) {
             let screen = view.parser.screen();
             if app.can_type() && !screen.hide_cursor() {
                 let (row, col) = screen.cursor_position();
-                if row < panel.height && col < panel.width {
-                    frame.set_cursor_position((panel.x + col, panel.y + row));
+                if row < pane.body.height && col < pane.body.width {
+                    frame.set_cursor_position((pane.body.x + col, pane.body.y + row));
                 }
             }
         }
-        None => draw_empty(frame, panel, app, theme),
     }
     draw_status(frame, status, app, theme);
     if let Link::Reconnecting { attempt, reason } = &app.link {
@@ -58,6 +68,57 @@ pub fn draw(frame: &mut Frame, app: &App, theme: &Theme) {
     }
     if theme.glyphs.ascii {
         asciify(frame.buffer_mut(), panel, agent_cells.as_deref());
+    }
+}
+
+/// Title rows and separators between split panes. Nothing for a lone pane.
+fn draw_pane_chrome(
+    frame: &mut Frame,
+    app: &App,
+    panes: &[PaneArea],
+    gaps: &[(Rect, Dir)],
+    theme: &Theme,
+) {
+    let line = Style::new().fg(if theme.mono {
+        theme.muted
+    } else {
+        theme.surface
+    });
+    for (gap, dir) in gaps {
+        let glyph = match dir {
+            Dir::Right => theme.glyphs.border.vertical_left,
+            Dir::Down => theme.glyphs.border.horizontal_top,
+        };
+        let buf = frame.buffer_mut();
+        for pos in gap.positions() {
+            if let Some(cell) = buf.cell_mut(pos) {
+                cell.reset();
+                cell.set_symbol(glyph).set_style(line);
+            }
+        }
+    }
+    for pane in panes.iter().filter(|p| p.title.height > 0) {
+        let focused = Some(pane.session) == app.focused();
+        let style = if focused {
+            theme.highlight()
+        } else {
+            Style::new().fg(theme.muted)
+        };
+        let mut text = match app.sessions.get(&pane.session) {
+            Some(s) => {
+                let (dot, _) = session_dot(s, app, theme);
+                format!(" {dot} #{} {}", s.id, s.label)
+            }
+            None => format!(" #{}", pane.session),
+        };
+        if let Some(a) = app.activity(pane.session).filter(|a| *a != Activity::Idle) {
+            text = format!("{text} · {}", a.word());
+        }
+        let text = truncate(theme, &text, pane.title.width as usize);
+        frame.render_widget(
+            Paragraph::new(Span::styled(text, style)).style(style),
+            pane.title,
+        );
     }
 }
 
@@ -145,6 +206,33 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let left_width: usize = left.iter().map(|s| s.content.chars().count()).sum();
     let room = (area.width as usize).saturating_sub(left_width);
     frame.render_widget(Paragraph::new(Line::from(left)).style(bar), area);
+    if app.tabs.len() > 1 {
+        // Tab bar in place of the tagline: each tab named by its focused
+        // session, the active one highlighted.
+        let mut spans = Vec::new();
+        for (i, t) in app.tabs.iter().enumerate() {
+            let name = app
+                .sessions
+                .get(&t.focus)
+                .map_or_else(|| format!("#{}", t.focus), |s| s.label.clone());
+            let name = truncate(theme, &name, 14);
+            let style = if i == app.tab {
+                theme.highlight()
+            } else {
+                bar.fg(theme.muted)
+            };
+            spans.push(Span::styled(format!(" {}:{name} ", i + 1), style));
+            spans.push(Span::styled(" ", bar));
+        }
+        let width: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+        if width + 2 <= room {
+            frame.render_widget(
+                Paragraph::new(Line::from(spans)).alignment(Alignment::Right),
+                area,
+            );
+        }
+        return;
+    }
     if app.config.branding.show_tagline && room > brand::TAGLINE.chars().count() + 2 {
         let tagline = format!("{} ", brand::TAGLINE);
         frame.render_widget(
@@ -283,7 +371,8 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         start += 1;
     }
 
-    let current = app.view.as_ref().map(|v| v.id);
+    let current = app.focused();
+    let shown = app.active_tab().map(|t| t.root.panes()).unwrap_or_default();
     let current_ws = app.current().map(|s| s.workspace);
     let width = inner.width as usize;
     let mut hits = app.sidebar_hits.borrow_mut();
@@ -350,7 +439,13 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                         app,
                         s,
                         *position,
-                        current == Some(*id),
+                        if current == Some(*id) {
+                            Shown::Focused
+                        } else if shown.contains(id) {
+                            Shown::Pane
+                        } else {
+                            Shown::No
+                        },
                         is_cursor,
                         shared,
                         theme,
@@ -362,6 +457,15 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     }
 }
 
+/// Whether a sidebar session is on screen.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Shown {
+    No,
+    /// In another pane of the active tab.
+    Pane,
+    Focused,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn draw_sidebar_session(
     frame: &mut Frame,
@@ -369,7 +473,7 @@ fn draw_sidebar_session(
     app: &App,
     s: &SessionInfo,
     position: usize,
-    is_current: bool,
+    shown: Shown,
     is_cursor: bool,
     shared: bool,
     theme: &Theme,
@@ -381,7 +485,7 @@ fn draw_sidebar_session(
         Style::new()
     };
     let (dot, dot_color) = session_dot(s, app, theme);
-    let label_style = match (is_current, s.state.is_alive()) {
+    let label_style = match ((shown == Shown::Focused), s.state.is_alive()) {
         (true, _) => base.fg(theme.accent).add_modifier(Modifier::BOLD),
         (false, true) => base.fg(theme.text),
         (false, false) => base.fg(theme.muted),
@@ -394,12 +498,16 @@ fn draw_sidebar_session(
     let label_width = width.saturating_sub(4 + number.len() + if shared { 2 } else { 0 });
     let mut line1 = vec![
         Span::styled(
-            if is_current {
-                theme.glyphs.current
-            } else {
+            if shown == Shown::No {
                 " "
+            } else {
+                theme.glyphs.current
             },
-            base.fg(theme.accent),
+            base.fg(if shown == Shown::Focused {
+                theme.accent
+            } else {
+                theme.accent_dim
+            }),
         ),
         Span::styled(format!("{dot} "), base.fg(dot_color)),
         Span::styled(truncate(theme, &s.label, label_width), label_style),
@@ -648,7 +756,7 @@ fn session_summary<'a>(s: &SessionInfo, app: &App, theme: &Theme, bar: Style) ->
             bar.fg(theme.muted),
         ),
     ];
-    if app.view.as_ref().is_some_and(|v| !v.controller) {
+    if app.view().is_some_and(|v| !v.controller) {
         spans.push(Span::styled(" · observing", bar.fg(theme.warning)));
     }
     spans
@@ -1165,6 +1273,7 @@ mod tests {
     #[test]
     fn sidebar_lists_sessions_and_marks_the_current_one() {
         let mut app = App::new(Config::default(), Start::Attach(2), (80, 12));
+        app.on_connect();
         app.on_server(ServerMessage::WorkspaceList(vec![workspace(1, "proj")]));
         app.on_server(ServerMessage::SessionList(vec![
             session(1, "claude", SessionState::Running),
@@ -1205,6 +1314,7 @@ mod tests {
     #[test]
     fn sidebar_groups_by_workspace_with_branches_and_worktrees() {
         let mut app = App::new(Config::default(), Start::Attach(2), (80, 14));
+        app.on_connect();
         app.on_server(ServerMessage::WorkspaceList(vec![
             workspace(1, "web"),
             workspace(2, "api"),
@@ -1243,6 +1353,7 @@ mod tests {
     #[test]
     fn ascii_glyphs_and_mono_render_without_unicode_or_colour() {
         let mut app = App::new(Config::default(), Start::Attach(1), (80, 10));
+        app.on_connect();
         app.on_server(ServerMessage::WorkspaceList(vec![workspace(1, "proj")]));
         app.on_server(ServerMessage::SessionList(vec![session(
             1,
@@ -1280,6 +1391,7 @@ mod tests {
     #[test]
     fn ascii_mode_leaves_the_agents_own_output_alone() {
         let mut app = App::new(Config::default(), Start::Attach(1), (50, 6));
+        app.on_connect();
         app.on_server(ServerMessage::Attached {
             session: session(1, "claude", SessionState::Running),
             snapshot: "agent → 中".as_bytes().to_vec(),
@@ -1305,6 +1417,7 @@ mod tests {
     #[test]
     fn narrow_terminal_hides_the_sidebar() {
         let mut app = App::new(Config::default(), Start::Attach(1), (50, 8));
+        app.on_connect();
         app.on_server(ServerMessage::Attached {
             session: session(1, "claude", SessionState::Running),
             snapshot: b"agent output".to_vec(),

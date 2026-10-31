@@ -1,9 +1,11 @@
 ---
 tags: [adr, phase-2]
-status: accepted
+status: superseded
 date: 2026-10-30
 ---
 # ADR-0007: Switching sessions re-attaches; the client mirrors one screen
+
+> Superseded by [[ADR-0018 Tabs of split panes over multi-attach]]: one connection now attaches every pane in the active tab.
 
 **Context:** Phase 2 needs instant switching between several agents. Two options from [[Risks and Open Questions]]:
 - **A.** One attachment per connection. Switching sends `Attach`, and the daemon replies with a snapshot.

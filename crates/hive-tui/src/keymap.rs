@@ -25,6 +25,15 @@ pub enum Command {
     PrevWorkspace,
     Sidebar,
     ToggleSidebar,
+    SplitRight,
+    SplitDown,
+    FocusNextPane,
+    Zoom,
+    ClosePane,
+    NewTab,
+    NextTab,
+    PrevTab,
+    CloseTab,
     Rename,
     Kill,
     TakeControl,
@@ -34,7 +43,7 @@ pub enum Command {
 }
 
 impl Command {
-    pub const ALL: [Command; 19] = [
+    pub const ALL: [Command; 28] = [
         Command::Palette,
         Command::SearchSessions,
         Command::NewSession,
@@ -48,6 +57,15 @@ impl Command {
         Command::PrevWorkspace,
         Command::Sidebar,
         Command::ToggleSidebar,
+        Command::SplitRight,
+        Command::SplitDown,
+        Command::FocusNextPane,
+        Command::Zoom,
+        Command::ClosePane,
+        Command::NewTab,
+        Command::NextTab,
+        Command::PrevTab,
+        Command::CloseTab,
         Command::Rename,
         Command::Kill,
         Command::TakeControl,
@@ -72,6 +90,15 @@ impl Command {
             Command::PrevWorkspace => "prev_workspace",
             Command::Sidebar => "sidebar",
             Command::ToggleSidebar => "toggle_sidebar",
+            Command::SplitRight => "split_right",
+            Command::SplitDown => "split_down",
+            Command::FocusNextPane => "focus_next_pane",
+            Command::Zoom => "zoom",
+            Command::ClosePane => "close_pane",
+            Command::NewTab => "new_tab",
+            Command::NextTab => "next_tab",
+            Command::PrevTab => "prev_tab",
+            Command::CloseTab => "close_tab",
             Command::Rename => "rename_session",
             Command::Kill => "kill_session",
             Command::TakeControl => "take_control",
@@ -97,6 +124,15 @@ impl Command {
             Command::PrevWorkspace => "Previous workspace",
             Command::Sidebar => "Focus the sidebar",
             Command::ToggleSidebar => "Show or hide the sidebar",
+            Command::SplitRight => "Split: new session on the right",
+            Command::SplitDown => "Split: new session below",
+            Command::FocusNextPane => "Focus the next pane",
+            Command::Zoom => "Zoom the pane (toggle)",
+            Command::ClosePane => "Close the pane (session keeps running)",
+            Command::NewTab => "New tab",
+            Command::NextTab => "Next tab",
+            Command::PrevTab => "Previous tab",
+            Command::CloseTab => "Close the tab (sessions keep running)",
             Command::Rename => "Rename session",
             Command::Kill => "Terminate session",
             Command::TakeControl => "Take input control",
@@ -129,6 +165,15 @@ impl Command {
             Command::NextWorkspace | Command::PrevWorkspace => &[],
             Command::Sidebar => &["s", "tab"],
             Command::ToggleSidebar => &["b"],
+            Command::SplitRight => &["v", "%"],
+            Command::SplitDown => &["-", "\""],
+            Command::FocusNextPane => &["o"],
+            Command::Zoom => &["z"],
+            Command::ClosePane => &["X"],
+            Command::NewTab => &["t"],
+            Command::NextTab => &["]"],
+            Command::PrevTab => &["["],
+            Command::CloseTab => &[],
             Command::Rename => &["r"],
             Command::Kill => &["x"],
             Command::TakeControl => &["a"],
@@ -587,14 +632,14 @@ mod tests {
             ..Keys::default()
         };
         keys.bind
-            .insert("kill_session".into(), KeyList::One("X".into()));
+            .insert("kill_session".into(), KeyList::One("K".into()));
         keys.bind.insert("detach".into(), KeyList::Many(vec![]));
         keys.bind
             .insert("settings".into(), KeyList::One("f2".into()));
         let km = Keymap::from_config(&keys).unwrap();
         assert!(km.is_leader(&ev(KeyCode::Char('a'), KeyModifiers::CONTROL)));
         assert_eq!(
-            km.command(&ev(KeyCode::Char('X'), KeyModifiers::SHIFT)),
+            km.command(&ev(KeyCode::Char('K'), KeyModifiers::SHIFT)),
             Some(Command::Kill)
         );
         assert_eq!(

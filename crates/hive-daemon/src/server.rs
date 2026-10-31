@@ -1,6 +1,7 @@
 //! Per-connection handling: handshake, request dispatch, and streaming the
-//! attached session's output to the client.
+//! attached sessions' output to the client (one per visible pane).
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -34,7 +35,7 @@ struct Connection {
     id: ClientId,
     daemon: Arc<Daemon>,
     out: mpsc::Sender<ServerMessage>,
-    attached: Option<Attached>,
+    attached: BTreeMap<SessionId, Attached>,
 }
 
 pub(crate) async fn handle_client(daemon: Arc<Daemon>, stream: UnixStream) {
@@ -87,7 +88,7 @@ pub(crate) async fn handle_client(daemon: Arc<Daemon>, stream: UnixStream) {
         id,
         daemon: daemon.clone(),
         out: out_tx,
-        attached: None,
+        attached: BTreeMap::new(),
     };
     loop {
         match read_frame::<_, ClientMessage>(&mut rd).await {
@@ -110,7 +111,7 @@ pub(crate) async fn handle_client(daemon: Arc<Daemon>, stream: UnixStream) {
         }
     }
 
-    conn.detach();
+    conn.detach_all();
     daemon.clients.lock().unwrap().remove(&id);
     events.abort();
     drop(conn);
@@ -146,18 +147,23 @@ impl Connection {
                 size,
                 force,
             } => self.attach(session, size, force).await,
-            ClientMessage::Detach => {
-                if let Some(id) = self.detach() {
+            ClientMessage::Detach { session: Some(id) } => {
+                if self.detach(id) {
                     self.send(ServerMessage::Detached { session: id }).await;
                 }
             }
-            ClientMessage::Input(data) => {
-                if let Some(a) = &self.attached {
+            ClientMessage::Detach { session: None } => {
+                for id in self.detach_all() {
+                    self.send(ServerMessage::Detached { session: id }).await;
+                }
+            }
+            ClientMessage::Input { session, data } => {
+                if let Some(a) = self.attached.get(&session) {
                     a.session.input(self.id, data).await;
                 }
             }
-            ClientMessage::Resize(size) => {
-                if let Some(a) = &self.attached {
+            ClientMessage::Resize { session, size } => {
+                if let Some(a) = self.attached.get(&session) {
                     a.session.resize(self.id, size);
                 }
             }
@@ -259,13 +265,8 @@ impl Connection {
         // Re-attaching to the same session (e.g. to take control) must not
         // release control in between, or observers would see a spurious
         // ControlReleased.
-        match self.attached.take() {
-            Some(old) if old.session.id == id => old.forwarder.abort(),
-            Some(old) => {
-                self.attached = Some(old);
-                self.detach();
-            }
-            None => {}
+        if let Some(old) = self.attached.remove(&id) {
+            old.forwarder.abort();
         }
         let a = session.attach(self.id, size, force);
         if let Some(prev) = a.previous_controller {
@@ -280,11 +281,18 @@ impl Connection {
         .await;
         session.publish();
         let forwarder = tokio::spawn(forward_output(session.clone(), a.output, self.out.clone()));
-        self.attached = Some(Attached { session, forwarder });
+        self.attached.insert(id, Attached { session, forwarder });
     }
 
-    fn detach(&mut self) -> Option<SessionId> {
-        let a = self.attached.take()?;
+    fn detach_all(&mut self) -> Vec<SessionId> {
+        let ids: Vec<SessionId> = self.attached.keys().copied().collect();
+        ids.into_iter().filter(|&id| self.detach(id)).collect()
+    }
+
+    fn detach(&mut self, id: SessionId) -> bool {
+        let Some(a) = self.attached.remove(&id) else {
+            return false;
+        };
         a.forwarder.abort();
         for observer in a.session.detach(self.id) {
             self.daemon.notify(
@@ -295,7 +303,7 @@ impl Connection {
             );
         }
         a.session.publish();
-        Some(a.session.id)
+        true
     }
 }
 

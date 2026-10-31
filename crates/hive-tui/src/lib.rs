@@ -4,6 +4,7 @@
 mod app;
 mod keymap;
 mod keys;
+mod layout;
 mod render;
 mod theme;
 
