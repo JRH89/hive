@@ -7,6 +7,7 @@ mod render;
 mod theme;
 
 use std::io::stdout;
+use std::time::{Duration, Instant};
 
 use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste, EventStream};
 use crossterm::execute;
@@ -19,6 +20,10 @@ use tokio::sync::mpsc;
 use app::App;
 pub use app::{Outcome, Start};
 use theme::Theme;
+
+/// Longest the loop spends applying queued daemon messages before it redraws
+/// and polls input again (~one frame at 60 Hz).
+const DRAIN_BUDGET: Duration = Duration::from_millis(12);
 
 /// Restores the user's terminal on every exit path, including errors.
 struct TerminalGuard;
@@ -75,10 +80,19 @@ pub async fn run(client: Client, config: Config, start: Start) -> anyhow::Result
             msg = srv_rx.recv() => match msg {
                 Some(Ok(m)) => {
                     let mut out = app.on_server(m);
-                    // Apply everything already queued before redrawing, so a
-                    // burst of output costs one frame instead of many.
-                    while let Ok(Ok(m)) = srv_rx.try_recv() {
-                        out.extend(app.on_server(m));
+                    // Apply what is already queued before redrawing, so a burst
+                    // of output costs one frame. The time budget keeps a flood
+                    // from starving key handling and redraws.
+                    let deadline = Instant::now() + DRAIN_BUDGET;
+                    while Instant::now() < deadline {
+                        match srv_rx.try_recv() {
+                            Ok(Ok(m)) => out.extend(app.on_server(m)),
+                            Ok(Err(e)) => {
+                                app.exit.get_or_insert(Outcome::DaemonGone(e));
+                                break;
+                            }
+                            Err(_) => break,
+                        }
                     }
                     out
                 }

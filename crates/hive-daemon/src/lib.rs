@@ -69,10 +69,8 @@ impl Daemon {
         )?;
         let info = session.info();
         tracing::info!(session = id, command = ?info.command, cwd = %info.cwd, "session created");
+        session.publish();
         self.sessions.lock().unwrap().insert(id, session);
-        let _ = self
-            .events
-            .send(ServerMessage::SessionUpdated(info.clone()));
         Ok(info)
     }
 
@@ -82,9 +80,17 @@ impl Daemon {
             .with_context(|| format!("no session with id {id}"))?;
         session.terminate(self.kill_timeout()).await;
         self.sessions.lock().unwrap().remove(&id);
-        session.mark_removed();
+        session.remove();
         tracing::info!(session = id, "session removed");
-        let _ = self.events.send(ServerMessage::SessionRemoved(id));
+        Ok(())
+    }
+
+    fn rename(&self, id: SessionId, label: &str) -> anyhow::Result<()> {
+        let session = self
+            .get(id)
+            .with_context(|| format!("no session with id {id}"))?;
+        session.rename(label);
+        session.publish();
         Ok(())
     }
 

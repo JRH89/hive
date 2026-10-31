@@ -45,6 +45,9 @@ struct Meta {
     size: TermSize,
     controller: Option<ClientId>,
     attached: BTreeSet<ClientId>,
+    /// Set once by `remove`. Checked under this lock before publishing so no
+    /// `SessionUpdated` can follow the `SessionRemoved` broadcast.
+    removed: bool,
 }
 
 struct Term {
@@ -65,6 +68,8 @@ pub(crate) struct Session {
     input: mpsc::Sender<Vec<u8>>,
     exited: watch::Sender<bool>,
     removed: watch::Sender<bool>,
+    /// Daemon-wide lifecycle broadcast. Only `publish`/`remove` send on it.
+    events: broadcast::Sender<ServerMessage>,
 }
 
 pub(crate) struct Attachment {
@@ -149,6 +154,7 @@ impl Session {
                 size,
                 controller: None,
                 attached: BTreeSet::new(),
+                removed: false,
             }),
             term: Mutex::new(Term {
                 parser: vt100::Parser::new_with_callbacks(
@@ -163,6 +169,7 @@ impl Session {
             input: input_tx,
             exited: watch::channel(false).0,
             removed: watch::channel(false).0,
+            events,
         });
 
         let s = session.clone();
@@ -188,7 +195,7 @@ impl Session {
                 tracing::info!(session = id, ?state, "session process ended");
                 lock(&s.meta).state = state;
                 s.exited.send_replace(true);
-                let _ = events.send(ServerMessage::SessionUpdated(s.info()));
+                s.publish();
             })?;
 
         Ok(session)
@@ -222,7 +229,10 @@ impl Session {
     }
 
     pub fn info(&self) -> SessionInfo {
-        let meta = lock(&self.meta);
+        self.info_locked(&lock(&self.meta))
+    }
+
+    fn info_locked(&self, meta: &Meta) -> SessionInfo {
         SessionInfo {
             id: self.id,
             agent: self.agent.clone(),
@@ -234,6 +244,17 @@ impl Session {
             created_at: self.created_at,
             attached_clients: meta.attached.len() as u32,
         }
+    }
+
+    /// Sets the label, trimmed and capped. Empty resets to the agent name.
+    pub fn rename(&self, label: &str) {
+        const MAX_LABEL: usize = 64;
+        let label: String = label.trim().chars().take(MAX_LABEL).collect();
+        lock(&self.meta).label = if label.is_empty() {
+            self.agent.clone()
+        } else {
+            label
+        };
     }
 
     pub fn is_alive(&self) -> bool {
@@ -337,7 +358,23 @@ impl Session {
         }
     }
 
-    pub fn mark_removed(&self) {
+    /// Broadcasts the current info, unless the session has been removed.
+    pub fn publish(&self) {
+        let meta = lock(&self.meta);
+        if !meta.removed {
+            let _ = self
+                .events
+                .send(ServerMessage::SessionUpdated(self.info_locked(&meta)));
+        }
+    }
+
+    /// Marks the session removed and broadcasts `SessionRemoved`. Holding the
+    /// meta lock orders this after any in-flight `publish`.
+    pub fn remove(&self) {
+        let mut meta = lock(&self.meta);
+        meta.removed = true;
+        let _ = self.events.send(ServerMessage::SessionRemoved(self.id));
+        drop(meta);
         self.removed.send_replace(true);
     }
 

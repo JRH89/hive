@@ -9,7 +9,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 
-use crate::app::{App, Mode, Tone};
+use crate::app::{App, Focus, Mode, SIDEBAR_WIDTH, Tone};
 use crate::theme::Theme;
 
 pub fn draw(frame: &mut Frame, app: &App, theme: &Theme) {
@@ -23,22 +23,32 @@ pub fn draw(frame: &mut Frame, app: &App, theme: &Theme) {
     if header.height > 0 {
         draw_header(frame, header, app, theme);
     }
+    let panel = if app.sidebar_visible {
+        let [sidebar, panel] =
+            Layout::horizontal([Constraint::Length(SIDEBAR_WIDTH), Constraint::Min(1)]).areas(body);
+        draw_sidebar(frame, sidebar, app, theme);
+        panel
+    } else {
+        body
+    };
     match &app.view {
         Some(view) => {
-            draw_terminal(frame.buffer_mut(), body, view.parser.screen());
+            draw_terminal(frame.buffer_mut(), panel, view.parser.screen());
             let screen = view.parser.screen();
             if app.can_type() && !screen.hide_cursor() {
                 let (row, col) = screen.cursor_position();
-                if row < body.height && col < body.width {
-                    frame.set_cursor_position((body.x + col, body.y + row));
+                if row < panel.height && col < panel.width {
+                    frame.set_cursor_position((panel.x + col, panel.y + row));
                 }
             }
         }
-        None => draw_empty(frame, body, app, theme),
+        None => draw_empty(frame, panel, app, theme),
     }
     draw_status(frame, status, app, theme);
-    if app.mode == Mode::Help {
-        draw_help(frame, body, theme);
+    match app.mode {
+        Mode::Help => draw_help(frame, body, theme),
+        Mode::NewSession { selected } => draw_picker(frame, body, app, selected, theme),
+        _ => {}
     }
 }
 
@@ -72,64 +82,223 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     }
 }
 
+/// Truncates to `max` characters, ending in an ellipsis when cut.
+fn truncate(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+        out.push('…');
+        out
+    }
+}
+
+fn state_dot(state: &SessionState, theme: &Theme) -> (&'static str, Color) {
+    match state {
+        SessionState::Starting => ("○", theme.muted),
+        SessionState::Running => ("●", theme.success),
+        SessionState::Exited { .. } => ("○", theme.muted),
+        SessionState::Failed { .. } => ("✕", theme.error),
+    }
+}
+
+fn dir_name(cwd: &str) -> &str {
+    cwd.trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("/")
+}
+
+fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
+    let border = Block::new()
+        .borders(Borders::RIGHT)
+        .border_style(Style::new().fg(theme.surface));
+    let inner = border.inner(area);
+    frame.render_widget(border, area);
+    if inner.height == 0 || inner.width < 4 {
+        return;
+    }
+
+    let heading = Style::new().fg(theme.muted).add_modifier(Modifier::BOLD);
+    let focused = app.focus == Focus::Sidebar || app.sidebar_keys_active();
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            " SESSIONS",
+            if focused {
+                heading.fg(theme.accent)
+            } else {
+                heading
+            },
+        )),
+        Rect { height: 1, ..inner },
+    );
+
+    let order = app.order();
+    let rows_available = inner.height.saturating_sub(2) as usize;
+    let per_page = (rows_available / 2).max(1);
+    let cursor_idx = app
+        .cursor
+        .and_then(|c| order.iter().position(|&id| id == c))
+        .unwrap_or(0);
+    let offset = cursor_idx.saturating_sub(per_page - 1);
+    let current = app.view.as_ref().map(|v| v.id);
+    let width = inner.width as usize;
+
+    for (slot, (idx, id)) in order
+        .iter()
+        .enumerate()
+        .skip(offset)
+        .take(per_page)
+        .enumerate()
+    {
+        let Some(s) = app.sessions.get(id) else {
+            continue;
+        };
+        let y = inner.y + 2 + (slot as u16) * 2;
+        if y + 1 >= inner.y + inner.height {
+            break;
+        }
+        let is_current = current == Some(*id);
+        let is_cursor = focused && app.cursor == Some(*id);
+        let base = if is_cursor {
+            Style::new().bg(theme.surface)
+        } else {
+            Style::new()
+        };
+        let (dot, dot_color) = state_dot(&s.state, theme);
+        let label_style = match (is_current, s.state.is_alive()) {
+            (true, _) => base.fg(theme.accent).add_modifier(Modifier::BOLD),
+            (false, true) => base.fg(theme.text),
+            (false, false) => base.fg(theme.muted),
+        };
+        let number = if idx < 9 {
+            format!("{} ", idx + 1)
+        } else {
+            "  ".into()
+        };
+        let label_width = width.saturating_sub(4 + number.len());
+        let line1 = Line::from(vec![
+            Span::styled(if is_current { "▌" } else { " " }, base.fg(theme.accent)),
+            Span::styled(format!("{dot} "), base.fg(dot_color)),
+            Span::styled(truncate(&s.label, label_width), label_style),
+        ]);
+        let detail = if s.label == s.agent {
+            dir_name(&s.cwd).to_string()
+        } else {
+            format!("{} · {}", s.agent, dir_name(&s.cwd))
+        };
+        let line2 = Line::from(Span::styled(
+            format!("   {}", truncate(&detail, width.saturating_sub(4))),
+            base.fg(theme.muted),
+        ));
+        let row1 = Rect {
+            y,
+            height: 1,
+            ..inner
+        };
+        let row2 = Rect {
+            y: y + 1,
+            height: 1,
+            ..inner
+        };
+        frame.render_widget(Paragraph::new(line1).style(base), row1);
+        frame.render_widget(
+            Paragraph::new(Span::styled(number, base.fg(theme.muted))).alignment(Alignment::Right),
+            row1,
+        );
+        frame.render_widget(Paragraph::new(line2).style(base), row2);
+    }
+}
+
 fn draw_status(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let bar = Style::new().bg(theme.surface).fg(theme.text);
     let key = bar.fg(theme.accent);
     let muted = bar.fg(theme.muted);
+    let hints = |pairs: &[(&str, &str)]| -> Vec<Span<'static>> {
+        let mut spans = Vec::new();
+        for (k, d) in pairs {
+            spans.push(Span::styled(format!(" {k}"), key));
+            spans.push(Span::styled(format!(" {d} "), muted));
+        }
+        spans
+    };
 
-    let left: Vec<Span> = match app.mode {
-        Mode::Leader => vec![
-            Span::styled(
+    let left: Vec<Span> = match &app.mode {
+        Mode::Leader => {
+            let mut spans = vec![Span::styled(
                 " LEADER ",
                 Style::new()
                     .bg(theme.accent)
                     .fg(Color::Black)
                     .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("  d", key),
-            Span::styled(" detach  ", muted),
-            Span::styled("n", key),
-            Span::styled(" new  ", muted),
-            Span::styled("x", key),
-            Span::styled(" kill  ", muted),
-            Span::styled("a", key),
-            Span::styled(" take control  ", muted),
-            Span::styled("?", key),
-            Span::styled(" help  ", muted),
-            Span::styled("Ctrl+Space", key),
-            Span::styled(" send literal", muted),
-        ],
+            )];
+            spans.extend(hints(&[
+                ("j/k", "switch"),
+                ("1-9", "jump"),
+                ("s", "sidebar"),
+                ("n", "new"),
+                ("r", "rename"),
+                ("x", "kill"),
+                ("d", "detach"),
+                ("?", "help"),
+            ]));
+            spans
+        }
         Mode::ConfirmKill(id) => {
             let name = app
                 .sessions
-                .get(&id)
-                .map(|s| s.agent.as_str())
+                .get(id)
+                .map(|s| s.label.as_str())
                 .unwrap_or("session");
             vec![Span::styled(
                 format!(" Terminate {name} (session {id})? y to confirm, any other key cancels "),
                 bar.fg(theme.warning).add_modifier(Modifier::BOLD),
             )]
         }
-        _ => {
-            let mut spans = Vec::new();
+        Mode::Rename { session, input } => vec![
+            Span::styled(format!(" Rename session {session}: "), bar.fg(theme.accent)),
+            Span::styled(input.clone(), bar.add_modifier(Modifier::BOLD)),
+            Span::styled("▏", key),
+            Span::styled("  enter save · esc cancel · empty resets", muted),
+        ],
+        Mode::NewSession { .. } => {
+            let mut spans = vec![Span::styled(" New session", bar.fg(theme.accent))];
+            spans.extend(hints(&[
+                ("↑↓", "choose"),
+                ("enter", "launch"),
+                ("esc", "cancel"),
+            ]));
+            spans
+        }
+        Mode::Help => vec![Span::styled(" Help · any key to close", muted)],
+        Mode::Normal => {
             if let Some((tone, msg)) = &app.status {
                 let fg = match tone {
                     Tone::Info => theme.text,
                     Tone::Warning => theme.warning,
                     Tone::Error => theme.error,
                 };
-                spans.push(Span::styled(format!(" {msg}"), bar.fg(fg)));
+                vec![Span::styled(format!(" {msg}"), bar.fg(fg))]
+            } else if app.sidebar_keys_active() && !app.sessions.is_empty() {
+                hints(&[
+                    ("↑↓", "select"),
+                    ("enter", "open"),
+                    ("n", "new"),
+                    ("r", "rename"),
+                    ("x", "kill"),
+                    ("q", "detach"),
+                ])
             } else if let Some(s) = app.current() {
-                spans.extend(session_summary(s, app, theme, bar));
+                session_summary(s, app, theme, bar)
             } else {
-                spans.push(Span::styled(format!(" {}", counts(app)), muted));
+                vec![Span::styled(format!(" {}", counts(app)), muted)]
             }
-            spans
         }
     };
     frame.render_widget(Paragraph::new(Line::from(left)).style(bar), area);
 
-    if app.mode == Mode::Normal {
+    if app.mode == Mode::Normal && app.status.is_none() && !app.sidebar_keys_active() {
         let hint = Line::from(vec![
             Span::styled("Ctrl+Space", key),
             Span::styled(" leader · ", muted),
@@ -141,27 +310,23 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
 }
 
 fn session_summary<'a>(s: &SessionInfo, app: &App, theme: &Theme, bar: Style) -> Vec<Span<'a>> {
-    let (dot, color, state) = match &s.state {
-        SessionState::Starting => ("○", theme.muted, "starting".to_string()),
-        SessionState::Running => ("●", theme.success, "running".to_string()),
-        SessionState::Exited { code: Some(c), .. } => ("○", theme.muted, format!("exited ({c})")),
-        SessionState::Exited { signal, .. } => (
-            "○",
-            theme.muted,
-            format!("killed ({})", signal.as_deref().unwrap_or("signal")),
-        ),
-        SessionState::Failed { reason } => ("✕", theme.error, format!("failed: {reason}")),
+    let (dot, color) = state_dot(&s.state, theme);
+    let state = match &s.state {
+        SessionState::Starting => "starting".to_string(),
+        SessionState::Running => "running".to_string(),
+        SessionState::Exited { code: Some(c), .. } => format!("exited ({c})"),
+        SessionState::Exited { signal, .. } => {
+            format!("killed ({})", signal.as_deref().unwrap_or("signal"))
+        }
+        SessionState::Failed { reason } => format!("failed: {reason}"),
     };
     let mut spans = vec![
         Span::styled(format!(" {dot} "), bar.fg(color)),
-        Span::styled(format!("#{} {}", s.id, s.agent), bar),
+        Span::styled(format!("#{} {}", s.id, s.label), bar),
         Span::styled(format!(" · {state} · {}", counts(app)), bar.fg(theme.muted)),
     ];
     if app.view.as_ref().is_some_and(|v| !v.controller) {
         spans.push(Span::styled(" · observing", bar.fg(theme.warning)));
-    }
-    if !s.state.is_alive() {
-        spans.push(Span::styled(" · n new · q detach", bar.fg(theme.muted)));
     }
     spans
 }
@@ -184,31 +349,38 @@ fn short_path(p: &str) -> String {
 }
 
 fn draw_empty(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
-    let agent = &app.config.general.default_agent;
-    let lines = vec![
+    let muted = Style::new().fg(theme.muted);
+    let key = Style::new().fg(theme.accent);
+    let mut lines = vec![
         Line::from(Span::styled(
             format!("{} {}", brand::MARK, brand::NAME),
-            Style::new().fg(theme.accent).add_modifier(Modifier::BOLD),
+            key.add_modifier(Modifier::BOLD),
         )),
         Line::raw(""),
         Line::from(Span::styled(brand::TAGLINE, Style::new().fg(theme.text))),
         Line::raw(""),
-        Line::from(Span::styled(
-            "No active sessions.",
-            Style::new().fg(theme.muted),
-        )),
-        Line::raw(""),
-        Line::from(vec![
-            Span::styled("Press ", Style::new().fg(theme.muted)),
-            Span::styled("n", Style::new().fg(theme.accent)),
-            Span::styled(
-                format!(" to launch {agent}, "),
-                Style::new().fg(theme.muted),
-            ),
-            Span::styled("q", Style::new().fg(theme.accent)),
-            Span::styled(" to quit.", Style::new().fg(theme.muted)),
-        ]),
     ];
+    if app.sessions.is_empty() {
+        lines.push(Line::from(Span::styled("No active sessions.", muted)));
+        lines.push(Line::raw(""));
+        lines.push(Line::from(vec![
+            Span::styled("Press ", muted),
+            Span::styled("n", key),
+            Span::styled(" to launch an agent, ", muted),
+            Span::styled("q", key),
+            Span::styled(" to quit.", muted),
+        ]));
+    } else {
+        lines.push(Line::from(vec![
+            Span::styled("Select a session with ", muted),
+            Span::styled("↑↓", key),
+            Span::styled(" and ", muted),
+            Span::styled("enter", key),
+            Span::styled(", or ", muted),
+            Span::styled("n", key),
+            Span::styled(" for a new one.", muted),
+        ]));
+    }
     let height = lines.len() as u16;
     let [_, mid, _] = Layout::vertical([
         Constraint::Fill(1),
@@ -219,15 +391,111 @@ fn draw_empty(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), mid);
 }
 
+fn popup(
+    frame: &mut Frame,
+    area: Rect,
+    width: u16,
+    height: u16,
+    title: &str,
+    theme: &Theme,
+) -> Rect {
+    let w = width.min(area.width);
+    let h = height.min(area.height);
+    let rect = Rect {
+        x: area.x + (area.width - w) / 2,
+        y: area.y + (area.height - h) / 2,
+        width: w,
+        height: h,
+    };
+    let block = Block::new()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::new().fg(theme.accent_dim))
+        .title(Span::styled(
+            format!(" {title} "),
+            Style::new().fg(theme.muted),
+        ));
+    let inner = block.inner(rect);
+    frame.render_widget(Clear, rect);
+    frame.render_widget(block, rect);
+    inner
+}
+
+fn draw_picker(frame: &mut Frame, area: Rect, app: &App, selected: usize, theme: &Theme) {
+    let inner = popup(
+        frame,
+        area,
+        48,
+        app.agents.len() as u16 + 2,
+        "New session",
+        theme,
+    );
+    let lines: Vec<Line> = app
+        .agents
+        .iter()
+        .enumerate()
+        .map(|(i, a)| {
+            let chosen = i == selected;
+            let base = if chosen {
+                Style::new().bg(theme.accent).fg(Color::Black)
+            } else {
+                Style::new()
+            };
+            let name = if a.installed {
+                base.fg(if chosen { Color::Black } else { theme.text })
+            } else {
+                base.fg(if chosen { Color::Black } else { theme.muted })
+            };
+            let num = if i < 9 {
+                format!(" {} ", i + 1)
+            } else {
+                "   ".into()
+            };
+            let detail = if a.installed {
+                a.command.clone()
+            } else {
+                format!("{} (not installed)", a.command)
+            };
+            Line::from(vec![
+                Span::styled(
+                    num,
+                    base.fg(if chosen { Color::Black } else { theme.muted }),
+                ),
+                Span::styled(
+                    format!("{:<10} ", a.name),
+                    name.add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    truncate(&detail, inner.width.saturating_sub(15) as usize),
+                    base.fg(if chosen { Color::Black } else { theme.muted }),
+                ),
+            ])
+            .style(base)
+        })
+        .collect();
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
 fn draw_help(frame: &mut Frame, area: Rect, theme: &Theme) {
     let rows = [
-        ("Ctrl+Space d", "Detach (agents keep running)"),
-        ("Ctrl+Space n", "New session (default agent)"),
-        ("Ctrl+Space x", "Terminate current session"),
+        ("Ctrl+Space j / k", "Next / previous session"),
+        ("Ctrl+Space 1-9", "Jump to session"),
+        ("Ctrl+Space s", "Focus sidebar (↑↓ enter, esc back)"),
+        ("Ctrl+Space n", "New session (pick an agent)"),
+        ("Ctrl+Space r", "Rename session"),
+        ("Ctrl+Space x", "Terminate session"),
         ("Ctrl+Space a", "Take input control back"),
+        ("Ctrl+Space d", "Detach (agents keep running)"),
         ("Ctrl+Space Ctrl+Space", "Send a literal Ctrl+Space"),
-        ("Ctrl+Space ?", "This help"),
     ];
+    let inner = popup(
+        frame,
+        area,
+        62,
+        rows.len() as u16 + 2,
+        "Help · any key to close",
+        theme,
+    );
     let lines: Vec<Line> = rows
         .iter()
         .map(|(k, d)| {
@@ -237,28 +505,7 @@ fn draw_help(frame: &mut Frame, area: Rect, theme: &Theme) {
             ])
         })
         .collect();
-    let w = 60.min(area.width);
-    let h = (lines.len() as u16 + 2).min(area.height);
-    let popup = Rect {
-        x: area.x + (area.width - w) / 2,
-        y: area.y + (area.height - h) / 2,
-        width: w,
-        height: h,
-    };
-    frame.render_widget(Clear, popup);
-    frame.render_widget(
-        Paragraph::new(lines).block(
-            Block::new()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::new().fg(theme.accent_dim))
-                .title(Span::styled(
-                    " Help · any key to close ",
-                    Style::new().fg(theme.muted),
-                )),
-        ),
-        popup,
-    );
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 fn color(c: vt100::Color) -> Color {
@@ -308,6 +555,84 @@ pub fn draw_terminal(buf: &mut Buffer, area: Rect, screen: &vt100::Screen) {
 mod tests {
     use super::*;
     use std::num::NonZeroU16;
+
+    use crate::app::Start;
+    use hive_core::config::Config;
+    use hive_protocol::{ServerMessage, TermSize};
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    fn session(id: u64, label: &str, state: SessionState) -> SessionInfo {
+        SessionInfo {
+            id,
+            agent: "claude".into(),
+            label: label.into(),
+            command: vec!["claude".into()],
+            cwd: "/home/u/proj".into(),
+            state,
+            size: TermSize::DEFAULT,
+            created_at: 0,
+            attached_clients: 0,
+        }
+    }
+
+    fn rendered(app: &App, w: u16, h: u16) -> Vec<String> {
+        let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+        term.draw(|f| draw(f, app, &Theme::hive_dark(true)))
+            .unwrap();
+        let buf = term.backend().buffer();
+        (0..h)
+            .map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect::<String>())
+            .collect()
+    }
+
+    #[test]
+    fn sidebar_lists_sessions_and_marks_the_current_one() {
+        let mut app = App::new(Config::default(), Start::Attach(2), (80, 12));
+        app.on_server(ServerMessage::SessionList(vec![
+            session(1, "claude", SessionState::Running),
+            session(2, "api", SessionState::Running),
+            session(
+                3,
+                "old",
+                SessionState::Exited {
+                    code: Some(0),
+                    signal: None,
+                },
+            ),
+        ]));
+        app.on_server(ServerMessage::Attached {
+            session: session(2, "api", SessionState::Running),
+            snapshot: b"agent output".to_vec(),
+            controller: true,
+        });
+        let lines = rendered(&app, 80, 12);
+        assert!(lines[1].contains("SESSIONS"));
+        assert!(lines[3].contains("● claude") && lines[3].contains('1'));
+        assert!(lines[4].contains("proj"));
+        assert!(lines[5].starts_with("▌● api"), "{:?}", lines[5]);
+        assert!(lines[6].contains("claude · proj"));
+        assert!(lines[7].contains("○ old"));
+        // The agent's screen starts right of the sidebar.
+        let panel: String = lines[1]
+            .chars()
+            .skip(SIDEBAR_WIDTH as usize)
+            .take(12)
+            .collect();
+        assert_eq!(panel, "agent output");
+    }
+
+    #[test]
+    fn narrow_terminal_hides_the_sidebar() {
+        let mut app = App::new(Config::default(), Start::Attach(1), (50, 8));
+        app.on_server(ServerMessage::Attached {
+            session: session(1, "claude", SessionState::Running),
+            snapshot: b"agent output".to_vec(),
+            controller: true,
+        });
+        let lines = rendered(&app, 50, 8);
+        assert!(lines[1].starts_with("agent output"));
+    }
 
     #[test]
     fn terminal_cells_and_attributes_are_copied() {

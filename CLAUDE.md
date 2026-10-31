@@ -46,6 +46,8 @@ Invariants that span files:
 - Attach snapshots (`state_formatted()`) and subscribes to the output broadcast **under the same `term` lock** the reader holds while publishing. Breaking this causes lost or duplicated output.
 - Lock order is `term` before `meta`. Never hold a `std::sync::Mutex` or a `watch::Ref` across `.await`.
 - Slow clients get `Resync` (a fresh snapshot) and never block the PTY. `broadcast::try_recv` repositions after `Lagged`, so resync immediately.
+- Per-session broadcasts go only through `Session::publish()`/`remove()`, never `daemon.events.send(SessionUpdated(..))` directly. They are ordered under the meta lock so nothing can resurrect a removed session (ADR-0008).
+- The TUI mirrors only the attached session. Switching re-attaches (ADR-0007), so don't add background mirroring without revisiting that ADR.
 - Only the controller client's `Input`/`Resize` are honoured. Attaching takes control, and the previous controller gets `ControlLost`.
 - The reader thread must never block on the writer (`try_send` for query replies).
 - `hive-protocol::read_frame` is not cancel-safe. Keep it in its own task, never in `select!`.

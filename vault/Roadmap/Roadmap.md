@@ -8,14 +8,14 @@ Full detail is in `AGENTS.md` §16. **Don't start a phase until the previous one
 ## Phase 1 — Daemon-First Foundation ✅
 [[Phase 1 - Foundation]]
 
-## Phase 2 — Multiplexing
-Goal: Claude Code and Codex running simultaneously. Switching doesn't interrupt either, and background output doesn't freeze the UI.
-- [ ] Sidebar (sessions list, state dots, selection highlight)
-- [ ] Switch sessions inside the TUI (re-`Attach` per switch, or subscribe to several sessions; decide this, see [[Risks and Open Questions]])
-- [ ] Session labels and rename (`RenameSession` message)
-- [ ] Create, terminate and select sessions from the UI
-- [ ] Basic branding pass on the sidebar
-- [ ] Integration test: two noisy sessions, UI stays responsive
+## Phase 2 — Multiplexing ✅
+[[Phase 2 - Multiplexing]]
+- [x] Sidebar (sessions list, state dots, selection highlight)
+- [x] Switch sessions inside the TUI (re-attach, see [[ADR-0007 Switching re-attaches]])
+- [x] Session labels and rename (`RenameSession`, protocol v2)
+- [x] Create (agent picker), terminate and select sessions from the UI
+- [x] Basic branding pass on the sidebar
+- [x] Integration tests: switching keeps sessions running; a flood doesn't starve a quiet session
 
 ## Phase 3 — Robust Persistence
 - [ ] TUI auto-reconnects when the daemon connection drops

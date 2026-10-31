@@ -5,13 +5,15 @@ One terminal. Many agents.
 
 A lightweight, Rust-powered terminal multiplexer for AI coding agents.
 
-> **Status: early development (Phase 1 of 6).** One agent session at a time, with detach and reattach. Multi-session sidebar, workspaces and git worktrees are planned and **not implemented yet**. See [Roadmap](#roadmap).
+> **Status: early development (Phase 2 of 6).** Several agents side by side with a session sidebar, plus detach and reattach. Workspaces and git worktrees are planned and **not implemented yet**. See [Roadmap](#roadmap).
 
 ## What works today
 - Launch Claude Code, Codex, Gemini CLI, OpenCode, a shell, or any configured command in a real PTY
 - Full terminal emulation: colours, cursor, alternate screen, wide characters, bracketed paste
 - Agents run inside a background daemon (`hived`). Detach, close the terminal, or let the UI crash, and they keep running
 - Reattach and get the exact current screen back
+- Run several agents at once and switch between them from a sidebar
+- Rename and terminate sessions from the UI
 - Resizing follows your terminal
 
 ## Build
@@ -46,9 +48,13 @@ The leader is **Ctrl+Space**. Everything else goes to the agent.
 
 | Keys | Action |
 |---|---|
-| `Ctrl+Space d` | Detach |
-| `Ctrl+Space n` | New session (default agent) |
+| `Ctrl+Space j` / `k` | Next / previous session |
+| `Ctrl+Space 1`–`9` | Jump to session |
+| `Ctrl+Space s` | Focus the sidebar (`↑↓` select, `enter` open, `esc` back) |
+| `Ctrl+Space n` | New session (pick an agent) |
+| `Ctrl+Space r` | Rename session |
 | `Ctrl+Space x` | Terminate session (asks to confirm) |
+| `Ctrl+Space d` | Detach |
 | `Ctrl+Space a` | Take input control (when another client attached) |
 | `Ctrl+Space Ctrl+Space` | Send a literal Ctrl+Space |
 | `Ctrl+Space ?` | Help |
@@ -74,7 +80,7 @@ args = ["--dark-mode"]
 
 ## Roadmap
 1. ✅ Daemon-first foundation: one session, detach/reattach
-2. Multiplexing: sidebar, switching, several agents at once
+2. ✅ Multiplexing: sidebar, switching, several agents at once
 3. Robust persistence: auto-reconnect, multi-client polish
 4. Workspaces and git worktrees
 5. Polish: command palette, themes, configurable keys

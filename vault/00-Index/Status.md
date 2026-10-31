@@ -4,9 +4,9 @@ updated: 2026-10-30
 ---
 # Status
 
-**Phase 1 complete** (2026-10-30). All acceptance criteria were verified against real Claude Code and Codex. See [[Phase 1 - Foundation]].
+**Phase 2 complete** (2026-10-30, branch `phase-2-multiplexing`). Claude Code and Codex run side by side with a sidebar, switching, picker, rename and kill. See [[Phase 2 - Multiplexing]]. Phase 1: [[Phase 1 - Foundation]].
 
-**Next:** [[Roadmap#Phase 2 — Multiplexing]]. Add a sidebar, switch sessions without leaving the TUI, and run several agents side by side. The daemon already supports multiple sessions. The TUI currently shows one at a time.
+**Next:** [[Roadmap#Phase 3 — Robust Persistence]]. TUI auto-reconnect, metadata persistence, and multi-client polish.
 
 ## Gate before every change
 ```bash
@@ -20,3 +20,5 @@ cargo test --workspace
 - Mouse is not captured or forwarded.
 - Shift+Enter is not distinguishable (no kitty keyboard protocol).
 - Sessions are not persisted across daemon restarts. This is by design (spec §4).
+- New sessions launched from the TUI use the `hive` process's cwd (no directory prompt yet).
+- No activity indicator for background sessions (see [[ADR-0007 Switching re-attaches]]).

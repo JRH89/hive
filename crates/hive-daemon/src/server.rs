@@ -18,7 +18,8 @@ use crate::session::{Chunk, ClientId, Session, wait_true};
 
 /// Outgoing messages queued per client. When full, output forwarding blocks,
 /// the session broadcast lags, and the client is resynced from a snapshot.
-const CLIENT_QUEUE: usize = 256;
+/// With `MAX_COALESCE` this bounds per-client buffering to ~4 MiB.
+const CLIENT_QUEUE: usize = 64;
 /// Upper bound on PTY bytes coalesced into a single `Output` frame.
 const MAX_COALESCE: usize = 64 * 1024;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -159,6 +160,11 @@ impl Connection {
                     }
                 });
             }
+            ClientMessage::RenameSession { session, label } => {
+                if let Err(e) = self.daemon.rename(session, &label) {
+                    self.error(e.to_string()).await;
+                }
+            }
             ClientMessage::Shutdown => {
                 tracing::info!(client = self.id, "shutdown requested");
                 self.daemon.shutdown.send_replace(true);
@@ -183,10 +189,7 @@ impl Connection {
             controller: true,
         })
         .await;
-        let _ = self
-            .daemon
-            .events
-            .send(ServerMessage::SessionUpdated(a.info));
+        session.publish();
         let forwarder = tokio::spawn(forward_output(session.clone(), a.output, self.out.clone()));
         self.attached = Some(Attached { session, forwarder });
     }
@@ -195,10 +198,7 @@ impl Connection {
         let a = self.attached.take()?;
         a.forwarder.abort();
         a.session.detach(self.id);
-        let _ = self
-            .daemon
-            .events
-            .send(ServerMessage::SessionUpdated(a.session.info()));
+        a.session.publish();
         Some(a.session.id)
     }
 }

@@ -27,8 +27,10 @@ No `hive-pty`, `hive-agents` or `hive-workspace` crates yet. Spec §5 says not t
 1. A per-session **reader thread** does a blocking `read()` on the PTY master (16 KiB).
 2. Under the session's `term` lock it feeds the bytes into the daemon's `vt100::Parser<Responder>` and publishes `Chunk::Output` on a bounded `broadcast` (256 chunks).
 3. Any query replies (DSR, DA, OSC 10/11) are `try_send`'d to the writer. See [[ADR-0005 Daemon answers terminal queries]].
-4. Per attached client, a **forwarder task** coalesces queued chunks (up to 64 KiB) into one `Output` frame and pushes it to the client's bounded out-queue (256). A writer task then writes the frames to the socket.
-5. The TUI's reader task decodes frames into an mpsc. The main loop applies everything queued, then redraws once.
+4. Per attached client, a **forwarder task** coalesces queued chunks (up to 64 KiB) into one `Output` frame and pushes it to the client's bounded out-queue (64 messages, so ≤ 4 MiB). A writer task then writes the frames to the socket.
+5. The TUI's reader task decodes frames into an mpsc. The main loop applies queued messages for up to 12 ms (`DRAIN_BUDGET`), then redraws and polls input again.
+
+The client mirrors **only the attached session**. Switching re-attaches and gets a fresh snapshot ([[ADR-0007 Switching re-attaches]]), so background sessions cost the frontend nothing.
 
 Attach takes the `state_formatted()` snapshot **and** subscribes under the same `term` lock. That gives no gap and no duplicate. See [[ADR-0004 Lagging clients resync from snapshot]] for the slow-consumer case.
 

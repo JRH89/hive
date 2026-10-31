@@ -17,8 +17,11 @@ source: crates/hive-daemon/src/session.rs
 - Attaching makes you controller ("last attach wins"). The old controller becomes an observer and gets `ControlLost`. In the TUI, Leader then `a` re-attaches to take control back.
 - Only the controller's `Input`/`Resize` are honoured. This is the explicit input ownership required by spec §11.
 
+## Lifecycle events
+Only `Session::publish()` (sends `SessionUpdated` unless removed) and `Session::remove()` (sets `removed`, sends `SessionRemoved`) emit per-session broadcasts, both under the `meta` lock. See [[ADR-0008 Session events published under the session lock]].
+
 ## Size policy
-- The PTY size follows the **controller's** panel size: set on attach and on every controller resize.
+- The PTY size follows the **controller's** panel size (terminal minus header, status bar and the 26-column sidebar): set on attach and on every controller resize.
 - With no client attached the PTY keeps its last size. Background agents are not resized under them.
 - Observers render the controller's size, clipped to their own panel.
 

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Bumped on any incompatible change to the message types below.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Upper bound on a single frame. Protects both sides from unbounded
 /// allocations caused by a corrupt or hostile length prefix.
@@ -108,6 +108,11 @@ pub enum ClientMessage {
     Resize(TermSize),
     /// Terminate (if running) and remove a session.
     KillSession(SessionId),
+    /// Change a session's label. An empty label resets it to the agent name.
+    RenameSession {
+        session: SessionId,
+        label: String,
+    },
     /// Terminate all sessions and stop the daemon.
     Shutdown,
 }

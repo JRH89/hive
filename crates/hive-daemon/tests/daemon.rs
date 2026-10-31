@@ -22,6 +22,13 @@ struct Harness {
 
 impl Harness {
     async fn start() -> Harness {
+        // `HIVE_LOG=debug cargo test ... -- --nocapture` shows daemon logs.
+        if let Ok(filter) = std::env::var("HIVE_LOG") {
+            let _ = tracing_subscriber::fmt()
+                .with_env_filter(filter)
+                .with_test_writer()
+                .try_init();
+        }
         let tmp = tempfile::tempdir().unwrap();
         let paths = Paths::with_runtime_dir(
             tmp.path().join("rt"),
@@ -310,4 +317,187 @@ async fn second_daemon_refuses_to_start_and_shutdown_cleans_up() {
     c.send(&ClientMessage::Shutdown).await.unwrap();
     timeout(T, h.daemon).await.unwrap().unwrap().unwrap();
     assert!(!h.paths.socket.exists());
+}
+
+/// Last `<prefix><number>` on screen, e.g. the counter printed by a ticker.
+fn counter(screen: &Screen, prefix: &str) -> u64 {
+    let text = screen.contents();
+    let start = text.rfind(prefix).expect("counter on screen") + prefix.len();
+    text[start..]
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>()
+        .parse()
+        .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn switching_between_sessions_keeps_both_running() {
+    let h = Harness::start().await;
+    let size = TermSize::DEFAULT;
+    let mut c = h.client().await;
+    let ticker = create(
+        &mut c,
+        sh(
+            r#"i=0; while :; do i=$((i+1)); printf '\rtick=%d ' $i; sleep 0.02; done"#,
+            size,
+        ),
+    )
+    .await;
+    let echo = create(&mut c, sh("cat", size)).await;
+
+    let mut screen = attach(&mut c, ticker, size).await;
+    wait_for_text(&mut c, &mut screen, "tick=").await;
+    let before = counter(&screen, "tick=");
+
+    // Switch away: the ticker is now unattached, the echo session interactive.
+    let mut echo_screen = attach(&mut c, echo, size).await;
+    c.send(&ClientMessage::Input(b"first\r".to_vec()))
+        .await
+        .unwrap();
+    wait_for_text(&mut c, &mut echo_screen, "first").await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Switch back: the ticker kept counting while it was in the background.
+    let screen = attach(&mut c, ticker, size).await;
+    let after = counter(&screen, "tick=");
+    assert!(after > before + 5, "ticker stalled: {before} -> {after}");
+
+    // And the echo session kept its screen and still takes input.
+    let mut echo_screen = attach(&mut c, echo, size).await;
+    assert!(echo_screen.contents().contains("first"));
+    c.send(&ClientMessage::Input(b"second\r".to_vec()))
+        .await
+        .unwrap();
+    wait_for_text(&mut c, &mut echo_screen, "second").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn noisy_session_does_not_starve_others() {
+    let h = Harness::start().await;
+    let size = TermSize::DEFAULT;
+    let mut c = h.client().await;
+    let noisy = create(&mut c, sh("yes 'noise noise noise noise noise'", size)).await;
+    let quiet = create(&mut c, sh("cat", size)).await;
+
+    // A client attached to the flood that never reads its socket: the daemon
+    // must resync it rather than block the PTY or other sessions.
+    let mut stalled = h.client().await;
+    stalled
+        .send(&ClientMessage::Attach {
+            session: noisy,
+            size,
+        })
+        .await
+        .unwrap();
+
+    let mut screen = attach(&mut c, quiet, size).await;
+    for i in 0..5 {
+        let marker = format!("ping{i}");
+        let started = std::time::Instant::now();
+        c.send(&ClientMessage::Input(format!("{marker}\r").into_bytes()))
+            .await
+            .unwrap();
+        wait_for_text(&mut c, &mut screen, &marker).await;
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "echo took {:?} while another session flooded",
+            started.elapsed()
+        );
+        // Spread the pings out so the flood overruns the stalled client.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+
+    // Once the stalled client finally reads, it must be told to resync
+    // rather than having silently lost output.
+    let resynced = timeout(
+        T,
+        stalled.recv_until(|m| matches!(m, ServerMessage::Resync { .. }).then_some(())),
+    )
+    .await;
+    assert!(resynced.is_ok(), "stalled client was never resynced");
+
+    c.send(&ClientMessage::Shutdown).await.unwrap();
+    timeout(T, h.daemon).await.unwrap().unwrap().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rename_updates_label_and_empty_resets_it() {
+    let h = Harness::start().await;
+    let mut c = h.client().await;
+    let id = create(&mut c, sh("sleep 60", TermSize::DEFAULT)).await;
+    for (label, expected) in [("  frontend  ", "frontend"), ("", "shell")] {
+        c.send(&ClientMessage::RenameSession {
+            session: id,
+            label: label.into(),
+        })
+        .await
+        .unwrap();
+        let got = timeout(
+            T,
+            c.recv_until(|m| match m {
+                ServerMessage::SessionUpdated(info) if info.id == id && info.label == expected => {
+                    Some(info.label)
+                }
+                _ => None,
+            }),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(got, expected);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn removed_session_is_never_resurrected_by_later_updates() {
+    let h = Harness::start().await;
+    let size = TermSize::DEFAULT;
+    let mut c = h.client().await;
+    let doomed = create(&mut c, sh("sleep 60", size)).await;
+    let other = create(&mut c, sh("sleep 60", size)).await;
+    let _ = attach(&mut c, doomed, size).await;
+
+    // What the TUI does: kill the attached session, then move to another.
+    c.send(&ClientMessage::KillSession(doomed)).await.unwrap();
+    let mut removed = false;
+    let mut stale = Vec::new();
+    let mut note = |m: &ServerMessage, removed: &mut bool| match m {
+        ServerMessage::SessionRemoved(id) if *id == doomed => *removed = true,
+        ServerMessage::SessionUpdated(info) if info.id == doomed && *removed => {
+            stale.push(info.clone())
+        }
+        _ => {}
+    };
+    timeout(T, async {
+        loop {
+            let m = c.recv().await.unwrap().unwrap();
+            note(&m, &mut removed);
+            if matches!(m, ServerMessage::Detached { session } if session == doomed) {
+                break;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    c.send(&ClientMessage::Attach {
+        session: other,
+        size,
+    })
+    .await
+    .unwrap();
+    c.send(&ClientMessage::ListSessions).await.unwrap();
+    timeout(T, async {
+        loop {
+            let m = c.recv().await.unwrap().unwrap();
+            note(&m, &mut removed);
+            if matches!(m, ServerMessage::SessionList(_)) {
+                break;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert!(removed, "SessionRemoved never arrived");
+    assert!(stale.is_empty(), "updates after removal: {stale:?}");
 }

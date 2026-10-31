@@ -6,6 +6,7 @@ Knowledge base for building **Hive**, a terminal multiplexer for AI coding agent
 - [[Status]]: where the project is right now (read first)
 - [[Roadmap]]: phases and their acceptance criteria
 - [[Phase 1 - Foundation]]: what shipped and how it was verified
+- [[Phase 2 - Multiplexing]]: sidebar, switching, picker, rename
 
 ## Architecture
 - [[Overview]]: processes, crates, data flow
@@ -19,6 +20,8 @@ Knowledge base for building **Hive**, a terminal multiplexer for AI coding agent
 - [[ADR-0004 Lagging clients resync from snapshot]]
 - [[ADR-0005 Daemon answers terminal queries]]
 - [[ADR-0006 Leader key Ctrl+Space]]
+- [[ADR-0007 Switching re-attaches]]
+- [[ADR-0008 Session events published under the session lock]]
 
 ## Ongoing
 - [[Risks and Open Questions]]
