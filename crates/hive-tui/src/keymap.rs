@@ -34,6 +34,7 @@ pub enum Command {
     NextTab,
     PrevTab,
     CloseTab,
+    Notes,
     Rename,
     Kill,
     TakeControl,
@@ -43,7 +44,7 @@ pub enum Command {
 }
 
 impl Command {
-    pub const ALL: [Command; 28] = [
+    pub const ALL: [Command; 29] = [
         Command::Palette,
         Command::SearchSessions,
         Command::NewSession,
@@ -66,6 +67,7 @@ impl Command {
         Command::NextTab,
         Command::PrevTab,
         Command::CloseTab,
+        Command::Notes,
         Command::Rename,
         Command::Kill,
         Command::TakeControl,
@@ -99,6 +101,7 @@ impl Command {
             Command::NextTab => "next_tab",
             Command::PrevTab => "prev_tab",
             Command::CloseTab => "close_tab",
+            Command::Notes => "notes",
             Command::Rename => "rename_session",
             Command::Kill => "kill_session",
             Command::TakeControl => "take_control",
@@ -133,6 +136,7 @@ impl Command {
             Command::NextTab => "Next tab",
             Command::PrevTab => "Previous tab",
             Command::CloseTab => "Close the tab (sessions keep running)",
+            Command::Notes => "Open the workspace's notes (Obsidian vault)",
             Command::Rename => "Rename session",
             Command::Kill => "Terminate session",
             Command::TakeControl => "Take input control",
@@ -174,6 +178,7 @@ impl Command {
             Command::NextTab => &["]"],
             Command::PrevTab => &["["],
             Command::CloseTab => &[],
+            Command::Notes => &["N"],
             Command::Rename => &["r"],
             Command::Kill => &["x"],
             Command::TakeControl => &["a"],
@@ -364,12 +369,14 @@ pub struct Keymap {
 
 impl Default for Keymap {
     fn default() -> Self {
-        Keymap::from_config(&Keys::default()).expect("default keys are valid")
+        Keymap::from_config(&Keys::default(), &[]).expect("default keys are valid")
     }
 }
 
 impl Keymap {
-    pub fn from_config(cfg: &Keys) -> Result<Keymap, KeymapError> {
+    /// `hidden` commands (disabled integrations) get no keys, so their
+    /// defaults never clash with the user's bindings.
+    pub fn from_config(cfg: &Keys, hidden: &[Command]) -> Result<Keymap, KeymapError> {
         let leader = KeySpec::parse(&cfg.leader).map_err(KeymapError::BadKey)?;
         if leader.is_typing_key() {
             return Err(KeymapError::TypingLeader(cfg.leader.clone()));
@@ -391,7 +398,7 @@ impl Keymap {
             _ => return Err(KeymapError::BadJumpModifier(cfg.jump_modifier.clone())),
         };
         let mut globals: Vec<(KeySpec, Command)> = Vec::new();
-        for cmd in Command::ALL {
+        for cmd in Command::ALL.into_iter().filter(|c| !hidden.contains(c)) {
             let keys: Vec<&str> = match cfg.global.get(cmd.name()) {
                 Some(list) => list.keys(),
                 None => cmd.default_global_keys().to_vec(),
@@ -420,7 +427,7 @@ impl Keymap {
             }
         }
         let mut bindings: Vec<(KeySpec, Command)> = Vec::new();
-        for cmd in Command::ALL {
+        for cmd in Command::ALL.into_iter().filter(|c| !hidden.contains(c)) {
             let keys: Vec<&str> = match cfg.bind.get(cmd.name()) {
                 Some(list) => list.keys(),
                 None => cmd.default_keys().to_vec(),
@@ -592,7 +599,7 @@ mod tests {
             .insert("next_session".into(), KeyList::Many(vec![]));
         keys.global
             .insert("help".into(), KeyList::One("ctrl+alt+h".into()));
-        let km = Keymap::from_config(&keys).unwrap();
+        let km = Keymap::from_config(&keys, &[]).unwrap();
         assert_eq!(km.global(&ev(KeyCode::Char('3'), KeyModifiers::ALT)), None);
         assert_eq!(km.global(&ev(KeyCode::Right, KeyModifiers::ALT)), None);
         assert_eq!(
@@ -605,14 +612,14 @@ mod tests {
             .global
             .insert("help".into(), KeyList::One("h".into()));
         assert!(matches!(
-            Keymap::from_config(&typing).unwrap_err(),
+            Keymap::from_config(&typing, &[]).unwrap_err(),
             KeymapError::TypingGlobal(_)
         ));
         let mut jump = Keys::default();
         jump.global
             .insert("help".into(), KeyList::One("alt+4".into()));
         assert!(matches!(
-            Keymap::from_config(&jump).unwrap_err(),
+            Keymap::from_config(&jump, &[]).unwrap_err(),
             KeymapError::Reserved(_)
         ));
         let bad = Keys {
@@ -620,7 +627,7 @@ mod tests {
             ..Keys::default()
         };
         assert!(matches!(
-            Keymap::from_config(&bad).unwrap_err(),
+            Keymap::from_config(&bad, &[]).unwrap_err(),
             KeymapError::BadJumpModifier(_)
         ));
     }
@@ -636,7 +643,7 @@ mod tests {
         keys.bind.insert("detach".into(), KeyList::Many(vec![]));
         keys.bind
             .insert("settings".into(), KeyList::One("f2".into()));
-        let km = Keymap::from_config(&keys).unwrap();
+        let km = Keymap::from_config(&keys, &[]).unwrap();
         assert!(km.is_leader(&ev(KeyCode::Char('a'), KeyModifiers::CONTROL)));
         assert_eq!(
             km.command(&ev(KeyCode::Char('K'), KeyModifiers::SHIFT)),
@@ -655,7 +662,7 @@ mod tests {
             Some(Command::Settings)
         );
 
-        let err = |keys: Keys| Keymap::from_config(&keys).unwrap_err();
+        let err = |keys: Keys| Keymap::from_config(&keys, &[]).unwrap_err();
         let typing = Keys {
             leader: "a".into(),
             ..Keys::default()

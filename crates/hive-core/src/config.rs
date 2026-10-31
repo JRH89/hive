@@ -15,6 +15,7 @@ pub struct Config {
     pub daemon: Daemon,
     pub worktrees: Worktrees,
     pub notifications: Notifications,
+    pub integrations: Integrations,
     pub theme: ThemeConfig,
     pub keys: Keys,
     /// User-defined or overridden agents, keyed by name.
@@ -100,6 +101,55 @@ pub struct Notifications {
 impl Default for Notifications {
     fn default() -> Self {
         Notifications { bell: true }
+    }
+}
+
+/// `[integrations.*]`: optional extras. All off by default, and invisible
+/// (no keys, palette entries or marks) until enabled.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct Integrations {
+    pub obsidian: Obsidian,
+}
+
+/// `[integrations.obsidian]`: open a workspace's Obsidian vault in a pane.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct Obsidian {
+    pub enabled: bool,
+    /// Agent to open the vault with; empty means `$VISUAL`, `$EDITOR`, `vi`.
+    pub agent: String,
+    pub open_in: OpenIn,
+}
+
+/// Where the notes pane opens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum OpenIn {
+    #[default]
+    Tab,
+    /// Split to the right of the focused pane.
+    Split,
+}
+
+impl Obsidian {
+    /// The program that opens the vault, as an agent definition.
+    pub fn notes_agent(&self, config: &Config) -> Option<AgentDef> {
+        if !self.agent.is_empty() {
+            return config.agent(&self.agent);
+        }
+        let editor = ["VISUAL", "EDITOR"]
+            .iter()
+            .filter_map(|k| std::env::var(k).ok())
+            .find(|v| !v.trim().is_empty())
+            .unwrap_or_else(|| "vi".into());
+        // `EDITOR="code -w"` is common; split on whitespace, no shell.
+        let mut words = editor.split_whitespace().map(str::to_string);
+        Some(AgentDef {
+            command: words.next()?,
+            args: words.collect(),
+            env: BTreeMap::new(),
+        })
     }
 }
 
@@ -307,6 +357,24 @@ mod tests {
         );
         assert_eq!(c.agent("aider").unwrap().env["AIDER_DARK_MODE"], "1");
         assert!(c.is_configured("aider") && !c.is_configured("codex"));
+    }
+
+    #[test]
+    fn obsidian_is_off_by_default_and_validated() {
+        let off = Config::default().integrations.obsidian;
+        assert!(!off.enabled);
+        assert_eq!(off.open_in, OpenIn::Tab);
+        let on = Config::parse(
+            "[integrations.obsidian]\nenabled = true\nagent = \"shell\"\nopen_in = \"split\"\n",
+        )
+        .unwrap();
+        let o = &on.integrations.obsidian;
+        assert_eq!(o.open_in, OpenIn::Split);
+        assert_eq!(
+            o.notes_agent(&on).unwrap().command,
+            on.agent("shell").unwrap().command
+        );
+        assert!(Config::parse("[integrations.obsidian]\nopen_in = \"window\"\n").is_err());
     }
 
     #[test]

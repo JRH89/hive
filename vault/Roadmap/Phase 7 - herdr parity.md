@@ -42,11 +42,26 @@ Bugs found in manual testing:
 - Replies to the TUI's own detaches emptied hidden tabs (the tab bar never appeared). Fixed and regression-tested.
 - The shared-directory warning still said "Leader n, then w". It now names the bound `new_worktree_session` key.
 
+## Obsidian notes (optional) ✅
+Design: [[ADR-0019 Optional integrations, off and invisible by default]].
+| Criterion | Evidence |
+|---|---|
+| Off by default; nothing shown | `notes_are_invisible_until_enabled` (no key, no palette entry, leader N inert, user's own `N` binding doesn't clash); tmux with an empty config: help and palette show no notes/Obsidian |
+| Finds the vault and opens it; once | `notes_open_the_workspace_vault_once` (cwd `src/` → `vault/`, label `notes · vault`, new tab, repeat focuses); `obsidian_vaults_are_found_at_or_above_cwd_then_one_level_down`; `notes_without_a_vault_say_so` |
+| Config validated | `obsidian_is_off_by_default_and_validated` (bad `open_in` rejected); `check_config` rejects an unknown agent; `hive doctor` with the test config: `config … (ok)` |
+| Live | tmux, isolated daemon, `open_in = "split"`, `agent = "shell"`: leader N on a session in this repo → split `#10 notes · vault`, `pwd` = `~/Projects/hive/vault`; leader N again from the other pane → refocused, `hive list` has one notes session |
+
 ## Next
-- Optional Obsidian notes integration (off by default).
 - Persist the pane/tab layout across `hive` restarts (not done).
 - Offer truss a Hive reporter (mirror of its herdr one, using `HIVE_SESSION_ID`/`HIVE_BIN_PATH`). Ask first: user's repo.
 - Website: say the install one-liner alone is enough (Download is optional).
 
-## Ideas (not scheduled)
-- Obsidian: detect a vault (`.obsidian/`) in a workspace and offer a notes tab/pane once tabs exist. An MCP server is not needed for this; agents can already use Obsidian MCP servers themselves.
+## Ideas (not scheduled): more optional integrations
+Same shape as [[ADR-0019 Optional integrations, off and invisible by default]]: off by default, a config table, built from sessions and panes.
+| Idea | What it does | Built from |
+|---|---|---|
+| Review pane | Leader G opens `lazygit`/`tig`/`git diff` in the focused agent's worktree, split beside it | session in the worktree cwd |
+| Task runner | Reads `justfile`/`package.json`/`Makefile` targets; the picker launches one (tests, dev server) in a split next to the agent | session + picker |
+| Desktop notifications | done/blocked also sends `notify-send` or OSC 9/777 to the outer terminal | existing activity events (`note_activity`) |
+| PR / CI pane | `gh pr checks --watch` / `gh pr view` for the session's branch in a pane | session running `gh` |
+| Obsidian journal | When an agent finishes, append a line (label, branch, duration) to today's note in the vault | done events + vault discovery; writes user files, so opt-in |

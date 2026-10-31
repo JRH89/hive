@@ -95,6 +95,19 @@ If an agent needs one of these, rebind or unbind it under `[keys.global]` (see [
 
 Split the panel to watch several agents at once. Each pane is its own terminal at its own size, with a title row showing the session and its status. Keys go to the focused pane. Switching to a session that is already in a pane focuses that pane (and its tab); otherwise the session replaces the focused pane. With more than one tab, the header shows the tab bar. Hidden tabs cost nothing: Hive only mirrors what is on screen. The layout lasts until you quit `hive`; sessions keep running either way.
 
+### Notes (Obsidian, optional)
+
+If your repository holds an [Obsidian](https://obsidian.md) vault, Hive can open it beside your agents. It is off by default and adds nothing to the interface until you turn it on:
+
+```toml
+[integrations.obsidian]
+enabled = true
+agent = ""          # "" opens $VISUAL/$EDITOR; or any agent name, e.g. "claude"
+open_in = "tab"     # or "split"
+```
+
+`Ctrl+Space N` (or "notes" in the palette) then opens the vault (the nearest folder with `.obsidian/` at or above the session's directory, or one level below the repository root) as a session labelled `notes · <vault>`. Asking again goes back to it.
+
 ### Mouse
 
 Click a pane to focus it, a session in the sidebar to open it, or a workspace name to open its first session. The wheel scrolls the sidebar. In the terminal panel, clicks and the wheel go to agents that use the mouse; full-screen apps without mouse support scroll with the wheel. Hold `Shift` to select text with your terminal as usual. Turn the mouse off with `[terminal] mouse_support = false`.

@@ -17,7 +17,7 @@ const CONTROL_FREE: &str = "Control is free. Leader then a to take it.";
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
-use hive_core::config::Config;
+use hive_core::config::{Config, OpenIn};
 use hive_core::launch;
 use hive_protocol::{
     AgentStatus, ClientMessage, CreateSession, NewWorktree, ServerMessage, SessionId, SessionInfo,
@@ -312,9 +312,23 @@ fn digit(key: &KeyEvent) -> Option<usize> {
     }
 }
 
+/// Agent name of sessions opened by the Obsidian integration.
+pub const NOTES_AGENT: &str = "notes";
+
+/// Commands of integrations that are switched off: no keys, no palette
+/// entries, no help lines.
+pub fn hidden_commands(config: &Config) -> Vec<Command> {
+    let mut hidden = Vec::new();
+    if !config.integrations.obsidian.enabled {
+        hidden.push(Command::Notes);
+    }
+    hidden
+}
+
 impl App {
     pub fn new(config: Config, start: Start, terminal: (u16, u16)) -> App {
-        let (keymap, key_error) = match Keymap::from_config(&config.keys) {
+        let (keymap, key_error) = match Keymap::from_config(&config.keys, &hidden_commands(&config))
+        {
             Ok(k) => (k, None),
             Err(e) => (Keymap::default(), Some(e.to_string())),
         };
@@ -1247,6 +1261,10 @@ impl App {
                 }
             }
             Command::ClosePane => return self.close_pane(),
+            Command::Notes if self.config.integrations.obsidian.enabled => {
+                return self.open_notes();
+            }
+            Command::Notes => {}
             Command::CloseTab => return self.close_tab(),
             Command::NewWorktreeSession => {
                 self.open_picker_for(Place::Replace);
@@ -1344,8 +1362,11 @@ impl App {
         };
         let mut items: Vec<(PaletteItem, String)> = Vec::new();
         if !sessions_only {
+            let hidden = hidden_commands(&self.config);
             for cmd in Command::ALL {
-                if matches!(cmd, Command::Palette | Command::SearchSessions) {
+                if matches!(cmd, Command::Palette | Command::SearchSessions)
+                    || hidden.contains(&cmd)
+                {
                     continue;
                 }
                 let item = PaletteItem {
@@ -1855,6 +1876,69 @@ impl App {
         }
     }
 
+    /// Opens the Obsidian vault of the focused session's workspace with the
+    /// configured editor, or shows the notes pane already open for it.
+    fn open_notes(&mut self) -> Vec<ClientMessage> {
+        let Some(s) = self
+            .focused()
+            .or(self.cursor)
+            .and_then(|id| self.sessions.get(&id))
+        else {
+            self.set_status(Tone::Warning, "Open a session in the workspace first.");
+            return Vec::new();
+        };
+        let cwd = std::path::PathBuf::from(&s.cwd);
+        let workspace = s.workspace;
+        let root = self
+            .workspaces
+            .get(&workspace)
+            .map_or_else(|| cwd.clone(), |w| std::path::PathBuf::from(&w.root));
+        let Some(vault) = hive_workspace::find_obsidian_vault(&cwd, &root) else {
+            let name = self.workspace_name(workspace);
+            self.set_status(
+                Tone::Warning,
+                format!("No Obsidian vault (a folder with .obsidian/) in {name}."),
+            );
+            return Vec::new();
+        };
+        let open = self.sessions.values().find(|s| {
+            s.agent == NOTES_AGENT
+                && s.state == SessionState::Running
+                && std::path::Path::new(&s.cwd) == vault
+        });
+        if let Some(id) = open.map(|s| s.id) {
+            return self.show(id);
+        }
+        let obsidian = &self.config.integrations.obsidian;
+        let Some(def) = obsidian.notes_agent(&self.config) else {
+            self.set_status(
+                Tone::Error,
+                format!(
+                    "[integrations.obsidian] agent `{}` is not defined.",
+                    obsidian.agent
+                ),
+            );
+            return Vec::new();
+        };
+        let label = Some(format!("notes · {}", hive_workspace::default_name(&vault)));
+        match launch::request_for(&def, NOTES_AGENT, label, Some(vault), &[], self.panel) {
+            Ok(mut req) => {
+                req.workspace = Some(workspace);
+                self.place = match obsidian.open_in {
+                    OpenIn::Tab => Place::NewTab,
+                    OpenIn::Split => Place::Split(Dir::Right),
+                };
+                self.awaiting_create = true;
+                self.set_status(Tone::Info, "Opening notes…");
+                vec![ClientMessage::CreateSession(req)]
+            }
+            Err(e) => {
+                self.set_status(Tone::Error, e.to_string());
+                Vec::new()
+            }
+        }
+    }
+
     fn create_session(
         &mut self,
         agent: &str,
@@ -2257,6 +2341,105 @@ mod tests {
         let out = app.on_server(ServerMessage::SessionRemoved(4));
         assert_eq!(app.tabs[0].root.panes(), vec![1]);
         assert_eq!(sizes(&out), vec![(1, app.panel)]);
+    }
+
+    fn palette_has(app: &mut App, cmd: Command) -> bool {
+        app.on_terminal_event(leader());
+        app.on_terminal_event(ch(':'));
+        let found = app
+            .palette_items()
+            .iter()
+            .any(|i| i.target == Target::Command(cmd));
+        app.on_terminal_event(key(KeyCode::Esc, KeyModifiers::NONE));
+        found
+    }
+
+    #[test]
+    fn notes_are_invisible_until_enabled() {
+        let mut app = app();
+        assert!(app.keymap.keys_for(Command::Notes).is_empty());
+        assert!(!palette_has(&mut app, Command::Notes));
+        app.on_terminal_event(leader());
+        assert!(app.on_terminal_event(ch('N')).is_empty());
+        assert_eq!(app.status, None);
+        // A user binding N to something else doesn't clash with the default.
+        let mut config = Config::default();
+        config.keys.bind.insert(
+            "rename_session".into(),
+            hive_core::config::KeyList::One("N".into()),
+        );
+        let app = App::new(config, Start::Attach(1), (100, 26));
+        assert_eq!(app.keymap.keys_for(Command::Rename).len(), 1);
+    }
+
+    #[test]
+    fn notes_open_the_workspace_vault_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let vault = root.join("vault");
+        std::fs::create_dir_all(vault.join(".obsidian")).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+
+        let mut config = Config::default();
+        config.integrations.obsidian.enabled = true;
+        config.integrations.obsidian.agent = "shell".into();
+        let mut app = App::new(config, Start::Attach(1), (100, 26));
+        app.on_connect();
+        app.on_server(ServerMessage::WorkspaceList(vec![WorkspaceInfo {
+            id: 1,
+            name: "proj".into(),
+            root: root.display().to_string(),
+            is_repo: false,
+        }]));
+        let mut one = info(1, SessionState::Running);
+        one.cwd = root.join("src").display().to_string();
+        app.on_server(ServerMessage::SessionList(vec![one]));
+        attached(&mut app, 1);
+        assert!(palette_has(&mut app, Command::Notes));
+
+        app.on_terminal_event(leader());
+        let out = app.on_terminal_event(ch('N'));
+        let [ClientMessage::CreateSession(req)] = out.as_slice() else {
+            panic!("expected CreateSession, got {out:?}");
+        };
+        assert_eq!(req.agent, NOTES_AGENT);
+        assert_eq!(req.label, "notes · vault");
+        assert_eq!(req.cwd, vault.display().to_string());
+        assert_eq!(req.workspace, Some(1));
+
+        // Opens in a new tab by default.
+        let mut notes = info(2, SessionState::Running);
+        notes.agent = NOTES_AGENT.into();
+        notes.cwd = req.cwd.clone();
+        app.on_server(ServerMessage::SessionCreated(notes));
+        assert_eq!(app.tabs.len(), 2);
+        assert_eq!(app.focused(), Some(2));
+
+        // Asking again from the first tab goes back to that pane.
+        app.run(Command::PrevTab);
+        assert_eq!(app.focused(), Some(1));
+        app.on_terminal_event(leader());
+        let out = app.on_terminal_event(ch('N'));
+        assert!(
+            !out.iter()
+                .any(|m| matches!(m, ClientMessage::CreateSession(_)))
+        );
+        assert_eq!((app.tab, app.focused()), (1, Some(2)));
+    }
+
+    #[test]
+    fn notes_without_a_vault_say_so() {
+        let mut config = Config::default();
+        config.integrations.obsidian.enabled = true;
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = App::new(config, Start::Attach(1), (100, 26));
+        app.on_connect();
+        let mut one = info(1, SessionState::Running);
+        one.cwd = dir.path().display().to_string();
+        app.on_server(ServerMessage::SessionList(vec![one]));
+        attached(&mut app, 1);
+        assert!(app.run(Command::Notes).is_empty());
+        assert!(matches!(&app.status, Some((Tone::Warning, m)) if m.contains("No Obsidian vault")));
     }
 
     #[test]

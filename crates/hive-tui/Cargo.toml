@@ -19,3 +19,6 @@ ratatui = "0.30.2"
 tokio = { version = "1.54.1", features = ["full"] }
 tracing = "0.1.44"
 vt100 = "0.18.1"
+
+[dev-dependencies]
+tempfile = "3.27.0"

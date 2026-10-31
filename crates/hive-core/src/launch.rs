@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use hive_protocol::{CreateSession, TermSize};
 
-use crate::config::Config;
+use crate::config::{AgentDef, Config};
 
 #[derive(Debug, thiserror::Error)]
 pub enum LaunchError {
@@ -31,6 +31,18 @@ pub fn create_request(
             known: agents.keys().cloned().collect(),
         });
     };
+    request_for(def, agent, label, cwd, extra_args, size)
+}
+
+/// Like [`create_request`], for a definition that isn't a named agent.
+pub fn request_for(
+    def: &AgentDef,
+    agent: &str,
+    label: Option<String>,
+    cwd: Option<PathBuf>,
+    extra_args: &[String],
+    size: TermSize,
+) -> Result<CreateSession, LaunchError> {
     let path_var = std::env::var_os("PATH").unwrap_or_default();
     if find_executable(&def.command, &path_var).is_none() {
         return Err(LaunchError::NotInstalled {

@@ -117,6 +117,32 @@ where
         .map(|(id, _)| id)
 }
 
+/// The Obsidian vault (a directory holding `.obsidian/`) for a session in
+/// `cwd` under workspace `root`: `cwd` or an ancestor up to `root`, else a
+/// direct subdirectory of `root` (e.g. `docs/`, `vault/`), first by name.
+pub fn find_obsidian_vault(cwd: &Path, root: &Path) -> Option<PathBuf> {
+    let is_vault = |d: &Path| d.join(".obsidian").is_dir();
+    let mut dir = Some(cwd);
+    while let Some(d) = dir {
+        if is_vault(d) {
+            return Some(d.to_path_buf());
+        }
+        if d == root || !d.starts_with(root) {
+            break;
+        }
+        dir = d.parent();
+    }
+    let mut subdirs: Vec<PathBuf> = std::fs::read_dir(root)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .collect();
+    subdirs.sort();
+    subdirs.into_iter().find(|d| is_vault(d))
+}
+
 /// A display name for a workspace rooted at `root`.
 pub fn default_name(root: &Path) -> String {
     root.file_name()
@@ -289,6 +315,23 @@ mod tests {
             .status()
             .unwrap();
         assert!(st.success(), "git {args:?}");
+    }
+
+    #[test]
+    fn obsidian_vaults_are_found_at_or_above_cwd_then_one_level_down() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let deep = root.join("src/deep");
+        std::fs::create_dir_all(&deep).unwrap();
+        assert_eq!(find_obsidian_vault(&deep, root), None);
+
+        std::fs::create_dir_all(root.join("zz/.obsidian")).unwrap();
+        std::fs::create_dir_all(root.join("vault/.obsidian")).unwrap();
+        std::fs::create_dir_all(root.join(".hidden/.obsidian")).unwrap();
+        assert_eq!(find_obsidian_vault(&deep, root), Some(root.join("vault")));
+
+        std::fs::create_dir_all(root.join("src/.obsidian")).unwrap();
+        assert_eq!(find_obsidian_vault(&deep, root), Some(root.join("src")));
     }
 
     fn repo() -> (tempfile::TempDir, PathBuf) {

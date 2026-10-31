@@ -27,6 +27,16 @@ kill_timeout_secs = 3
 # (blocked) or finishes its turn (done).
 bell = true
 
+
+# Optional integrations. Off by default and invisible until enabled.
+[integrations.obsidian]
+# Leader N opens the workspace's Obsidian vault (a folder with .obsidian/,
+# at or above the session's directory or one level below the repository
+# root) in a pane. Asking again focuses the open one.
+enabled = false
+agent = ""          # agent to open it with; "" = $VISUAL, $EDITOR, else vi
+open_in = "tab"     # or "split"
+
 [worktrees]
 # Where `hive new -w` creates git worktrees.
 # Default: $XDG_DATA_HOME/hive/worktrees
@@ -61,7 +71,8 @@ jump_modifier = "alt"
 # workspaces, add_workspace, rename_workspace, next_session, prev_session,
 # next_workspace, prev_workspace, sidebar, toggle_sidebar, rename_session,
 # kill_session, take_control, detach, help, settings, split_right, split_down,
-# focus_next_pane, zoom, close_pane, new_tab, next_tab, prev_tab, close_tab
+# focus_next_pane, zoom, close_pane, new_tab, next_tab, prev_tab, close_tab,
+# notes (only with [integrations.obsidian] enabled)
 palette = [":", "P"]
 new_session = "c"
 next_session = ["n", "j", "down"]

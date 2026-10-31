@@ -66,7 +66,14 @@ type Term = ratatui::DefaultTerminal;
 /// reported before the terminal switches to the alternate screen.
 pub fn check_config(config: &Config) -> anyhow::Result<()> {
     theme_for(config)?;
-    keymap::Keymap::from_config(&config.keys)?;
+    keymap::Keymap::from_config(&config.keys, &app::hidden_commands(config))?;
+    let obsidian = &config.integrations.obsidian;
+    if obsidian.enabled && obsidian.notes_agent(config).is_none() {
+        anyhow::bail!(
+            "[integrations.obsidian] agent `{}` is not defined; leave it empty to use $EDITOR",
+            obsidian.agent
+        );
+    }
     Ok(())
 }
 

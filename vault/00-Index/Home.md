@@ -36,6 +36,7 @@ Knowledge base for building **Hive**, a terminal multiplexer for AI coding agent
 - [[ADR-0016 Agent detection from process and herdr manifests]]
 - [[ADR-0017 herdr-style keys, global chords and mouse]]
 - [[ADR-0018 Tabs of split panes over multi-attach]]
+- [[ADR-0019 Optional integrations, off and invisible by default]]
 
 ## Ongoing
 - [[Website Design]]: approved website direction, branding, scope and acceptance
