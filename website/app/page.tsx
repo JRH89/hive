@@ -5,6 +5,9 @@ import { TerminalShowcase } from "@/components/terminal-showcase";
 import { HiveBackdrop } from "@/components/hive-backdrop";
 import { ReleaseInstall } from "@/components/release-install";
 
+const siteUrl = "https://hive.codefrontlabs.com/";
+const repoUrl = "https://github.com/jrh89/hive";
+
 const Arrow = () => <Icon name="arrow" size={17} />;
 
 const features = [
@@ -29,12 +32,33 @@ const features = [
     text: "Normal input goes straight to your agent. A dedicated leader key handles Hive commands, so managing the terminal stays out of the way of using it.",
     foot: "CTRL+SPACE · YOUR WAY BACK",
   },
+  {
+    number: "04",
+    symbol: "branch" as const,
+    title: "Every project in its place.",
+    text: "Sessions group by repository with the live Git branch beside each one. Give an agent its own worktree so two agents never edit the same checkout.",
+    foot: "WORKSPACES · BRANCHES · WORKTREES",
+  },
+  {
+    number: "05",
+    symbol: "search" as const,
+    title: "Find anything in a keystroke.",
+    text: "A fuzzy command palette for every action, session and workspace. Rebind any key, pick a theme, and it still works in 16 colours or plain ASCII.",
+    foot: "PALETTE · KEYMAPS · THEMES",
+  },
+  {
+    number: "06",
+    symbol: "detach" as const,
+    title: "Survives the bumps.",
+    text: "The interface reconnects on its own if the daemon restarts. Open a session in two windows: one types, the other watches, and taking over is explicit.",
+    foot: "RECONNECT · OBSERVE · TAKE OVER",
+  },
 ];
 
 const faqs = [
   [
     "Is Hive ready to use?",
-    "Hive is in early development. The foundation and multi-session experience are working and have been checked with Claude Code and Codex: launch agents, switch from the sidebar, rename sessions, resize, detach, and reattach. Workspace management and Git worktrees are still planned.",
+    "Hive is pre-release but feature-complete for its first version on Linux: many sessions, detach and reattach, automatic reconnection, workspaces, Git worktrees, a command palette, themes, and configurable keys. It is tested with real terminals in CI. Prebuilt binaries are not published yet, so build it from source for now.",
   ],
   [
     "Which agents can I run?",
@@ -45,18 +69,61 @@ const faqs = [
     "Closing or detaching the frontend leaves your agent running in the local hived daemon. Reopening Hive reconnects to the live session. Stopping the daemon or rebooting the machine ends those processes; Hive does not recover them after a reboot.",
   ],
   [
+    "Is Hive open source?",
+    "Yes. Hive is MIT-licensed and developed in the open on GitHub at github.com/jrh89/hive.",
+  ],
+  [
     "Does Hive need a cloud account?",
     "Hive itself runs locally and needs no cloud account, browser, or external service. The agents you choose may have their own accounts, API keys, subscriptions, and network requirements.",
   ],
   [
     "Can I run it on macOS or Windows?",
-    "Linux is the initial target. macOS and Windows support will be investigated after the Linux implementation is stable.",
+    "Linux is supported today. Hive compiles for macOS but has not been tested there yet. Windows needs a dedicated port and is not supported.",
   ],
+];
+
+const structuredData = [
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    name: "Hive",
+    alternateName: "Hive terminal multiplexer",
+    description:
+      "An open-source terminal multiplexer for AI coding agents. Run Claude Code, Codex, Gemini CLI and OpenCode side by side in real terminals, managed by a local daemon that keeps sessions running when you detach.",
+    url: siteUrl,
+    applicationCategory: "DeveloperApplication",
+    applicationSubCategory: "Terminal multiplexer",
+    operatingSystem: "Linux",
+    softwareVersion: "0.1.0",
+    license: "https://opensource.org/licenses/MIT",
+    codeRepository: repoUrl,
+    programmingLanguage: "Rust",
+    isAccessibleForFree: true,
+    offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+    author: { "@type": "Person", name: "Jared Hooker" },
+    publisher: { "@type": "Organization", name: "Codefront Labs" },
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: faqs.map(([question, answer]) => ({
+      "@type": "Question",
+      name: question,
+      acceptedAnswer: { "@type": "Answer", text: answer },
+    })),
+  },
 ];
 
 export default function Home() {
   return (
     <>
+      <script
+        type="application/ld+json"
+        // Static, build-time data; `<` is escaped so it can't close the tag.
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(structuredData).replace(/</g, "\\u003c"),
+        }}
+      />
       <a href="#main" className="skip-link">
         Skip to content
       </a>
@@ -73,6 +140,14 @@ export default function Home() {
           </a>
           <a className="nav-link" href="#how-it-works">
             How it works
+          </a>
+          <a
+            className="nav-link nav-github"
+            href={repoUrl}
+            aria-label="Hive on GitHub"
+          >
+            <Icon name="github" size={18} />
+            <span>GitHub</span>
           </a>
           <a className="nav-cta" href="#get-started">
             Get started <Arrow />
@@ -93,9 +168,9 @@ export default function Home() {
             <span>Many agents.</span>
           </h1>
           <p className="hero-description">
-            Claude on the frontend. Codex on the API.
-            <br className="desktop-break" /> All your agents, together in the
-            terminal you already love.
+            Hive is an open-source terminal multiplexer for AI coding agents.
+            <br className="desktop-break" /> Run Claude Code, Codex, Gemini CLI
+            and OpenCode side by side, in the terminal you already love.
           </p>
           <div className="hero-actions flex flex-wrap items-center justify-center gap-4">
             <a href="#get-started" className="button button-primary">
@@ -106,8 +181,8 @@ export default function Home() {
             </a>
           </div>
           <p className="release-note">
-            <span className="tiny-square" /> Linux-first{" "}
-            <span aria-hidden="true">/</span> Early development{" "}
+            <span className="tiny-square" /> Linux{" "}
+            <span aria-hidden="true">/</span> Open source · MIT{" "}
             <span aria-hidden="true">/</span> Built to stay local
           </p>
 
@@ -262,7 +337,7 @@ export default function Home() {
               <h2 id="start-title">Your terminal. Your platform.</h2>
             </div>
             <span className="development-badge">
-              <span className="tiny-square" /> EARLY DEVELOPMENT
+              <span className="tiny-square" /> PRE-RELEASE
             </span>
           </div>
           <ReleaseInstall />
@@ -292,8 +367,8 @@ export default function Home() {
                     <h3>Build Hive</h3>
                     <Icon name="terminal" size={19} />
                   </div>
-                  <p>From the Hive repository root:</p>
-                  <CopyCommand command="cargo build --release" />
+                  <p>Clone the repository and build:</p>
+                  <CopyCommand command="git clone https://github.com/jrh89/hive && cd hive && cargo build --release" />
                   <p className="setup-footnote">
                     Keep <code>hive</code> and <code>hived</code> together in{" "}
                     <code>target/release/</code>.
@@ -351,7 +426,8 @@ export default function Home() {
             <p className="eyebrow">A FOUNDATION, THEN A WORKSPACE</p>
             <h2 id="roadmap-title">Built in the right order.</h2>
             <p className="body-copy">
-              Reliability first. More room for your agents next.
+              Reliability first, then room for your agents. All six phases of
+              the first roadmap are done.
             </p>
           </div>
           <div className="roadmap-list">
@@ -362,7 +438,19 @@ export default function Home() {
                 <h3>Many agents. One view.</h3>
                 <p>
                   Real PTYs, a session sidebar, switching, labels, detach and
-                  reattach. Verified with Claude Code and Codex.
+                  reattach, automatic reconnection, and explicit control when
+                  several windows share a session.
+                </p>
+              </div>
+            </article>
+            <article>
+              <span className="roadmap-marker current" />
+              <div>
+                <span className="roadmap-status available">WORKING TODAY</span>
+                <h3>Room for every project</h3>
+                <p>
+                  Workspaces, live Git branches, optional worktree isolation, a
+                  command palette, themes, and configurable keys.
                 </p>
               </div>
             </article>
@@ -370,21 +458,10 @@ export default function Home() {
               <span className="roadmap-marker" />
               <div>
                 <span className="roadmap-status">UP NEXT · PLANNED</span>
-                <h3>A more resilient connection</h3>
+                <h3>The first release</h3>
                 <p>
-                  Automatic frontend reconnection, persisted session metadata,
-                  and a clearer experience for multiple clients.
-                </p>
-              </div>
-            </article>
-            <article>
-              <span className="roadmap-marker" />
-              <div>
-                <span className="roadmap-status">ON THE HORIZON · PLANNED</span>
-                <h3>Room for every project</h3>
-                <p>
-                  Workspaces, Git branch context, optional worktree isolation,
-                  and a configurable command palette.
+                  Static Linux binaries for x86_64 and ARM64 with a one-line,
+                  checksum-verified installer, then testing on macOS.
                 </p>
               </div>
             </article>
@@ -439,6 +516,8 @@ export default function Home() {
           <a href="#get-started">Get started</a>
           <a href="#roadmap">Roadmap</a>
           <a href="#questions">FAQ</a>
+          <a href={repoUrl}>GitHub</a>
+          <a href={`${repoUrl}/blob/master/LICENSE`}>MIT License</a>
         </nav>
       </footer>
     </>

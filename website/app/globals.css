@@ -114,6 +114,11 @@ p {
   color: #a8afbd;
   transition: color 0.18s;
 }
+.nav-github {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 .nav-link:hover,
 .site-footer a:hover {
   color: var(--amber);
@@ -374,8 +379,11 @@ h2 {
   padding: 27px 26px;
   min-width: 0;
 }
-.feature + .feature {
+.feature:not(:nth-child(3n + 1)) {
   border-left: 1px solid var(--line);
+}
+.feature:nth-child(n + 4) {
+  border-top: 1px solid var(--line);
 }
 .feature-top {
   display: flex;
@@ -966,8 +974,10 @@ h2 {
   .feature {
     padding: 25px;
   }
-  .feature + .feature {
+  .feature:not(:nth-child(3n + 1)) {
     border-left: 0;
+  }
+  .feature + .feature {
     border-top: 1px solid var(--line);
   }
   .feature-top {

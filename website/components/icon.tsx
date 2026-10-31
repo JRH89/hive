@@ -1,5 +1,13 @@
 type IconName =
-  "arrow" | "terminal" | "layers" | "keyboard" | "detach" | "check";
+  | "arrow"
+  | "terminal"
+  | "layers"
+  | "keyboard"
+  | "detach"
+  | "check"
+  | "branch"
+  | "search"
+  | "github";
 
 const paths: Record<IconName, React.ReactNode> = {
   arrow: (
@@ -31,6 +39,23 @@ const paths: Record<IconName, React.ReactNode> = {
     </>
   ),
   check: <path d="m5 12 4 4L19 6" />,
+  branch: (
+    <>
+      <circle cx="6" cy="5" r="2" />
+      <circle cx="6" cy="19" r="2" />
+      <circle cx="18" cy="8" r="2" />
+      <path d="M6 7v10M18 10c0 4-6 3-11 7" />
+    </>
+  ),
+  search: (
+    <>
+      <circle cx="11" cy="11" r="6" />
+      <path d="m20 20-4.5-4.5" />
+    </>
+  ),
+  github: (
+    <path d="M9 19c-4 1.5-4-2-6-2.5m12 5v-3.5a3 3 0 0 0-.9-2.4c3-.3 6-1.5 6-6.6a5.2 5.2 0 0 0-1.4-3.6 4.8 4.8 0 0 0-.1-3.6s-1.1-.3-3.7 1.4a12.6 12.6 0 0 0-6.6 0C5.7 1.9 4.6 2.2 4.6 2.2a4.8 4.8 0 0 0-.1 3.6A5.2 5.2 0 0 0 3 9.4c0 5.1 3 6.3 6 6.6a3 3 0 0 0-.9 2.4V22" />
+  ),
 };
 
 export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
