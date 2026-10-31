@@ -56,3 +56,10 @@ Full detail is in `AGENTS.md` §16. **Don't start a phase until the previous one
 - [x] Split panes and tabs (multi-attach, [[ADR-0018 Tabs of split panes over multi-attach]])
 - [x] Optional Obsidian notes integration, off by default ([[ADR-0019 Optional integrations, off and invisible by default]])
 - [ ] truss reports to Hive (needs the user's OK: their repo)
+
+## Phase 8 — ease of use (done)
+[[Phase 8 - Ease of use]]
+- [x] herdr-style spaces/agents sidebar, everything clickable ([[ADR-0020 Spaces and agents sidebar]])
+- [x] Alt+↑/↓ spaces, Alt+←/→ tabs or agents
+- [x] Optional integrations: review, PR checks, tasks, desktop notifications, Obsidian journal
+- [x] `hive update`

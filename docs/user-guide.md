@@ -34,14 +34,25 @@ Arguments after `--` go to the agent: `hive new claude -- --model opus`.
 
 ```text
  ◇ HIVE  CLAUDE — api  ~/src/api (main)                  One terminal. Many agents.
- WORKSPACES              │
- ▾ api                   │   (the attached agent's terminal)
+ SPACES                  │
+                         │   (the focused agent's terminal)
+ ● api                 2 │
+   main                  │
+ · docs                1 │
+   main                  │
+                         │
+ + new            ● menu │
+─────────────────────────│
+ AGENTS                  │
+                         │
 ▌● api                 1 │
    main · claude         │
  ● review              2 │
    wt hive/codex-2 · co… │
  ● #1 api · api · main · running · 2 active        Ctrl+Space leader · then : commands
 ```
+
+The sidebar lists your **spaces** (one per repository, with its branch and agent count) and, below them, the **agents** of the selected space. Click a space to switch to it, an agent to open it, **+ new** to start an agent in the selected space, and **menu** for the command palette.
 
 | Mark | Meaning |
 |---|---|
@@ -85,9 +96,9 @@ A few chords work **without the leader**, even while typing to an agent:
 
 | Keys | Action |
 |---|---|
-| `Alt+1`–`Alt+9` | Jump to a session |
-| `Alt+←` / `Alt+→` | Previous / next session |
-| `Alt+↑` / `Alt+↓` | Previous / next workspace |
+| `Alt+↑` / `Alt+↓` | Previous / next space |
+| `Alt+←` / `Alt+→` | Previous / next tab; with one tab, the previous / next agent in the space |
+| `Alt+1`–`Alt+9` | Jump to an agent of the space |
 
 If an agent needs one of these, rebind or unbind it under `[keys.global]` (see [Keys](#keys)).
 
@@ -108,9 +119,36 @@ open_in = "tab"     # or "split"
 
 `Ctrl+Space N` (or "notes" in the palette) then opens the vault (the nearest folder with `.obsidian/` at or above the session's directory, or one level below the repository root) as a session labelled `notes · <vault>`. Asking again goes back to it.
 
+### More integrations (optional)
+
+All off by default; each adds one command (and key) when enabled:
+
+```toml
+[integrations.review]         # Ctrl+Space G: lazygit, tig or git diff beside the agent
+enabled = true
+command = []                  # e.g. ["lazygit"]; [] picks the first installed
+open_in = "split"             # or "tab"
+
+[integrations.github]         # Ctrl+Space H: `gh pr checks --watch` for the branch
+enabled = true
+
+[integrations.tasks]          # Ctrl+Space T: pick a just/npm/make/cargo task to run beside the agent
+enabled = true
+
+[integrations.desktop_notify] # a desktop notification when an agent finishes or needs input
+enabled = true
+command = ["notify-send", "--app-name=Hive"]
+
+[integrations.obsidian]
+journal = true                # append "claude finished in #3 api (main)" to today's note
+journal_dir = "Daily"         # folder of daily notes in the vault
+```
+
+Each opens as an ordinary session, so it shows in the sidebar and can be closed like any other. Asking again goes back to the one already open.
+
 ### Mouse
 
-Click a pane to focus it, a session in the sidebar to open it, or a workspace name to open its first session. The wheel scrolls the sidebar. In the terminal panel, clicks and the wheel go to agents that use the mouse; full-screen apps without mouse support scroll with the wheel. Hold `Shift` to select text with your terminal as usual. Turn the mouse off with `[terminal] mouse_support = false`.
+Everything in the sidebar and the tab bar is clickable: spaces, agents, **+ new**, **menu** and tabs. Click a pane to focus it. The wheel scrolls the sidebar. In the terminal panel, clicks and the wheel go to agents that use the mouse; full-screen apps without mouse support scroll with the wheel. Hold `Shift` to select text with your terminal as usual. Turn the mouse off with `[terminal] mouse_support = false`.
 
 ### Agent status
 
@@ -177,7 +215,7 @@ add_workspace = ["W", "f2"]
 kill_session = ""          # unbind
 
 [keys.global]              # without the leader; needs Ctrl or Alt
-next_session = "ctrl+alt+right"
+next_tab = "ctrl+alt+right"
 prev_workspace = []        # free Alt+Up for the agent
 ```
 
@@ -198,10 +236,9 @@ Nerd Fonts are never required. Individual colours can be overridden with `#rrggb
 
 ## Upgrading
 
-Install the new binaries, then restart the daemon:
-
 ```bash
-hive daemon stop    # terminates all running sessions
+hive update         # installs the latest release next to the running hive
+hive daemon stop    # the old daemon keeps running until stopped; this ends running sessions
 hive                # starts the new daemon
 ```
 

@@ -161,8 +161,8 @@ impl Command {
     /// Prefix-free chords, active even while typing to an agent.
     fn default_global_keys(self) -> &'static [&'static str] {
         match self {
-            Command::NextSession => &["alt+right"],
-            Command::PrevSession => &["alt+left"],
+            Command::NextTab => &["alt+right"],
+            Command::PrevTab => &["alt+left"],
             Command::NextWorkspace => &["alt+down"],
             Command::PrevWorkspace => &["alt+up"],
             _ => &[],
@@ -596,7 +596,7 @@ mod tests {
         );
         assert_eq!(
             km.global(&ev(KeyCode::Right, KeyModifiers::ALT)),
-            Some(Global::Run(Command::NextSession))
+            Some(Global::Run(Command::NextTab))
         );
         assert_eq!(
             km.global(&ev(KeyCode::Up, KeyModifiers::ALT)),
@@ -610,8 +610,7 @@ mod tests {
             jump_modifier: String::new(),
             ..Keys::default()
         };
-        keys.global
-            .insert("next_session".into(), KeyList::Many(vec![]));
+        keys.global.insert("next_tab".into(), KeyList::Many(vec![]));
         keys.global
             .insert("help".into(), KeyList::One("ctrl+alt+h".into()));
         let km = Keymap::from_config(&keys, &[]).unwrap();

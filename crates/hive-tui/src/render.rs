@@ -1,7 +1,7 @@
 //! Drawing. Reads `App` only; never mutates state.
 
 use hive_core::brand;
-use hive_protocol::{SessionId, SessionInfo, SessionState, WorkspaceId};
+use hive_protocol::{SessionInfo, SessionState, WorkspaceId};
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
@@ -17,6 +17,8 @@ use crate::layout::{Dir, PaneArea};
 use crate::theme::Theme;
 
 pub fn draw(frame: &mut Frame, app: &App, theme: &Theme) {
+    // Clickable areas are recorded as they are drawn.
+    app.sidebar_hits.borrow_mut().clear();
     let [header, body, status] = Layout::vertical([
         Constraint::Length(app.header_rows()),
         Constraint::Min(1),
@@ -33,7 +35,6 @@ pub fn draw(frame: &mut Frame, app: &App, theme: &Theme) {
         draw_sidebar(frame, sidebar, app, theme);
         panel
     } else {
-        app.sidebar_hits.borrow_mut().clear();
         body
     };
     let mut agent_cells = None;
@@ -212,6 +213,7 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         // Tab bar in place of the tagline: each tab named by its focused
         // session, the active one highlighted.
         let mut spans = Vec::new();
+        let mut ranges = Vec::new();
         for (i, t) in app.tabs.iter().enumerate() {
             let name = app
                 .sessions
@@ -223,11 +225,20 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             } else {
                 bar.fg(theme.muted)
             };
-            spans.push(Span::styled(format!(" {}:{name} ", i + 1), style));
+            let label = format!(" {}:{name} ", i + 1);
+            ranges.push((label.chars().count() as u16, i));
+            spans.push(Span::styled(label, style));
             spans.push(Span::styled(" ", bar));
         }
         let width: usize = spans.iter().map(|s| s.content.chars().count()).sum();
         if width + 2 <= room {
+            // Right-aligned, so the bar starts `width` cells from the edge.
+            let mut x = area.x + area.width - width as u16;
+            let mut hits = app.sidebar_hits.borrow_mut();
+            for (w, i) in ranges {
+                hits.push((Rect::new(x, area.y, w, 1), SidebarHit::Tab(i)));
+                x += w + 1;
+            }
             frame.render_widget(
                 Paragraph::new(Line::from(spans)).alignment(Alignment::Right),
                 area,
@@ -292,38 +303,19 @@ fn dir_name(cwd: &str) -> &str {
         .unwrap_or("/")
 }
 
-/// One sidebar entry. Sessions take two rows, everything else one.
-enum Item {
-    Workspace(WorkspaceId),
-    NoSessions,
-    Session { position: usize, id: SessionId },
+/// The branch a space is on: that of a session in its main checkout, else
+/// any of its sessions'.
+fn space_branch(app: &App, w: WorkspaceId) -> Option<String> {
+    let mut in_space = app.sessions.values().filter(|s| s.workspace == w);
+    let main = in_space
+        .clone()
+        .find(|s| s.worktree.is_none() && s.branch.is_some());
+    main.or_else(|| in_space.find(|s| s.branch.is_some()))
+        .and_then(|s| s.branch.clone())
 }
 
-impl Item {
-    fn height(&self) -> u16 {
-        match self {
-            Item::Session { .. } => 2,
-            _ => 1,
-        }
-    }
-}
-
-fn sidebar_items(app: &App) -> Vec<Item> {
-    let mut items = Vec::new();
-    let mut position = 0;
-    for (w, ids) in app.groups() {
-        items.push(Item::Workspace(w));
-        if ids.is_empty() {
-            items.push(Item::NoSessions);
-        }
-        for id in ids {
-            items.push(Item::Session { position, id });
-            position += 1;
-        }
-    }
-    items
-}
-
+/// herdr-style: SPACES (one entry per workspace), the new/menu buttons,
+/// then AGENTS of the selected space. Every entry is clickable.
 fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let border = Block::new()
         .borders(Borders::RIGHT)
@@ -335,127 +327,212 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         }));
     let inner = border.inner(area);
     frame.render_widget(border, area);
-    if inner.height == 0 || inner.width < 4 {
+    if inner.height < 4 || inner.width < 6 {
         return;
     }
-
     let heading = Style::new().fg(theme.muted).add_modifier(Modifier::BOLD);
-    let focused = app.focus == Focus::Sidebar || app.sidebar_keys_active();
+    let browsing = app.focus == Focus::Sidebar || app.sidebar_keys_active();
+    let row = |y| Rect {
+        y,
+        height: 1,
+        ..inner
+    };
+    let width = inner.width as usize;
+    let bottom = inner.y + inner.height;
+    let mut hits = app.sidebar_hits.borrow_mut();
+
+    // SPACES: up to about half the height, scrolled to the selected one.
+    let space = app.shown_space();
+    let groups = app.groups();
+    frame.render_widget(
+        Paragraph::new(Span::styled(" SPACES", heading)),
+        row(inner.y),
+    );
+    let room = ((inner.height.saturating_sub(6)) / 2).max(2) / 2;
+    let selected = groups
+        .iter()
+        .position(|(w, _)| Some(*w) == space)
+        .unwrap_or(0);
+    let first = selected.saturating_sub(room.saturating_sub(1) as usize);
+    let mut y = inner.y + 2;
+    for (w, ids) in groups.iter().skip(first).take(room as usize) {
+        let chosen = Some(*w) == space;
+        let base = if chosen {
+            theme.cursor_row()
+        } else {
+            Style::new()
+        };
+        let (dot, color) = match app.workspace_activity(*w).filter(|a| *a != Activity::Idle) {
+            Some(a) => activity_dot(a, theme),
+            None if chosen => (theme.glyphs.running, theme.accent),
+            None => ("·", theme.muted),
+        };
+        let name_style = if chosen {
+            base.fg(theme.text).add_modifier(Modifier::BOLD)
+        } else {
+            base.fg(theme.text)
+        };
+        let count = if ids.is_empty() {
+            String::new()
+        } else {
+            format!("{} ", ids.len())
+        };
+        let name = truncate(
+            theme,
+            app.workspace_name(*w),
+            width.saturating_sub(4 + count.len()),
+        );
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(format!(" {dot} "), base.fg(color)),
+                Span::styled(name, name_style),
+            ]))
+            .style(base),
+            row(y),
+        );
+        frame.render_widget(
+            Paragraph::new(Span::styled(count, base.fg(theme.muted))).alignment(Alignment::Right),
+            row(y),
+        );
+        let branch = space_branch(app, *w).unwrap_or_default();
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                format!("   {}", truncate(theme, &branch, width.saturating_sub(3))),
+                base.fg(theme.muted),
+            ))
+            .style(base),
+            row(y + 1),
+        );
+        hits.push((
+            Rect {
+                height: 2,
+                ..row(y)
+            },
+            SidebarHit::Workspace(*w),
+        ));
+        y += 2;
+    }
+    if groups.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                "   no spaces yet",
+                Style::new().fg(theme.muted),
+            )),
+            row(y),
+        );
+        y += 1;
+    }
+
+    // Buttons, then a rule.
+    y += 1;
+    if y + 3 > bottom {
+        return;
+    }
+    let half = inner.width / 2;
+    let button = Style::new().fg(theme.accent);
+    frame.render_widget(
+        Paragraph::new(Span::styled(" + new", button)),
+        Rect {
+            width: half,
+            ..row(y)
+        },
+    );
     frame.render_widget(
         Paragraph::new(Span::styled(
-            " WORKSPACES",
-            if focused {
+            format!("{} menu ", theme.glyphs.running),
+            button,
+        ))
+        .alignment(Alignment::Right),
+        row(y),
+    );
+    hits.push((
+        Rect {
+            width: half,
+            ..row(y)
+        },
+        SidebarHit::New,
+    ));
+    hits.push((
+        Rect {
+            x: inner.x + half,
+            width: inner.width - half,
+            ..row(y)
+        },
+        SidebarHit::Menu,
+    ));
+    let rule = theme.glyphs.border.horizontal_top.repeat(width);
+    frame.render_widget(
+        Paragraph::new(Span::styled(rule, Style::new().fg(theme.surface))),
+        row(y + 1),
+    );
+
+    // AGENTS of the selected space.
+    let top = y + 2;
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            " AGENTS",
+            if browsing {
                 heading.fg(theme.accent)
             } else {
                 heading
             },
         )),
-        Rect { height: 1, ..inner },
+        row(top),
     );
-
-    let items = sidebar_items(app);
-    let top = inner.y + 2;
-    let bottom = inner.y + inner.height;
-    let available = bottom.saturating_sub(top);
-    // Scroll just enough that the cursor's session is visible.
-    let cursor_idx = items
-        .iter()
-        .position(|i| matches!(i, Item::Session { id, .. } if Some(*id) == app.cursor))
-        .unwrap_or(0);
-    let mut start = 0;
-    while start < cursor_idx
-        && items[start..=cursor_idx]
-            .iter()
-            .map(Item::height)
-            .sum::<u16>()
-            > available
-    {
-        start += 1;
+    let ids = app.space_sessions();
+    let mut y = top + 2;
+    if ids.is_empty() {
+        if y < bottom {
+            frame.render_widget(
+                Paragraph::new(Span::styled(
+                    "   none yet: + new",
+                    Style::new().fg(theme.muted),
+                )),
+                row(y),
+            );
+        }
+        return;
     }
-
+    let available = bottom.saturating_sub(y) / 2;
+    let cursor_idx = ids
+        .iter()
+        .position(|id| Some(*id) == app.cursor)
+        .unwrap_or(0);
+    let start = (cursor_idx + 1).saturating_sub(available.max(1) as usize);
     let current = app.focused();
     let shown = app.active_tab().map(|t| t.root.panes()).unwrap_or_default();
-    let current_ws = app.current().map(|s| s.workspace);
-    let width = inner.width as usize;
-    let mut hits = app.sidebar_hits.borrow_mut();
-    hits.clear();
-    let mut y = top;
-    for item in &items[start..] {
-        if y + item.height() > bottom {
+    for (position, id) in ids.iter().enumerate().skip(start) {
+        if y + 2 > bottom {
             break;
         }
-        match item {
-            Item::Workspace(w) => hits.push((y, SidebarHit::Workspace(*w))),
-            Item::Session { id, .. } => {
-                hits.push((y, SidebarHit::Session(*id)));
-                hits.push((y + 1, SidebarHit::Session(*id)));
-            }
-            Item::NoSessions => {}
-        }
-        let row = |y| Rect {
-            y,
-            height: 1,
-            ..inner
+        let Some(s) = app.sessions.get(id) else {
+            continue;
         };
-        match item {
-            Item::Workspace(w) => {
-                let style = if current_ws == Some(*w) {
-                    heading.fg(theme.text)
-                } else {
-                    heading
-                };
-                let name = truncate(theme, app.workspace_name(*w), width.saturating_sub(6));
-                frame.render_widget(
-                    Paragraph::new(Line::from(vec![
-                        Span::styled(
-                            format!(" {} ", theme.glyphs.group),
-                            Style::new().fg(theme.accent_dim),
-                        ),
-                        Span::styled(name, style),
-                    ])),
-                    row(y),
-                );
-                // Idle is the norm; only flag what deserves a look.
-                if let Some(a) = app.workspace_activity(*w).filter(|a| *a != Activity::Idle) {
-                    let (glyph, color) = activity_dot(a, theme);
-                    frame.render_widget(
-                        Paragraph::new(Span::styled(format!("{glyph} "), Style::new().fg(color)))
-                            .alignment(Alignment::Right),
-                        row(y),
-                    );
-                }
-            }
-            Item::NoSessions => {
-                frame.render_widget(
-                    Paragraph::new(Span::styled("   no sessions", Style::new().fg(theme.muted))),
-                    row(y),
-                );
-            }
-            Item::Session { position, id } => {
-                if let Some(s) = app.sessions.get(id) {
-                    let is_cursor = focused && app.cursor == Some(*id);
-                    let shared = !app.sharing_dir(*id).is_empty();
-                    draw_sidebar_session(
-                        frame,
-                        [row(y), row(y + 1)],
-                        app,
-                        s,
-                        *position,
-                        if current == Some(*id) {
-                            Shown::Focused
-                        } else if shown.contains(id) {
-                            Shown::Pane
-                        } else {
-                            Shown::No
-                        },
-                        is_cursor,
-                        shared,
-                        theme,
-                    );
-                }
-            }
-        }
-        y += item.height();
+        hits.push((
+            Rect {
+                height: 2,
+                ..row(y)
+            },
+            SidebarHit::Session(*id),
+        ));
+        draw_sidebar_session(
+            frame,
+            [row(y), row(y + 1)],
+            app,
+            s,
+            position,
+            if current == Some(*id) {
+                Shown::Focused
+            } else if shown.contains(id) {
+                Shown::Pane
+            } else {
+                Shown::No
+            },
+            browsing && app.cursor == Some(*id),
+            !app.sharing_dir(*id).is_empty(),
+            theme,
+        );
+        y += 2;
     }
 }
 
@@ -1291,16 +1368,21 @@ mod tests {
             snapshot: b"agent output".to_vec(),
             controller: true,
         });
-        let lines = rendered(&app, 80, 12);
-        assert!(lines[1].contains("WORKSPACES"));
-        assert!(lines[3].contains("▾ proj"), "{:?}", lines[3]);
-        assert!(lines[4].contains("● claude") && lines[4].contains('1'));
+        let lines = rendered(&app, 80, 18);
+        assert!(lines[1].contains("SPACES"));
+        assert!(
+            lines[3].contains("● proj") && lines[3].contains('3'),
+            "{:?}",
+            lines[3]
+        );
+        assert!(lines[6].contains("+ new") && lines[6].contains("menu"));
+        assert!(lines[8].contains("AGENTS"));
+        assert!(lines[10].contains("● claude") && lines[10].contains('1'));
         // Both running sessions use /home/u/proj: flagged as sharing.
-        assert!(lines[4].contains(" !"), "{:?}", lines[4]);
-        assert!(lines[5].contains("proj"));
-        assert!(lines[6].starts_with("▌● api"), "{:?}", lines[6]);
-        assert!(lines[7].contains("proj · claude"));
-        assert!(lines[8].contains("○ old") && !lines[8].contains('!'));
+        assert!(lines[10].contains(" !"), "{:?}", lines[10]);
+        assert!(lines[12].starts_with("▌● api"), "{:?}", lines[12]);
+        assert!(lines[13].contains("proj · claude"));
+        assert!(lines[14].contains("○ old") && !lines[14].contains('!'));
         // The agent's screen starts right of the sidebar.
         let panel: String = lines[1]
             .chars()
@@ -1312,7 +1394,7 @@ mod tests {
 
     #[test]
     fn sidebar_groups_by_workspace_with_branches_and_worktrees() {
-        let mut app = App::new(Config::default(), Start::Attach(2), (80, 14));
+        let mut app = App::new(Config::default(), Start::Attach(2), (80, 24));
         app.on_connect();
         app.on_server(ServerMessage::WorkspaceList(vec![
             workspace(1, "web"),
@@ -1333,25 +1415,36 @@ mod tests {
         app.on_server(ServerMessage::SessionList(vec![main, wt, late]));
         assert_eq!(app.order(), vec![1, 3, 2]);
 
-        let lines = rendered(&app, 80, 14);
-        assert!(lines[3].contains("▾ web"));
-        assert!(lines[4].contains("● claude") && lines[4].contains('1'));
-        assert!(
-            lines[5].contains("main"),
-            "branch replaces the directory: {:?}",
-            lines[5]
-        );
-        assert!(lines[6].contains("● later") && lines[6].contains('2'));
-        assert!(lines[8].contains("▾ api"));
-        assert!(lines[9].contains("● codex") && lines[9].contains('3'));
-        assert!(lines[10].contains("wt hive/codex-2"), "{:?}", lines[10]);
-        assert!(lines[11].contains("▾ empty"));
-        assert!(lines[12].contains("no sessions"));
+        // Spaces with their branch (the main checkout's) and agent count;
+        // the agents listed are the selected space's.
+        let lines = rendered(&app, 80, 24);
+        assert!(lines[3].contains("· web") && lines[3].contains('2'));
+        assert!(lines[4].contains("main"), "{:?}", lines[4]);
+        assert!(lines[5].contains("● api"), "selected: {:?}", lines[5]);
+        assert!(lines[6].contains("hive/codex-2"));
+        assert!(lines[7].contains("· empty"));
+        assert!(lines[14].contains("● codex") && lines[14].contains('1'));
+        assert!(lines[15].contains("wt hive/codex-2"), "{:?}", lines[15]);
+        assert!(!lines.iter().any(|l| l.contains("later")), "other space");
+
+        // Clicking a space lists its agents, numbered from 1 for Alt+digit.
+        let hit = app
+            .sidebar_hits
+            .borrow()
+            .iter()
+            .find(|(_, h)| *h == SidebarHit::Workspace(1))
+            .map(|(r, _)| *r)
+            .unwrap();
+        assert_eq!(hit.y, 3);
+        app.cursor = Some(1);
+        assert_eq!(app.space_sessions(), vec![1, 3]);
+        let lines = rendered(&app, 80, 24);
+        assert!(lines[16].contains("● later") && lines[16].contains('2'));
     }
 
     #[test]
     fn ascii_glyphs_and_mono_render_without_unicode_or_colour() {
-        let mut app = App::new(Config::default(), Start::Attach(1), (80, 10));
+        let mut app = App::new(Config::default(), Start::Attach(1), (80, 16));
         app.on_connect();
         app.on_server(ServerMessage::WorkspaceList(vec![workspace(1, "proj")]));
         app.on_server(ServerMessage::SessionList(vec![session(
@@ -1373,7 +1466,7 @@ mod tests {
             &crate::theme::Env::default(),
         )
         .unwrap();
-        let mut term = Terminal::new(TestBackend::new(80, 10)).unwrap();
+        let mut term = Terminal::new(TestBackend::new(80, 16)).unwrap();
         term.draw(|f| draw(f, &app, &theme)).unwrap();
         let buf = term.backend().buffer();
         let text: String = buf.content().iter().map(|c| c.symbol()).collect();

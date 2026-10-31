@@ -36,6 +36,31 @@ bell = true
 enabled = false
 agent = ""          # agent to open it with; "" = $VISUAL, $EDITOR, else vi
 open_in = "tab"     # or "split"
+journal = false     # append a line to today's note when an agent finishes
+journal_dir = ""    # folder of daily notes in the vault; "" = vault root
+
+[integrations.review]
+# Leader G: review changes in the focused session's directory.
+enabled = false
+command = []        # [] = lazygit, else tig, else git diff
+open_in = "split"
+
+[integrations.github]
+# Leader H: pull request checks for the session's branch.
+enabled = false
+command = []        # [] = ["gh", "pr", "checks", "--watch"]
+open_in = "split"
+
+[integrations.tasks]
+# Leader T: pick a just/package.json/make/cargo task to run beside the agent.
+enabled = false
+open_in = "split"
+
+[integrations.desktop_notify]
+# A desktop notification when a session you aren't viewing needs input or
+# finishes. The title and body are appended to the command.
+enabled = false
+command = ["notify-send", "--app-name=Hive"]
 
 [worktrees]
 # Where `hive new -w` creates git worktrees.
@@ -72,7 +97,7 @@ jump_modifier = "alt"
 # next_workspace, prev_workspace, sidebar, toggle_sidebar, rename_session,
 # kill_session, take_control, detach, help, settings, split_right, split_down,
 # focus_next_pane, zoom, close_pane, new_tab, next_tab, prev_tab, close_tab,
-# notes (only with [integrations.obsidian] enabled)
+# notes, review, pull_request, run_task (only with their [integrations.*] enabled)
 palette = [":", "P"]
 new_session = "c"
 next_session = ["n", "j", "down"]
@@ -82,8 +107,8 @@ toggle_sidebar = "b"
 [keys.global]
 # Prefix-free keys, active even while typing to an agent (need Ctrl or Alt).
 # Same command names. [] frees a key for the agent.
-next_session = "alt+right"
-prev_session = "alt+left"
+next_tab = "alt+right"        # with one tab: the next agent in the space
+prev_tab = "alt+left"
 next_workspace = "alt+down"
 prev_workspace = "alt+up"
 

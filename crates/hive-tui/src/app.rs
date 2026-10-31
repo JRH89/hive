@@ -187,6 +187,12 @@ fn agent_status(s: &SessionInfo) -> Option<AgentStatus> {
 pub enum SidebarHit {
     Session(SessionId),
     Workspace(WorkspaceId),
+    /// The "new" button: new session in the selected space.
+    New,
+    /// The "menu" button: the command palette.
+    Menu,
+    /// A tab in the header's tab bar.
+    Tab(usize),
 }
 
 /// Where the next session created from the UI goes.
@@ -259,7 +265,10 @@ pub struct App {
     working_since: BTreeMap<SessionId, std::time::Instant>,
     /// Screen rows of sidebar entries as last drawn (render fills this), so
     /// clicks hit what the user saw.
-    pub sidebar_hits: RefCell<Vec<(u16, SidebarHit)>>,
+    pub sidebar_hits: RefCell<Vec<(Rect, SidebarHit)>>,
+    /// The space (workspace) whose agents the sidebar lists. Follows the
+    /// focused session; a click can pick an empty space.
+    pub space: Option<WorkspaceId>,
 }
 
 /// Result of a key in a one-line text prompt.
@@ -434,6 +443,7 @@ impl App {
             effects: Vec::new(),
             working_since: BTreeMap::new(),
             sidebar_hits: RefCell::new(Vec::new()),
+            space: None,
         };
         app.set_terminal_size(terminal);
         if let Some(e) = key_error {
@@ -566,6 +576,7 @@ impl App {
             self.tab = self.tabs.len() - 1;
         }
         self.cursor = Some(id);
+        self.space = self.sessions.get(&id).map(|s| s.workspace);
         self.done.remove(&id);
         self.sync_panes(before)
     }
@@ -657,6 +668,32 @@ impl App {
     }
 
     /// Session ids in sidebar order: grouped by workspace, then creation.
+    /// The space the sidebar lists agents for: the sidebar cursor's while
+    /// browsing it, else the chosen one, else the focused session's.
+    pub fn shown_space(&self) -> Option<WorkspaceId> {
+        let of = |id: Option<SessionId>| {
+            id.and_then(|id| self.sessions.get(&id))
+                .map(|s| s.workspace)
+        };
+        let browsing = self.focus == Focus::Sidebar || self.sidebar_keys_active();
+        browsing
+            .then(|| of(self.cursor))
+            .flatten()
+            .or(self.space.filter(|w| self.workspaces.contains_key(w)))
+            .or_else(|| of(self.focused()))
+            .or_else(|| self.groups().first().map(|(w, _)| *w))
+    }
+
+    /// The agents listed under the shown space, numbered 1-9 for jumps.
+    pub fn space_sessions(&self) -> Vec<SessionId> {
+        let space = self.shown_space();
+        self.groups()
+            .into_iter()
+            .find(|(w, _)| Some(*w) == space)
+            .map(|(_, ids)| ids)
+            .unwrap_or_default()
+    }
+
     pub fn order(&self) -> Vec<SessionId> {
         self.groups().into_iter().flat_map(|(_, ids)| ids).collect()
     }
@@ -775,15 +812,19 @@ impl App {
             id.and_then(|id| self.sessions.get(&id))
                 .map(|s| s.workspace)
         };
-        of(self.focused()).or_else(|| of(self.cursor)).or_else(|| {
-            let cwd = std::env::current_dir().ok()?;
-            let key = hive_workspace::workspace_key(&cwd);
-            let roots = self
-                .workspaces
-                .values()
-                .map(|w| (w.id, std::path::Path::new(&w.root)));
-            hive_workspace::best_match(roots, &key)
-        })
+        self.space
+            .filter(|w| self.workspaces.contains_key(w))
+            .or_else(|| of(self.focused()))
+            .or_else(|| of(self.cursor))
+            .or_else(|| {
+                let cwd = std::env::current_dir().ok()?;
+                let key = hive_workspace::workspace_key(&cwd);
+                let roots = self
+                    .workspaces
+                    .values()
+                    .map(|w| (w.id, std::path::Path::new(&w.root)));
+                hive_workspace::best_match(roots, &key)
+            })
     }
 
     /// Other running sessions in exactly the same directory (not isolated
@@ -1127,22 +1168,30 @@ impl App {
             return Vec::new();
         }
         let (px, py) = self.panel_origin();
+        let at = ratatui::layout::Position::new(m.column, m.row);
+        let hit = self
+            .sidebar_hits
+            .borrow()
+            .iter()
+            .find(|(r, _)| r.contains(at))
+            .map(|(_, h)| *h);
+        let click = matches!(m.kind, MouseEventKind::Down(MouseButton::Left));
+        if let (true, Some(SidebarHit::Tab(i))) = (click, hit) {
+            return self.select_tab(i);
+        }
         if self.sidebar_visible && m.column < px && m.row >= py {
-            let hit = self
-                .sidebar_hits
-                .borrow()
-                .iter()
-                .find(|(y, _)| *y == m.row)
-                .map(|(_, h)| *h);
             return match (m.kind, hit) {
                 (MouseEventKind::Down(MouseButton::Left), Some(SidebarHit::Session(id))) => {
                     self.switch_to(id)
                 }
                 (MouseEventKind::Down(MouseButton::Left), Some(SidebarHit::Workspace(w))) => {
-                    match self.groups().into_iter().find(|(g, _)| *g == w) {
-                        Some((_, ids)) if !ids.is_empty() => self.switch_to(ids[0]),
-                        _ => Vec::new(),
-                    }
+                    self.open_space(w)
+                }
+                (MouseEventKind::Down(MouseButton::Left), Some(SidebarHit::New)) => {
+                    self.run(Command::NewSession)
+                }
+                (MouseEventKind::Down(MouseButton::Left), Some(SidebarHit::Menu)) => {
+                    self.run(Command::Palette)
                 }
                 (MouseEventKind::ScrollDown, _) => {
                     self.move_cursor(1);
@@ -1155,7 +1204,6 @@ impl App {
                 _ => Vec::new(),
             };
         }
-        let at = ratatui::layout::Position::new(m.column, m.row);
         let Some(pane) = self
             .pane_areas()
             .0
@@ -1369,10 +1417,14 @@ impl App {
                 self.tab =
                     (self.tab as isize + delta).rem_euclid(self.tabs.len() as isize) as usize;
                 self.cursor = self.focused();
+                self.space = self.current().map(|s| s.workspace);
                 self.focus = Focus::Terminal;
                 return self.sync_panes(before);
             }
-            Command::NextTab | Command::PrevTab => {}
+            Command::NextTab | Command::PrevTab => {
+                let delta = if cmd == Command::NextTab { 1 } else { -1 };
+                return self.switch_in_space(delta);
+            }
             Command::FocusNextPane => {
                 if let Some(t) = self.tabs.get_mut(self.tab) {
                     t.cycle_focus(1);
@@ -1687,33 +1739,80 @@ impl App {
         self.sync_panes(before)
     }
 
+    /// Selects a space: shows its focused-last agent, or just lists it
+    /// (empty, ready for "new").
+    fn open_space(&mut self, w: WorkspaceId) -> Vec<ClientMessage> {
+        let ids = self
+            .groups()
+            .into_iter()
+            .find(|(g, _)| *g == w)
+            .map(|(_, ids)| ids)
+            .unwrap_or_default();
+        match ids.into_iter().find(|&id| !self.is_lost(id)) {
+            Some(id) => self.switch_to(id),
+            None => {
+                self.space = Some(w);
+                // The sidebar shows the cursor's space while browsing.
+                self.cursor = None;
+                self.focus = Focus::Terminal;
+                let name = self.workspace_name(w).to_string();
+                let new = self.keymap.hint(Command::NewSession).unwrap_or_default();
+                self.set_status(
+                    Tone::Info,
+                    format!("No agents in {name} yet. Click new (or leader {new}) to start one."),
+                );
+                Vec::new()
+            }
+        }
+    }
+
+    fn select_tab(&mut self, i: usize) -> Vec<ClientMessage> {
+        if i >= self.tabs.len() || i == self.tab {
+            return Vec::new();
+        }
+        let before = self.tab_sessions();
+        self.tab = i;
+        self.cursor = self.focused();
+        self.space = self.current().map(|s| s.workspace);
+        self.focus = Focus::Terminal;
+        self.sync_panes(before)
+    }
+
     fn switch_nth(&mut self, n: usize) -> Vec<ClientMessage> {
-        match self.order().get(n) {
+        match self.space_sessions().get(n) {
             Some(&id) => self.switch_to(id),
             None => Vec::new(),
         }
     }
 
-    /// First live session of the next/previous workspace that has one,
-    /// wrapping around.
+    /// Selects the next/previous space (empty ones too), wrapping around.
     fn switch_workspace(&mut self, delta: isize) -> Vec<ClientMessage> {
-        let groups: Vec<SessionId> = self
-            .groups()
-            .into_iter()
-            .filter_map(|(_, ids)| ids.into_iter().find(|&id| !self.is_lost(id)))
-            .collect();
-        if groups.is_empty() {
+        let spaces: Vec<WorkspaceId> = self.groups().into_iter().map(|(w, _)| w).collect();
+        if spaces.is_empty() {
             return Vec::new();
         }
-        let current_ws = self.current().map(|s| s.workspace);
         let idx = self
-            .groups()
-            .into_iter()
-            .filter(|(_, ids)| ids.iter().any(|&id| !self.is_lost(id)))
-            .position(|(w, _)| Some(w) == current_ws)
+            .shown_space()
+            .and_then(|w| spaces.iter().position(|&s| s == w))
             .map_or(0, |i| i as isize + delta);
-        let next = idx.rem_euclid(groups.len() as isize) as usize;
-        self.switch_to(groups[next])
+        self.open_space(spaces[idx.rem_euclid(spaces.len() as isize) as usize])
+    }
+
+    /// Next/previous agent of the shown space, wrapping around.
+    fn switch_in_space(&mut self, delta: isize) -> Vec<ClientMessage> {
+        let ids: Vec<SessionId> = self
+            .space_sessions()
+            .into_iter()
+            .filter(|&id| !self.is_lost(id) || Some(id) == self.focused())
+            .collect();
+        if ids.is_empty() {
+            return Vec::new();
+        }
+        let idx = self
+            .focused()
+            .and_then(|f| ids.iter().position(|&id| id == f))
+            .map_or(0, |i| i as isize + delta);
+        self.switch_to(ids[idx.rem_euclid(ids.len() as isize) as usize])
     }
 
     /// Next/previous attachable session, wrapping around.
@@ -2336,7 +2435,7 @@ mod tests {
         let (px, py) = app.panel_origin();
         app.sidebar_hits
             .borrow_mut()
-            .extend([(3, SidebarHit::Session(2)), (4, SidebarHit::Session(2))]);
+            .extend([(Rect::new(0, 3, 26, 2), SidebarHit::Session(2))]);
         let click = MouseEventKind::Down(MouseButton::Left);
         assert_eq!(
             attaches(app.on_terminal_event(mouse(click, 2, 4))),
@@ -2792,6 +2891,81 @@ mod tests {
         )));
         assert!(plain.done.contains(&2));
         assert!(plain.effects.is_empty());
+    }
+
+    #[test]
+    fn spaces_tabs_and_buttons_are_clickable_and_alt_arrows_move_between_them() {
+        let mut app = app_with_workspaces();
+        let mut three = info(3, SessionState::Running);
+        three.workspace = 2;
+        app.on_server(ServerMessage::SessionUpdated(three));
+        let press = |x, y| mouse(MouseEventKind::Down(MouseButton::Left), x, y);
+        let set_hits = |app: &App, hits: Vec<(Rect, SidebarHit)>| {
+            *app.sidebar_hits.borrow_mut() = hits;
+        };
+        let spaces: Vec<WorkspaceId> = app.groups().into_iter().map(|(w, _)| w).collect();
+        assert!(spaces.len() >= 2);
+        let other = spaces[1];
+        set_hits(
+            &app,
+            vec![
+                (Rect::new(0, 3, 26, 2), SidebarHit::Workspace(other)),
+                (Rect::new(0, 10, 13, 1), SidebarHit::New),
+                (Rect::new(13, 10, 13, 1), SidebarHit::Menu),
+            ],
+        );
+        app.on_terminal_event(press(2, 4));
+        assert_eq!(app.shown_space(), Some(other));
+        assert_eq!(app.current().map(|s| s.workspace), Some(other));
+
+        app.on_terminal_event(press(15, 10));
+        assert!(matches!(
+            app.mode,
+            Mode::Palette {
+                scope: Scope::All,
+                ..
+            }
+        ));
+        app.on_terminal_event(key(KeyCode::Esc, KeyModifiers::NONE));
+        app.on_terminal_event(press(2, 10));
+        assert!(matches!(app.mode, Mode::NewSession { .. }));
+        app.on_terminal_event(key(KeyCode::Esc, KeyModifiers::NONE));
+
+        // Alt+Up/Down walk the spaces, wrapping.
+        let alt = |code| key(code, KeyModifiers::ALT);
+        app.on_terminal_event(alt(KeyCode::Down));
+        assert_eq!(app.shown_space(), Some(spaces[2 % spaces.len()]));
+        app.on_terminal_event(alt(KeyCode::Up));
+        assert_eq!(app.shown_space(), Some(other));
+
+        assert_eq!(app.focused(), Some(3));
+
+        // With one tab, Alt+Right is the next agent of this space.
+        app.on_terminal_event(Event::Key(KeyEvent::new(
+            KeyCode::Char('1'),
+            KeyModifiers::ALT,
+        )));
+        assert_eq!(app.focused(), Some(3), "Alt+1 is this space's first agent");
+        let alt_ = |code| key(code, KeyModifiers::ALT);
+        app.on_terminal_event(alt_(KeyCode::Up));
+        assert_eq!(app.space_sessions(), vec![1, 2]);
+        app.on_terminal_event(alt_(KeyCode::Right));
+        assert_eq!(app.focused(), Some(2));
+        app.on_terminal_event(alt_(KeyCode::Right));
+        assert_eq!(app.focused(), Some(1), "wraps within the space");
+
+        // A tab in the header's tab bar.
+        launch_via(&mut app, 't');
+        app.on_server(ServerMessage::SessionCreated(info(
+            9,
+            SessionState::Running,
+        )));
+        assert_eq!(app.tab, 1);
+        set_hits(&app, vec![(Rect::new(80, 0, 9, 1), SidebarHit::Tab(0))]);
+        app.on_terminal_event(press(82, 0));
+        assert_eq!(app.tab, 0);
+        app.on_terminal_event(alt(KeyCode::Right));
+        assert_eq!(app.tab, 1, "with tabs, Alt+Right moves between them");
     }
 
     #[test]

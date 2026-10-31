@@ -147,6 +147,17 @@ enum Command {
     },
     /// Check the installation: paths, config, daemon, terminal and agents
     Doctor,
+    /// Install the latest release over this one (Linux binaries)
+    #[command(
+        after_help = "Downloads the official installer from GitHub, which verifies \
+        the SHA-256 checksum, and installs next to the running hive. A running \
+        daemon keeps the old version until `hive daemon stop`."
+    )]
+    Update {
+        /// Release tag to install instead of the latest, e.g. v0.2.0
+        #[arg(long = "tag")]
+        tag: Option<String>,
+    },
     /// Manage the background daemon
     Daemon {
         #[command(subcommand)]
@@ -240,10 +251,57 @@ fn init_logging(paths: &Paths) {
         .init();
 }
 
+const INSTALLER: &str = "https://github.com/jrh89/hive/releases/latest/download/install.sh";
+
+/// Runs the release installer into the directory holding this binary.
+fn update(tag: Option<&str>) -> anyhow::Result<()> {
+    use std::process::Command as Cmd;
+    let exe = std::env::current_exe().context("cannot locate the running hive")?;
+    let dir = exe
+        .parent()
+        .context("cannot locate the running hive's directory")?
+        .to_path_buf();
+    let tmp = tempfile_path();
+    let fetched = if Cmd::new("curl").arg("--version").output().is_ok() {
+        Cmd::new("curl")
+            .args(["-fsSL", INSTALLER, "-o"])
+            .arg(&tmp)
+            .status()
+    } else {
+        Cmd::new("wget")
+            .args(["-q", INSTALLER, "-O"])
+            .arg(&tmp)
+            .status()
+    };
+    match fetched {
+        Ok(st) if st.success() => {}
+        Ok(_) => bail!("could not download {INSTALLER}"),
+        Err(e) => bail!("need curl or wget to update: {e}"),
+    }
+    let mut install = Cmd::new("sh");
+    install.arg(&tmp).env("HIVE_INSTALL_DIR", &dir);
+    if let Some(tag) = tag {
+        install.env("HIVE_VERSION", tag);
+    }
+    let status = install.status();
+    let _ = std::fs::remove_file(&tmp);
+    if !status.context("could not run sh")?.success() {
+        bail!("the installer failed (see above)");
+    }
+    Ok(())
+}
+
+fn tempfile_path() -> PathBuf {
+    std::env::temp_dir().join(format!("hive-install-{}.sh", std::process::id()))
+}
+
 async fn run(cli: Cli, paths: Paths) -> anyhow::Result<()> {
     if matches!(cli.command, Some(Command::Doctor)) {
         // Runs before loading the config so it can report a broken one.
         return doctor(&paths).await;
+    }
+    if let Some(Command::Update { tag }) = &cli.command {
+        return update(tag.as_deref());
     }
     let config = Config::load(&paths.config_file)?;
     let connect = |auto_start: bool| {
@@ -383,7 +441,9 @@ async fn run(cli: Cli, paths: Paths) -> anyhow::Result<()> {
             let mut client = connect(false).await.or_else(not_running)?;
             request(&mut client, ClientMessage::ReleaseAgent { session, agent }).await
         }
-        Some(Command::Doctor) => unreachable!("handled before loading the config"),
+        Some(Command::Doctor | Command::Update { .. }) => {
+            unreachable!("handled before loading the config")
+        }
         Some(Command::Daemon { action }) => daemon(action, &paths, connect).await,
     }
 }
