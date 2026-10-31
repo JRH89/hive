@@ -39,6 +39,7 @@ Knowledge base for building **Hive**, a terminal multiplexer for AI coding agent
 - [[ADR-0019 Optional integrations, off and invisible by default]]
 - [[ADR-0020 Spaces and agents sidebar]]
 - [[ADR-0021 Windows named pipe with token auth]]
+- [[ADR-0022 Terminal first]]
 
 ## Ongoing
 - [[Website Design]]: approved website direction, branding, scope and acceptance

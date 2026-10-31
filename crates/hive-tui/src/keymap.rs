@@ -15,6 +15,7 @@ pub enum Command {
     Palette,
     SearchSessions,
     NewSession,
+    NewAgent,
     NewWorktreeSession,
     Workspaces,
     AddWorkspace,
@@ -47,10 +48,11 @@ pub enum Command {
 }
 
 impl Command {
-    pub const ALL: [Command; 32] = [
+    pub const ALL: [Command; 33] = [
         Command::Palette,
         Command::SearchSessions,
         Command::NewSession,
+        Command::NewAgent,
         Command::NewWorktreeSession,
         Command::Workspaces,
         Command::AddWorkspace,
@@ -88,6 +90,7 @@ impl Command {
             Command::Palette => "palette",
             Command::SearchSessions => "search_sessions",
             Command::NewSession => "new_session",
+            Command::NewAgent => "new_agent",
             Command::NewWorktreeSession => "new_worktree_session",
             Command::Workspaces => "workspaces",
             Command::AddWorkspace => "add_workspace",
@@ -125,7 +128,8 @@ impl Command {
         match self {
             Command::Palette => "Command palette",
             Command::SearchSessions => "Search sessions",
-            Command::NewSession => "New session",
+            Command::NewSession => "New terminal",
+            Command::NewAgent => "New agent (pick one)",
             Command::NewWorktreeSession => "New session in its own worktree",
             Command::Workspaces => "Switch workspace",
             Command::AddWorkspace => "Add workspace",
@@ -136,8 +140,8 @@ impl Command {
             Command::PrevWorkspace => "Previous workspace",
             Command::Sidebar => "Focus the sidebar",
             Command::ToggleSidebar => "Show or hide the sidebar",
-            Command::SplitRight => "Split: new session on the right",
-            Command::SplitDown => "Split: new session below",
+            Command::SplitRight => "Split: terminal on the right",
+            Command::SplitDown => "Split: terminal below",
             Command::FocusNextPane => "Focus the next pane",
             Command::Zoom => "Zoom the pane (toggle)",
             Command::ClosePane => "Close the pane (session keeps running)",
@@ -175,6 +179,7 @@ impl Command {
             Command::Palette => &[":", "P"],
             Command::SearchSessions => &["/"],
             Command::NewSession => &["c"],
+            Command::NewAgent => &["A"],
             Command::Workspaces => &["w"],
             Command::NextSession => &["n", "j", "down"],
             Command::PrevSession => &["p", "k", "up"],

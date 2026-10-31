@@ -72,13 +72,14 @@ Everything you type goes to the agent, except the **leader** key (`Ctrl+Space`) 
 |---|---|
 | `:` or `P` | Command palette: search every command, session and workspace |
 | `/` | Search sessions by name, agent, workspace or branch |
-| `c` | New session (pick an agent; `w` in the picker toggles its own worktree) |
+| `c` | New terminal in the focused pane's directory (start an agent by typing it, e.g. `claude`; Hive detects it) |
+| `A` | New agent: pick one from a list (`w` in the picker toggles its own worktree) |
 | `C` | New session in its own git worktree |
 | `n` / `p` (or `j` / `k`) | Next / previous session |
 | `1`–`9` | Jump to a session |
 | `s` | Focus the sidebar (`↑↓`, `enter`, `n`, `x`, `esc`) |
 | `b` | Show or hide the sidebar |
-| `v` or `%` / `-` or `"` | Split: new session to the right / below |
+| `v` or `%` / `-` or `"` | Split: new terminal to the right / below |
 | `o` | Focus the next pane (or click it) |
 | `z` | Zoom the focused pane; again to restore |
 | `X` | Close the pane (the session keeps running) |
@@ -104,7 +105,7 @@ If an agent needs one of these, rebind or unbind it under `[keys.global]` (see [
 
 ### Panes and tabs
 
-Split the panel to watch several agents at once. Each pane is its own terminal at its own size, with a title row showing the session and its status. Keys go to the focused pane. Switching to a session that is already in a pane focuses that pane (and its tab); otherwise the session replaces the focused pane. The header's tab bar (`1:api  2:shell  +`) is clickable: pick a tab, or `+` for a new terminal tab in the current directory. Hidden tabs cost nothing: Hive only mirrors what is on screen. The layout lasts until you quit `hive`; sessions keep running either way.
+Split the panel to watch several agents at once. Each pane is its own terminal at its own size, with a title row showing the session and its status. Keys go to the focused pane. Switching to a session that is already in a pane focuses that pane (and its tab); otherwise the session replaces the focused pane. The tab row above the panes (`1  2  +`) is clickable: pick a tab, or `+` for a new terminal tab in the current directory. Every new tab, split and "new" is a plain terminal, like herdr; the sidebar's agents list shows what runs in them. Hidden tabs cost nothing: Hive only mirrors what is on screen. The layout lasts until you quit `hive`; sessions keep running either way.
 
 ### Notes (Obsidian, optional)
 

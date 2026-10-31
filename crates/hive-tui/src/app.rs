@@ -187,7 +187,7 @@ fn agent_status(s: &SessionInfo) -> Option<AgentStatus> {
 pub enum SidebarHit {
     Session(SessionId),
     Workspace(WorkspaceId),
-    /// The "new" button: new session in the selected space.
+    /// The "new" button: a terminal in the selected space.
     New,
     /// The "menu" button: the command palette.
     Menu,
@@ -829,15 +829,18 @@ impl App {
             })
     }
 
-    /// Other running sessions in exactly the same directory (not isolated
-    /// by a worktree).
+    /// Other running agents in exactly the same directory (not isolated by
+    /// a worktree). Plain terminals don't count: they don't edit files.
     pub fn sharing_dir(&self, id: SessionId) -> Vec<SessionId> {
-        let Some(s) = self.sessions.get(&id).filter(|s| s.state.is_alive()) else {
+        let agent =
+            |s: &&SessionInfo| s.state.is_alive() && (s.agent != "shell" || s.presence.is_some());
+        let Some(s) = self.sessions.get(&id).filter(agent) else {
             return Vec::new();
         };
         self.sessions
             .values()
-            .filter(|o| o.id != id && o.state.is_alive() && o.cwd == s.cwd)
+            .filter(agent)
+            .filter(|o| o.id != id && o.cwd == s.cwd)
             .map(|o| o.id)
             .collect()
     }
@@ -1169,7 +1172,7 @@ impl App {
         if self.link != Link::Connected || self.mode != Mode::Normal {
             return Vec::new();
         }
-        let (px, py) = self.panel_origin();
+        let (px, _) = self.panel_origin();
         let at = ratatui::layout::Position::new(m.column, m.row);
         let hit = self
             .sidebar_hits
@@ -1180,10 +1183,10 @@ impl App {
         let click = matches!(m.kind, MouseEventKind::Down(MouseButton::Left));
         match (click, hit) {
             (true, Some(SidebarHit::Tab(i))) => return self.select_tab(i),
-            (true, Some(SidebarHit::NewTab)) => return self.new_terminal_tab(),
+            (true, Some(SidebarHit::NewTab)) => return self.new_terminal(Place::NewTab),
             _ => {}
         }
-        if self.sidebar_visible && m.column < px && m.row >= py {
+        if self.sidebar_visible && m.column < px {
             return match (m.kind, hit) {
                 (MouseEventKind::Down(MouseButton::Left), Some(SidebarHit::Session(id))) => {
                     self.switch_to(id)
@@ -1364,7 +1367,7 @@ impl App {
                     self.focus = Focus::Terminal;
                 }
             }
-            KeyCode::Char('n') => self.open_picker_for(Place::Replace),
+            KeyCode::Char('n') => return self.new_terminal(Place::Replace),
             KeyCode::Char('w') => self.open_workspaces(),
             KeyCode::Char('p') => self.open_palette(false),
             KeyCode::Char('/') => self.open_palette(true),
@@ -1411,10 +1414,11 @@ impl App {
         match cmd {
             Command::Palette => self.open_palette(false),
             Command::SearchSessions => self.open_palette(true),
-            Command::NewSession => self.open_picker_for(Place::Replace),
-            Command::SplitRight => self.open_picker_for(Place::Split(Dir::Right)),
-            Command::SplitDown => self.open_picker_for(Place::Split(Dir::Down)),
-            Command::NewTab => return self.new_terminal_tab(),
+            Command::NewSession => return self.new_terminal(Place::Replace),
+            Command::NewAgent => self.open_picker_for(Place::Replace),
+            Command::SplitRight => return self.new_terminal(Place::Split(Dir::Right)),
+            Command::SplitDown => return self.new_terminal(Place::Split(Dir::Down)),
+            Command::NewTab => return self.new_terminal(Place::NewTab),
             Command::NextTab | Command::PrevTab if self.tabs.len() > 1 => {
                 let before = self.tab_sessions();
                 let delta = if cmd == Command::NextTab { 1 } else { -1 };
@@ -1763,16 +1767,19 @@ impl App {
                 let new = self.keymap.hint(Command::NewSession).unwrap_or_default();
                 self.set_status(
                     Tone::Info,
-                    format!("No agents in {name} yet. Click new (or leader {new}) to start one."),
+                    format!(
+                        "Nothing open in {name} yet. Click new (or leader {new}) for a terminal."
+                    ),
                 );
                 Vec::new()
             }
         }
     }
 
-    /// A shell in a new tab, like herdr: in the focused agent's directory,
-    /// or the selected space's root.
-    fn new_terminal_tab(&mut self) -> Vec<ClientMessage> {
+    /// A shell, like herdr: in the focused pane's directory, or the selected
+    /// space's root. Agents and dev servers are started from it by hand and
+    /// detected from the process.
+    fn new_terminal(&mut self, place: Place) -> Vec<ClientMessage> {
         let workspace = self.active_workspace();
         let cwd = self
             .current()
@@ -1786,7 +1793,7 @@ impl App {
         match launch::create_request(&self.config, "shell", None, cwd, &[], self.panel) {
             Ok(mut req) => {
                 req.workspace = workspace;
-                self.place = Place::NewTab;
+                self.place = place;
                 self.awaiting_create = true;
                 self.mode = Mode::Normal;
                 self.set_status(Tone::Info, "Opening a terminal…");
@@ -2558,13 +2565,11 @@ mod tests {
         assert_eq!(app.panel.cols, 120 - SIDEBAR_WIDTH);
     }
 
-    /// Runs a leader command that opens the picker and launches `shell`;
-    /// returns the CreateSession size.
+    /// Runs a leader command that opens a terminal; returns the
+    /// CreateSession size.
     fn launch_via(app: &mut App, key: char) -> TermSize {
-        app.config.general.default_agent = "shell".into();
         app.on_terminal_event(leader());
-        app.on_terminal_event(ch(key));
-        let out = app.on_terminal_event(self::key(KeyCode::Enter, KeyModifiers::NONE));
+        let out = app.on_terminal_event(ch(key));
         match out.as_slice() {
             [ClientMessage::CreateSession(req)] => req.size,
             other => panic!("expected CreateSession, got {other:?}"),
@@ -2965,9 +2970,14 @@ mod tests {
             }
         ));
         app.on_terminal_event(key(KeyCode::Esc, KeyModifiers::NONE));
-        app.on_terminal_event(press(2, 10));
-        assert!(matches!(app.mode, Mode::NewSession { .. }));
-        app.on_terminal_event(key(KeyCode::Esc, KeyModifiers::NONE));
+        // "new" opens a terminal straight away, in the selected space.
+        let out = app.on_terminal_event(press(2, 10));
+        assert!(
+            matches!(out.as_slice(), [ClientMessage::CreateSession(r)] if r.agent == "shell"),
+            "{out:?}"
+        );
+        assert!(matches!(app.mode, Mode::Normal));
+        app.awaiting_create = false;
 
         // Alt+Up/Down walk the spaces, wrapping.
         let alt = |code| key(code, KeyModifiers::ALT);
@@ -3242,7 +3252,7 @@ mod tests {
             },
         );
         let mut app = App::new(config, Start::Auto, (100, 26));
-        app.on_terminal_event(ch('n'));
+        app.run(Command::NewAgent);
         let Mode::NewSession { selected, .. } = app.mode else {
             panic!("picker not open")
         };
@@ -3288,7 +3298,7 @@ mod tests {
             },
         );
         let mut app = App::new(config, Start::Auto, (100, 26));
-        app.on_terminal_event(ch('n'));
+        app.run(Command::NewAgent);
         assert!(!app.agents[0].installed);
         assert!(app.on_terminal_event(ch('1')).is_empty());
         assert!(matches!(app.status, Some((Tone::Error, ref m)) if m.contains("not found")));
@@ -3597,7 +3607,7 @@ mod tests {
     fn new_session_targets_the_active_workspace_and_can_use_a_worktree() {
         let mut app = app_with_workspaces();
         app.on_terminal_event(leader());
-        app.on_terminal_event(ch('c'));
+        app.on_terminal_event(ch('A'));
         assert!(matches!(
             app.mode,
             Mode::NewSession {
@@ -3771,13 +3781,20 @@ mod tests {
     #[test]
     fn launching_into_a_busy_directory_warns() {
         let mut app = app_with_workspaces();
+        let agent = |mut s: SessionInfo| {
+            s.agent = "claude".into();
+            s
+        };
+        for s in app.sessions.values_mut() {
+            s.agent = "claude".into();
+        }
         app.open_picker(None);
         choose_shell(&mut app);
         // `info` sessions all run in "/"; the new one does too.
-        app.on_server(ServerMessage::SessionCreated(info(
+        app.on_server(ServerMessage::SessionCreated(agent(info(
             4,
             SessionState::Running,
-        )));
+        ))));
         assert!(
             matches!(&app.status, Some((Tone::Warning, m)) if m.contains("#1, #2, #3") && m.contains("worktree")),
             "{:?}",
@@ -3788,7 +3805,13 @@ mod tests {
         isolated.worktree = Some("/wt/x".into());
         app.open_picker(None);
         choose_shell(&mut app);
-        app.on_server(ServerMessage::SessionCreated(isolated));
+        app.on_server(ServerMessage::SessionCreated(agent(isolated)));
+        assert_eq!(app.status, None);
+        // A plain terminal in the busy directory edits nothing: no warning.
+        app.on_server(ServerMessage::SessionCreated(info(
+            6,
+            SessionState::Running,
+        )));
         assert_eq!(app.status, None);
     }
 
