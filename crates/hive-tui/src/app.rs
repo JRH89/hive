@@ -3553,7 +3553,7 @@ mod tests {
         assert_eq!(req.cwd, "/src/api");
         assert_eq!(req.label, "api");
         assert!(
-            req.env.iter().any(|(k, _)| k == "PATH"),
+            req.env.iter().any(|(k, _)| k.eq_ignore_ascii_case("PATH")),
             "env comes from this client"
         );
         let out = app.on_server(ServerMessage::SessionCreated(info(
