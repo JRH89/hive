@@ -701,6 +701,7 @@ dependencies = [
  "hive-daemon",
  "hive-protocol",
  "hive-tui",
+ "hive-workspace",
  "ratatui",
  "tokio",
  "tracing",
@@ -728,6 +729,7 @@ dependencies = [
  "anyhow",
  "hive-core",
  "hive-protocol",
+ "hive-workspace",
  "portable-pty",
  "rustix",
  "serde",
@@ -759,10 +761,19 @@ dependencies = [
  "futures-util",
  "hive-core",
  "hive-protocol",
+ "hive-workspace",
  "ratatui",
  "tokio",
  "tracing",
  "vt100",
+]
+
+[[package]]
+name = "hive-workspace"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

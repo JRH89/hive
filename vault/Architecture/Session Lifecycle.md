@@ -13,6 +13,9 @@ source: crates/hive-daemon/src/session.rs
 - An exited session **stays listed** (the final screen is still viewable) until it is killed or removed.
 - `Lost`: only in a daemon started after a crash. The process is gone; the record (from `sessions.json`) can be renamed, dismissed, or relaunched from the TUI sidebar. Never attachable. See [[ADR-0009 Persist session metadata, mark lost sessions]].
 
+## Placement
+Every session has a `workspace`, resolved at create time ([[ADR-0011 Daemon-owned workspaces grouped by repository]]). The daemon keeps the session's discovered `Repo` and re-reads `HEAD` every 2 s while it runs, publishing `branch` changes. `worktree` is set when the cwd is in a linked worktree (any, not only Hive-created ones).
+
 ## Persistence
 - Live sessions (not exited ones) plus lost records are written to `$HIVE_STATE_DIR/sessions.json` after each burst of lifecycle events. No env.
 - Graceful shutdown writes only the lost records, so sessions stopped on purpose aren't "lost". Ids never repeat across restarts.

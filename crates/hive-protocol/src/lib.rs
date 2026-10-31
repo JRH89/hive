@@ -11,13 +11,14 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Bumped on any incompatible change to the message types below.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// Upper bound on a single frame. Protects both sides from unbounded
 /// allocations caused by a corrupt or hostile length prefix.
 pub const MAX_FRAME_LEN: usize = 8 * 1024 * 1024;
 
 pub type SessionId = u64;
+pub type WorkspaceId = u64;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TermSize {
@@ -72,6 +73,44 @@ pub struct SessionInfo {
     /// Seconds since the Unix epoch.
     pub created_at: u64,
     pub attached_clients: u32,
+    /// Every session belongs to exactly one workspace.
+    pub workspace: WorkspaceId,
+    /// Checked-out branch (or short commit id when detached) of the working
+    /// tree `cwd` is in. Refreshed by the daemon while the session runs.
+    pub branch: Option<String>,
+    /// Root of the linked git worktree `cwd` is in, if any.
+    pub worktree: Option<String>,
+}
+
+/// A named group of sessions, usually one repository.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceInfo {
+    pub id: WorkspaceId,
+    pub name: String,
+    /// Canonical path. For a repository, the root of its main working tree.
+    pub root: String,
+    /// Whether `root` is a git repository (worktrees can be created).
+    pub is_repo: bool,
+}
+
+/// Asks the daemon to create a linked worktree and launch the session in it.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct NewWorktree {
+    /// Checked out if it exists, created from HEAD otherwise. Defaults to
+    /// `hive/<agent>-<session id>`.
+    pub branch: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct WorktreeInfo {
+    pub path: String,
+    pub branch: Option<String>,
+    /// The repository's main working tree (never removed by Hive).
+    pub main: bool,
+    /// `None` if git could not tell.
+    pub dirty: Option<bool>,
+    /// Live sessions running in this worktree.
+    pub sessions: Vec<SessionId>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -85,6 +124,12 @@ pub struct CreateSession {
     /// agents see the PATH and credentials of the shell that launched them.
     pub env: Vec<(String, String)>,
     pub size: TermSize,
+    /// Explicit workspace. When `None` the daemon picks (or creates) the one
+    /// that contains `cwd`.
+    pub workspace: Option<WorkspaceId>,
+    /// Launch in a new linked worktree of the workspace's repository instead
+    /// of `cwd`.
+    pub worktree: Option<NewWorktree>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -121,6 +166,27 @@ pub enum ClientMessage {
     },
     /// Terminate all sessions and stop the daemon.
     Shutdown,
+    ListWorkspaces,
+    /// Adds a workspace for `path` (its repository's main root when inside
+    /// git). Replies `WorkspaceCreated`, with the existing workspace if one
+    /// already has that root.
+    CreateWorkspace {
+        path: String,
+        name: Option<String>,
+    },
+    RenameWorkspace {
+        workspace: WorkspaceId,
+        name: String,
+    },
+    /// Forgets a workspace that has no sessions. Nothing on disk changes.
+    RemoveWorkspace(WorkspaceId),
+    ListWorktrees(WorkspaceId),
+    /// Removes a linked worktree. Refused while a session runs in it, and
+    /// when it has uncommitted changes unless `force`. Branches are kept.
+    RemoveWorktree {
+        path: String,
+        force: bool,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -173,6 +239,18 @@ pub enum ServerMessage {
     /// can be taken with a forced `Attach`.
     ControlReleased {
         session: SessionId,
+    },
+    WorkspaceList(Vec<WorkspaceInfo>),
+    WorkspaceCreated(WorkspaceInfo),
+    /// Broadcast when a workspace is added or renamed.
+    WorkspaceUpdated(WorkspaceInfo),
+    WorkspaceRemoved(WorkspaceId),
+    WorktreeList {
+        workspace: WorkspaceId,
+        worktrees: Vec<WorktreeInfo>,
+    },
+    WorktreeRemoved {
+        path: String,
     },
 }
 

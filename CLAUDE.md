@@ -39,6 +39,7 @@ Run fmt, clippy and test after every meaningful change and fix failures before m
 
 - `hive-protocol`: Serde enums framed as u32-LE length + postcard (8 MiB cap). `Hello`/`Welcome` must stay enum variant 0 (a test enforces this).
 - `hive-core`: `paths` (0700 runtime dir, env overrides), `config` (TOML, built-in agents overlaid by `[agents.*]`), `launch` (agent → argv/env/cwd plus PATH check), `client` (handshake, `recv_until`, daemon auto-start).
+- `hive-workspace`: git discovery by reading `.git`/`HEAD` (no subprocess) and the git argv calls for worktrees. Shared by the daemon, CLI and TUI.
 - `hive-daemon`: `session.rs` runs 3 threads per session (PTY reader → emulator → `broadcast`, writer, waiter). `server.rs` handles per-connection dispatch and output forwarding. `responder.rs` answers DSR/DA/OSC 10/11 queries for the child.
 - `hive-tui`: `app.rs` is a **pure** state machine (events in, `Vec<ClientMessage>` out), so unit-test it there. `render.rs` copies vt100 cells into a ratatui buffer. `keys.rs` encodes crossterm keys to PTY bytes.
 
@@ -49,6 +50,8 @@ Invariants that span files:
 - Per-session broadcasts go only through `Session::publish()`/`remove()`, never `daemon.events.send(SessionUpdated(..))` directly. They are ordered under the meta lock so nothing can resurrect a removed session (ADR-0008).
 - The TUI mirrors only the attached session. Switching re-attaches (ADR-0007), so don't add background mirroring without revisiting that ADR.
 - Only the controller client's `Input`/`Resize` are honoured. `Attach` takes control only if it's free or `force` is set (TUI Leader `a`); otherwise the client observes (ADR-0010). Take-over sends `ControlLost`; a controller leaving sends observers `ControlReleased`.
+- Workspaces are daemon-owned. Every session gets one, resolved from its cwd's repository main root (ADR-0011). The daemon runs `git worktree add/remove`; dirty or in-use worktrees are never removed without force, and branches are never deleted (ADR-0012).
+- `SessionCreated` (reply) can arrive after a `SessionUpdated` (broadcast) for the same session. Clients must not overwrite newer info with it.
 - `sessions.json` (state dir) holds metadata only, never env. Sessions alive at a crash return as `SessionState::Lost`; graceful shutdown forgets them. Ids never repeat (ADR-0009).
 - The reader thread must never block on the writer (`try_send` for query replies).
 - `hive-protocol::read_frame` is not cancel-safe. Keep it in its own task, never in `select!`.

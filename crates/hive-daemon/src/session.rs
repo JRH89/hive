@@ -13,11 +13,14 @@
 use std::collections::BTreeSet;
 use std::io::{Read, Write};
 use std::num::NonZeroU16;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, bail};
-use hive_protocol::{CreateSession, ServerMessage, SessionId, SessionInfo, SessionState, TermSize};
+use hive_protocol::{
+    CreateSession, ServerMessage, SessionId, SessionInfo, SessionState, TermSize, WorkspaceId,
+};
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use rustix::process::{Pid, Signal};
 use tokio::sync::{broadcast, mpsc, watch};
@@ -39,8 +42,15 @@ pub(crate) enum Chunk {
     Resized(TermSize),
 }
 
+/// Where a session runs: its workspace and the git working tree of its cwd.
+pub(crate) struct Placement {
+    pub workspace: WorkspaceId,
+    pub repo: Option<hive_workspace::Repo>,
+}
+
 struct Meta {
     label: String,
+    branch: Option<String>,
     state: SessionState,
     size: TermSize,
     controller: Option<ClientId>,
@@ -62,6 +72,8 @@ pub(crate) struct Session {
     cwd: String,
     created_at: u64,
     pid: Option<u32>,
+    workspace: WorkspaceId,
+    repo: Option<hive_workspace::Repo>,
     meta: Mutex<Meta>,
     term: Mutex<Term>,
     output: broadcast::Sender<Chunk>,
@@ -104,6 +116,7 @@ impl Session {
     pub fn spawn(
         id: SessionId,
         req: CreateSession,
+        placement: Placement,
         scrollback: usize,
         events: broadcast::Sender<ServerMessage>,
     ) -> anyhow::Result<Arc<Session>> {
@@ -150,8 +163,10 @@ impl Session {
                 .map(|d| d.as_secs())
                 .unwrap_or(0),
             pid: child.process_id(),
+            workspace: placement.workspace,
             meta: Mutex::new(Meta {
                 label: req.label,
+                branch: placement.repo.as_ref().and_then(|r| r.branch()),
                 state: SessionState::Running,
                 size,
                 controller: None,
@@ -172,6 +187,7 @@ impl Session {
             exited: watch::channel(false).0,
             removed: watch::channel(false).0,
             events,
+            repo: placement.repo,
         });
 
         let s = session.clone();
@@ -245,7 +261,38 @@ impl Session {
             size: meta.size,
             created_at: self.created_at,
             attached_clients: meta.attached.len() as u32,
+            workspace: self.workspace,
+            branch: meta.branch.clone(),
+            worktree: self
+                .repo
+                .as_ref()
+                .filter(|r| r.is_linked_worktree())
+                .map(|r| r.worktree_root.display().to_string()),
         }
+    }
+
+    /// Root of the git working tree the session runs in, if any.
+    pub fn tree_root(&self) -> Option<&std::path::Path> {
+        self.repo.as_ref().map(|r| r.worktree_root.as_path())
+    }
+
+    pub fn cwd(&self) -> PathBuf {
+        PathBuf::from(&self.cwd)
+    }
+
+    /// Re-reads the checked-out branch. Returns true if it changed, in which
+    /// case the caller should `publish`.
+    pub fn refresh_branch(&self) -> bool {
+        let Some(repo) = &self.repo else {
+            return false;
+        };
+        let branch = repo.branch();
+        let mut meta = lock(&self.meta);
+        if meta.branch == branch || !meta.state.is_alive() {
+            return false;
+        }
+        meta.branch = branch;
+        true
     }
 
     /// Sets the label, trimmed and capped. Empty resets to the agent name.

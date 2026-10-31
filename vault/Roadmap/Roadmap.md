@@ -24,6 +24,12 @@ Full detail is in `AGENTS.md` §16. **Don't start a phase until the previous one
 - [x] Multi-client behaviour polish: observe unless forced, `ControlReleased` ([[ADR-0010 Attach observes unless control is free or forced]])
 - [x] Stale socket cleanup and ids that never repeat across restarts
 
-## Phase 4 — Workspaces and Git
+## Phase 4 — Workspaces and Git ✅
+[[Phase 4 - Workspaces and Git]]
+- [x] Workspace creation, naming, removal; remembered across restarts ([[ADR-0011 Daemon-owned workspaces grouped by repository]])
+- [x] Repository discovery and session grouping (linked worktrees join their repository)
+- [x] Git branch display, refreshed while sessions run
+- [x] Optional worktree creation and worktree-aware launching ([[ADR-0012 Worktrees created by the daemon, never deleted dirty]])
+- [x] Safe cleanup: never removes dirty or in-use worktrees without force; branches kept
 ## Phase 5 — Product Experience and Branding
 ## Phase 6 — Testing and Distribution

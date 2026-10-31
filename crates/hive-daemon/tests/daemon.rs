@@ -2,13 +2,15 @@
 //! shell commands (no agent CLIs required).
 
 use std::num::NonZeroU16;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use hive_core::client::Client;
 use hive_core::config::Config;
 use hive_core::paths::Paths;
 use hive_protocol::{
-    ClientMessage, CreateSession, ServerMessage, SessionId, SessionState, TermSize,
+    ClientMessage, CreateSession, NewWorktree, ServerMessage, SessionId, SessionInfo, SessionState,
+    TermSize, WorkspaceInfo,
 };
 use tokio::time::timeout;
 
@@ -77,6 +79,7 @@ impl Harness {
 async fn spawn_daemon(paths: &Paths) -> tokio::task::JoinHandle<anyhow::Result<()>> {
     let mut config = Config::default();
     config.daemon.kill_timeout_secs = 1;
+    config.worktrees.dir = Some(paths.state_dir.join("worktrees"));
     let daemon = tokio::spawn(hive_daemon::run(paths.clone(), config));
     for _ in 0..500 {
         if daemon.is_finished() {
@@ -122,7 +125,83 @@ fn sh(script: &str, size: TermSize) -> CreateSession {
         cwd: std::env::temp_dir().display().to_string(),
         env: vec![("PATH".into(), std::env::var("PATH").unwrap_or_default())],
         size,
+        workspace: None,
+        worktree: None,
     }
+}
+
+fn sh_in(script: &str, cwd: &Path) -> CreateSession {
+    CreateSession {
+        cwd: cwd.display().to_string(),
+        ..sh(script, TermSize::DEFAULT)
+    }
+}
+
+fn git(dir: &Path, args: &[&str]) {
+    let st = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .env("GIT_AUTHOR_NAME", "t")
+        .env("GIT_AUTHOR_EMAIL", "t@t")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@t")
+        .stdout(std::process::Stdio::null())
+        .status()
+        .unwrap();
+    assert!(st.success(), "git {args:?}");
+}
+
+/// A repository with one commit on `main`, at `<parent>/proj`.
+fn git_repo(parent: &Path) -> PathBuf {
+    let root = parent.join("proj");
+    std::fs::create_dir_all(root.join("sub")).unwrap();
+    git(&root, &["init", "-q", "-b", "main"]);
+    std::fs::write(root.join("a.txt"), "a").unwrap();
+    git(&root, &["add", "."]);
+    git(&root, &["commit", "-q", "-m", "init"]);
+    root.canonicalize().unwrap()
+}
+
+async fn workspaces(client: &mut Client) -> Vec<WorkspaceInfo> {
+    client.send(&ClientMessage::ListWorkspaces).await.unwrap();
+    timeout(
+        T,
+        client.recv_until(|m| match m {
+            ServerMessage::WorkspaceList(l) => Some(l),
+            _ => None,
+        }),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+}
+
+async fn create_info(client: &mut Client, req: CreateSession) -> SessionInfo {
+    client
+        .send(&ClientMessage::CreateSession(req))
+        .await
+        .unwrap();
+    timeout(
+        T,
+        client.recv_until(|m| match m {
+            ServerMessage::SessionCreated(info) => Some(info),
+            _ => None,
+        }),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+}
+
+/// Sends `msg` and returns the daemon's error text.
+async fn expect_error(client: &mut Client, msg: ClientMessage) -> String {
+    client.send(&msg).await.unwrap();
+    timeout(T, client.recv_until(|_| None::<()>))
+        .await
+        .unwrap()
+        .unwrap_err()
+        .to_string()
 }
 
 async fn create(client: &mut Client, req: CreateSession) -> SessionId {
@@ -334,18 +413,19 @@ async fn exit_is_reported_and_kill_removes_session() {
     let h = Harness::start().await;
     let mut c = h.client().await;
     let id = create(&mut c, sh("exit 3", TermSize::DEFAULT)).await;
-    let state = timeout(
-        T,
-        c.recv_until(|m| match m {
-            ServerMessage::SessionUpdated(info) if info.id == id && !info.state.is_alive() => {
-                Some(info.state)
+    // Poll rather than wait for the broadcast: it can arrive before the
+    // `SessionCreated` reply, which `create` would skip past.
+    let state = timeout(T, async {
+        loop {
+            let s = list(&mut c).await.into_iter().find(|s| s.id == id).unwrap();
+            if !s.state.is_alive() {
+                break s.state;
             }
-            _ => None,
-        }),
-    )
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
     .await
-    .unwrap()
-    .unwrap();
+    .expect("exit reported");
     assert_eq!(
         state,
         SessionState::Exited {
@@ -668,6 +748,19 @@ async fn crash_marks_running_sessions_lost_and_ids_keep_increasing() {
     .await
     .unwrap();
     let exited = create(&mut c, sh("exit 0", TermSize::DEFAULT)).await;
+    // The exit must have happened first: a write from before `exited` was
+    // even registered would otherwise satisfy the store check below.
+    timeout(T, async {
+        while list(&mut c)
+            .await
+            .iter()
+            .any(|s| s.id == exited && s.state.is_alive())
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("exit reported");
     // Wait until the store reflects the rename and the exit.
     timeout(T, async {
         loop {
@@ -751,4 +844,226 @@ async fn graceful_shutdown_forgets_sessions_but_ids_keep_increasing() {
     );
     let next = create(&mut c, sh("sleep 60", TermSize::DEFAULT)).await;
     assert!(next > first);
+}
+
+#[tokio::test]
+async fn sessions_are_grouped_into_workspaces_by_repository() {
+    let h = Harness::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = git_repo(tmp.path());
+    let plain = tmp.path().join("notes");
+    std::fs::create_dir(&plain).unwrap();
+    let mut c = h.client().await;
+
+    let a = create_info(&mut c, sh_in("sleep 60", &repo.join("sub"))).await;
+    let b = create_info(&mut c, sh_in("sleep 60", &repo)).await;
+    let n = create_info(&mut c, sh_in("sleep 60", &plain)).await;
+
+    assert_eq!(a.workspace, b.workspace, "same repository, same workspace");
+    assert_ne!(a.workspace, n.workspace);
+    assert_eq!(a.branch.as_deref(), Some("main"));
+    assert_eq!(a.worktree, None);
+    assert_eq!(n.branch, None);
+
+    let ws = workspaces(&mut c).await;
+    let repo_ws = ws.iter().find(|w| w.id == a.workspace).unwrap();
+    assert_eq!(repo_ws.root, repo.display().to_string());
+    assert_eq!(repo_ws.name, "proj");
+    assert!(repo_ws.is_repo);
+    let plain_ws = ws.iter().find(|w| w.id == n.workspace).unwrap();
+    assert!(!plain_ws.is_repo);
+    assert_eq!(plain_ws.name, "notes");
+}
+
+#[tokio::test]
+async fn worktree_sessions_are_isolated_and_cleanup_is_safe() {
+    let h = Harness::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = git_repo(tmp.path());
+    let mut c = h.client().await;
+    let main = create_info(&mut c, sh_in("sleep 60", &repo)).await;
+
+    let wt = create_info(
+        &mut c,
+        CreateSession {
+            workspace: Some(main.workspace),
+            worktree: Some(NewWorktree { branch: None }),
+            ..sh_in("sleep 60", &repo)
+        },
+    )
+    .await;
+    let path = PathBuf::from(wt.worktree.clone().expect("runs in a linked worktree"));
+    assert_eq!(wt.workspace, main.workspace);
+    assert_eq!(wt.branch, Some(format!("hive/shell-{}", wt.id)));
+    assert!(path.starts_with(h.paths.state_dir.join("worktrees")));
+    assert_eq!(PathBuf::from(&wt.cwd), path);
+
+    c.send(&ClientMessage::ListWorktrees(main.workspace))
+        .await
+        .unwrap();
+    let trees = timeout(
+        T,
+        c.recv_until(|m| match m {
+            ServerMessage::WorktreeList { worktrees, .. } => Some(worktrees),
+            _ => None,
+        }),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(trees.len(), 2);
+    assert!(trees[0].main);
+    assert_eq!(trees[0].sessions, vec![main.id]);
+    assert_eq!(trees[1].sessions, vec![wt.id]);
+    assert_eq!(trees[1].dirty, Some(false));
+
+    let remove = |force| ClientMessage::RemoveWorktree {
+        path: path.display().to_string(),
+        force,
+    };
+    let err = expect_error(&mut c, remove(true)).await;
+    assert!(err.contains("terminate it first"), "{err}");
+
+    c.send(&ClientMessage::KillSession(wt.id)).await.unwrap();
+    timeout(
+        T,
+        c.recv_until(|m| {
+            matches!(m, ServerMessage::SessionRemoved(id) if id == wt.id).then_some(())
+        }),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    std::fs::write(path.join("work.txt"), "unsaved").unwrap();
+    let err = expect_error(&mut c, remove(false)).await;
+    assert!(err.contains("uncommitted changes"), "{err}");
+    assert!(path.join("work.txt").exists(), "nothing was deleted");
+
+    c.send(&remove(true)).await.unwrap();
+    timeout(
+        T,
+        c.recv_until(|m| matches!(m, ServerMessage::WorktreeRemoved { .. }).then_some(())),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(!path.exists());
+    // The branch survives the worktree.
+    git(
+        &repo,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/hive/shell-{}", wt.id),
+        ],
+    );
+
+    // The main working tree is never removed.
+    let err = expect_error(
+        &mut c,
+        ClientMessage::RemoveWorktree {
+            path: repo.display().to_string(),
+            force: true,
+        },
+    )
+    .await;
+    assert!(
+        err.contains("not a linked worktree") || err.contains("terminate"),
+        "{err}"
+    );
+}
+
+#[tokio::test]
+async fn branch_changes_are_published() {
+    let h = Harness::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = git_repo(tmp.path());
+    let mut c = h.client().await;
+    let s = create_info(&mut c, sh_in("sleep 60", &repo)).await;
+    assert_eq!(s.branch.as_deref(), Some("main"));
+
+    git(&repo, &["checkout", "-q", "-b", "feature"]);
+    timeout(
+        T,
+        c.recv_until(|m| match m {
+            ServerMessage::SessionUpdated(i)
+                if i.id == s.id && i.branch.as_deref() == Some("feature") =>
+            {
+                Some(())
+            }
+            _ => None,
+        }),
+    )
+    .await
+    .expect("branch change published")
+    .unwrap();
+}
+
+#[tokio::test]
+async fn workspaces_persist_and_are_removed_only_when_empty() {
+    let mut h = Harness::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = git_repo(tmp.path());
+    let mut c = h.client().await;
+
+    let add = ClientMessage::CreateWorkspace {
+        path: repo.join("sub").display().to_string(),
+        name: Some("api".into()),
+    };
+    c.send(&add).await.unwrap();
+    let pick = |m| match m {
+        ServerMessage::WorkspaceCreated(w) => Some(w),
+        _ => None,
+    };
+    let ws = timeout(T, c.recv_until(pick)).await.unwrap().unwrap();
+    assert_eq!(ws.name, "api");
+    assert_eq!(
+        ws.root,
+        repo.display().to_string(),
+        "the repository root, not the subdirectory"
+    );
+    c.send(&add).await.unwrap();
+    let again = timeout(T, c.recv_until(pick)).await.unwrap().unwrap();
+    assert_eq!(again.id, ws.id, "adding the same root twice is idempotent");
+
+    c.send(&ClientMessage::RenameWorkspace {
+        workspace: ws.id,
+        name: "backend".into(),
+    })
+    .await
+    .unwrap();
+    create(&mut c, sh_in("sleep 60", &repo)).await;
+    let err = expect_error(&mut c, ClientMessage::RemoveWorkspace(ws.id)).await;
+    assert!(err.contains("still has 1 session"), "{err}");
+    drop(c);
+
+    h.shutdown().await;
+    h.restart().await;
+    let mut c = h.client().await;
+    let ws_list = workspaces(&mut c).await;
+    let kept = ws_list
+        .iter()
+        .find(|w| w.id == ws.id)
+        .expect("workspace remembered");
+    assert_eq!(kept.name, "backend");
+    assert!(
+        list(&mut c).await.is_empty(),
+        "sessions were stopped on purpose"
+    );
+
+    c.send(&ClientMessage::RemoveWorkspace(ws.id))
+        .await
+        .unwrap();
+    timeout(
+        T,
+        c.recv_until(|m| {
+            matches!(m, ServerMessage::WorkspaceRemoved(id) if id == ws.id).then_some(())
+        }),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(workspaces(&mut c).await.iter().all(|w| w.id != ws.id));
 }

@@ -6,7 +6,7 @@ source: crates/hive-protocol/src/lib.rs
 
 - Transport: Unix stream socket, per-user dir. The daemon checks `SO_PEERCRED` uid == own uid.
 - Frame: `u32` little-endian length + `postcard` payload. Max 8 MiB (`MAX_FRAME_LEN`). See [[ADR-0003 postcard length-prefixed frames]].
-- `PROTOCOL_VERSION = 3` (v2 added `RenameSession`; v3 added `Attach.force`, `ControlReleased` and `SessionState::Lost`). Bump it on any incompatible change. New variants go at the **end** of the enums.
+- `PROTOCOL_VERSION = 4` (v2 added `RenameSession`; v3 added `Attach.force`, `ControlReleased` and `SessionState::Lost`; v4 added workspaces and worktrees). Bump it on any incompatible change. New variants go at the **end** of the enums.
 - **Compat invariant:** `ClientMessage::Hello` and `ServerMessage::Welcome` stay variant 0 with the same shape (a unit test enforces this). That way a mismatched client and daemon can still handshake and report "run `hive daemon stop`".
 
 ## Handshake
@@ -16,19 +16,25 @@ Client → `Hello{protocol_version, client}` (within 5 s) → daemon replies `We
 | Message | Effect |
 |---|---|
 | `ListSessions` | → `SessionList` |
-| `CreateSession{agent,label,command,cwd,env,size}` | spawn; → `SessionCreated`, plus a `SessionUpdated` broadcast. `command` is argv, never a shell string. `env` is the client's full environment |
+| `CreateSession{agent,label,command,cwd,env,size,workspace,worktree}` | spawn; → `SessionCreated`, plus a `SessionUpdated` broadcast. `command` is argv, never a shell string. `env` is the client's full environment. `workspace: None` means resolve from `cwd`; `worktree: Some{branch}` creates a linked worktree and launches there. **The broadcast can overtake the reply**, so don't let `SessionCreated` overwrite newer info |
 | `Attach{session,size,force}` | become **controller** if control is free or `force`, else observe; a controller resizes the PTY to `size`; → `Attached{session,snapshot,controller}`. A forced take-over sends the previous controller `ControlLost`. Fails for `Lost` sessions. See [[ADR-0010 Attach observes unless control is free or forced]] |
 | `Detach` | → `Detached` |
 | `Input(bytes)` / `Resize(size)` | silently ignored unless sender is controller |
 | `RenameSession{session,label}` | trimmed, ≤64 chars; empty resets to the agent name; → `SessionUpdated` broadcast |
 | `KillSession(id)` | TERM → (timeout) → KILL the process group, remove; → `SessionRemoved` broadcast. On a `Lost` record it just forgets it |
 | `Shutdown` | terminate all sessions, `ShuttingDown` broadcast, remove socket, exit |
+| `ListWorkspaces` | → `WorkspaceList` |
+| `CreateWorkspace{path,name}` | root = repository main root (or `path`); idempotent per root; → `WorkspaceCreated`, plus a `WorkspaceUpdated` broadcast if new |
+| `RenameWorkspace{workspace,name}` | → `WorkspaceUpdated` broadcast |
+| `RemoveWorkspace(id)` | forget it (refused with any session in it); → `WorkspaceRemoved` broadcast |
+| `ListWorktrees(id)` | → `WorktreeList{workspace, worktrees:[{path,branch,main,dirty,sessions}]}` |
+| `RemoveWorktree{path,force}` | refused for the main tree, in use, or dirty without `force`; → `WorktreeRemoved{path}`. Branch kept |
 
 ## Daemon → client (streamed while attached)
 `Output{data}`, `Resized{size}` (ordered with output, so mirrors stay in sync), `Resync{size,snapshot}` (after lag), `Detached` (when the session is removed), `ControlLost{session}`, `ControlReleased{session}` (to observers when the controller leaves).
 
 ## Broadcasts (every client)
-`SessionUpdated(info)`, `SessionRemoved(id)`, `ShuttingDown`. If a client lags on the event channel it gets a full `SessionList` instead.
+`SessionUpdated(info)`, `SessionRemoved(id)`, `WorkspaceUpdated(info)`, `WorkspaceRemoved(id)`, `ShuttingDown`. If a client lags on the event channel it gets a full `WorkspaceList` and `SessionList` instead.
 
 **Ordering guarantee:** no `SessionUpdated(id)` ever follows `SessionRemoved(id)`. Both are emitted only through `Session::publish`/`remove`, under the session's meta lock. See [[ADR-0008 Session events published under the session lock]].
 

@@ -53,6 +53,8 @@ pub fn create_request(
         cwd: cwd.display().to_string(),
         env,
         size,
+        workspace: None,
+        worktree: None,
     })
 }
 

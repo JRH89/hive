@@ -9,7 +9,7 @@ mod store;
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File, TryLockError};
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -17,15 +17,20 @@ use std::time::Duration;
 use anyhow::Context;
 use hive_core::config::Config;
 use hive_core::paths::Paths;
-use hive_protocol::{CreateSession, ServerMessage, SessionId, SessionInfo};
+use hive_protocol::{
+    CreateSession, ServerMessage, SessionId, SessionInfo, WorkspaceId, WorkspaceInfo, WorktreeInfo,
+};
 use tokio::net::UnixListener;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::broadcast::error::{RecvError, TryRecvError};
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::task::JoinHandle;
 
-use session::{ClientId, Session};
-use store::{Store, StoredSession};
+use session::{ClientId, Placement, Session};
+use store::{Store, StoredSession, StoredWorkspace};
+
+/// How often running sessions' branches are re-read (a small file read each).
+const BRANCH_REFRESH: Duration = Duration::from_secs(2);
 
 #[derive(Debug, thiserror::Error)]
 #[error("another hived is already running")]
@@ -38,6 +43,11 @@ pub(crate) struct Daemon {
     /// Kept until the user relaunches or removes them.
     lost: Mutex<BTreeMap<SessionId, SessionInfo>>,
     next_session: AtomicU64,
+    // Lock order across these maps: workspaces, then sessions, then lost.
+    /// Broadcasts about a workspace are sent while holding this lock, so they
+    /// reach clients in the order the changes were made.
+    workspaces: Mutex<BTreeMap<WorkspaceId, WorkspaceInfo>>,
+    next_workspace: AtomicU64,
     clients: Mutex<HashMap<ClientId, mpsc::Sender<ServerMessage>>>,
     next_client: AtomicU64,
     /// Session lifecycle broadcasts delivered to every connected client.
@@ -58,6 +68,18 @@ impl Daemon {
             .chain([store.next_session_id, 1])
             .max()
             .unwrap_or(1);
+        let next_workspace = store
+            .workspaces
+            .iter()
+            .map(|w| w.id + 1)
+            .chain([store.next_workspace_id, 1])
+            .max()
+            .unwrap_or(1);
+        let workspaces: BTreeMap<_, _> = store
+            .workspaces
+            .into_iter()
+            .map(|w| (w.id, w.into_info()))
+            .collect();
         let lost: BTreeMap<_, _> = store
             .sessions
             .into_iter()
@@ -69,18 +91,128 @@ impl Daemon {
                 "previous daemon stopped unexpectedly; its sessions are marked lost"
             );
         }
-        Daemon {
+        let daemon = Daemon {
             config,
             sessions: Mutex::new(BTreeMap::new()),
             lost: Mutex::new(lost),
             next_session: AtomicU64::new(next),
+            workspaces: Mutex::new(workspaces),
+            next_workspace: AtomicU64::new(next_workspace),
             clients: Mutex::new(HashMap::new()),
             next_client: AtomicU64::new(1),
             events: broadcast::channel(1024).0,
             shutdown: watch::channel(false).0,
             store_path,
             saved: Mutex::new(Vec::new()),
+        };
+        // Records from a version-1 store, or whose workspace was lost, are
+        // regrouped by directory.
+        // Lock order is workspaces, then sessions, then lost.
+        let known: Vec<WorkspaceId> = daemon.workspaces.lock().unwrap().keys().copied().collect();
+        let orphans: Vec<(SessionId, String)> = daemon
+            .lost
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|s| !known.contains(&s.workspace))
+            .map(|s| (s.id, s.cwd.clone()))
+            .collect();
+        for (id, cwd) in orphans {
+            let workspace = daemon.ensure_workspace(Path::new(&cwd)).id;
+            if let Some(info) = daemon.lost.lock().unwrap().get_mut(&id) {
+                info.workspace = workspace;
+            }
         }
+        daemon
+    }
+
+    fn workspace(&self, id: WorkspaceId) -> anyhow::Result<WorkspaceInfo> {
+        self.workspaces
+            .lock()
+            .unwrap()
+            .get(&id)
+            .cloned()
+            .with_context(|| format!("no workspace with id {id}"))
+    }
+
+    fn list_workspaces(&self) -> Vec<WorkspaceInfo> {
+        self.workspaces.lock().unwrap().values().cloned().collect()
+    }
+
+    /// The workspace `path` belongs to: the one with the deepest root
+    /// containing its repository (or the path itself, outside git). Creates
+    /// one if none does.
+    fn ensure_workspace(&self, path: &Path) -> WorkspaceInfo {
+        let key = hive_workspace::workspace_key(path);
+        let mut workspaces = self.workspaces.lock().unwrap();
+        let roots = workspaces.values().map(|w| (w.id, Path::new(&w.root)));
+        if let Some(id) = hive_workspace::best_match(roots, &key) {
+            return workspaces[&id].clone();
+        }
+        self.insert_workspace(&mut workspaces, &key, None)
+    }
+
+    fn insert_workspace(
+        &self,
+        workspaces: &mut BTreeMap<WorkspaceId, WorkspaceInfo>,
+        root: &Path,
+        name: Option<String>,
+    ) -> WorkspaceInfo {
+        let id = self.next_workspace.fetch_add(1, Ordering::Relaxed);
+        let info = WorkspaceInfo {
+            id,
+            name: clean_name(name.as_deref()).unwrap_or_else(|| hive_workspace::default_name(root)),
+            root: root.display().to_string(),
+            is_repo: hive_workspace::discover(root).is_some(),
+        };
+        tracing::info!(workspace = id, root = %info.root, "workspace created");
+        workspaces.insert(id, info.clone());
+        let _ = self
+            .events
+            .send(ServerMessage::WorkspaceUpdated(info.clone()));
+        info
+    }
+
+    /// Adds a workspace rooted at `path`'s repository (or `path`). Returns
+    /// the existing one if a workspace already has exactly that root.
+    fn create_workspace(&self, path: &str, name: Option<String>) -> anyhow::Result<WorkspaceInfo> {
+        let path = Path::new(path);
+        anyhow::ensure!(path.is_dir(), "{} is not a directory", path.display());
+        let key = hive_workspace::workspace_key(path);
+        let mut workspaces = self.workspaces.lock().unwrap();
+        if let Some(w) = workspaces.values().find(|w| Path::new(&w.root) == key) {
+            return Ok(w.clone());
+        }
+        Ok(self.insert_workspace(&mut workspaces, &key, name))
+    }
+
+    fn rename_workspace(&self, id: WorkspaceId, name: &str) -> anyhow::Result<()> {
+        let mut workspaces = self.workspaces.lock().unwrap();
+        let info = workspaces
+            .get_mut(&id)
+            .with_context(|| format!("no workspace with id {id}"))?;
+        info.name = clean_name(Some(name))
+            .unwrap_or_else(|| hive_workspace::default_name(Path::new(&info.root)));
+        let _ = self
+            .events
+            .send(ServerMessage::WorkspaceUpdated(info.clone()));
+        Ok(())
+    }
+
+    /// Forgets a workspace with no sessions (running, exited or lost).
+    fn remove_workspace(&self, id: WorkspaceId) -> anyhow::Result<()> {
+        // Held across the check and removal so a concurrent create can't
+        // pick this workspace in between.
+        let mut workspaces = self.workspaces.lock().unwrap();
+        anyhow::ensure!(workspaces.contains_key(&id), "no workspace with id {id}");
+        let used = self.list().iter().filter(|s| s.workspace == id).count();
+        anyhow::ensure!(
+            used == 0,
+            "workspace {id} still has {used} session(s); remove them first"
+        );
+        workspaces.remove(&id);
+        let _ = self.events.send(ServerMessage::WorkspaceRemoved(id));
+        Ok(())
     }
 
     fn get(&self, id: SessionId) -> Option<Arc<Session>> {
@@ -99,11 +231,29 @@ impl Daemon {
         all
     }
 
-    fn create(&self, req: CreateSession) -> anyhow::Result<SessionInfo> {
+    async fn create(&self, mut req: CreateSession) -> anyhow::Result<SessionInfo> {
+        let workspace = match req.workspace {
+            Some(id) => self.workspace(id)?,
+            None => self.ensure_workspace(Path::new(&req.cwd)),
+        };
         let id = self.next_session.fetch_add(1, Ordering::Relaxed);
+        if let Some(wt) = req.worktree.take() {
+            let branch = wt
+                .branch
+                .filter(|b| !b.trim().is_empty())
+                .unwrap_or_else(|| {
+                    format!("hive/{}-{id}", hive_workspace::branch_dir_name(&req.agent))
+                });
+            req.cwd = self.add_worktree(&workspace, branch).await?;
+        }
+        let placement = Placement {
+            workspace: workspace.id,
+            repo: hive_workspace::discover(Path::new(&req.cwd)),
+        };
         let session = Session::spawn(
             id,
             req,
+            placement,
             self.config.terminal.scrollback_lines,
             self.events.clone(),
         )?;
@@ -155,6 +305,111 @@ impl Daemon {
         Ok(())
     }
 
+    /// Creates a linked worktree of `workspace`'s repository on `branch`
+    /// under the configured base directory and returns its path.
+    async fn add_worktree(
+        &self,
+        workspace: &WorkspaceInfo,
+        branch: String,
+    ) -> anyhow::Result<String> {
+        let repo = hive_workspace::discover(Path::new(&workspace.root))
+            .with_context(|| format!("workspace `{}` is not a git repository", workspace.name))?;
+        let path = self
+            .config
+            .worktrees
+            .base_dir()
+            .join(hive_workspace::repo_dir_name(&repo.main_root))
+            .join(hive_workspace::branch_dir_name(&branch));
+        anyhow::ensure!(
+            !path.exists(),
+            "{} already exists; pick another branch name",
+            path.display()
+        );
+        let main_root = repo.main_root.clone();
+        let target = path.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            hive_workspace::add_worktree(&main_root, &target, &branch)?;
+            anyhow::Ok(())
+        })
+        .await??;
+        tracing::info!(path = %path.display(), "worktree created");
+        Ok(path.display().to_string())
+    }
+
+    async fn list_worktrees(&self, id: WorkspaceId) -> anyhow::Result<Vec<WorktreeInfo>> {
+        let workspace = self.workspace(id)?;
+        let repo = hive_workspace::discover(Path::new(&workspace.root))
+            .with_context(|| format!("workspace `{}` is not a git repository", workspace.name))?;
+        let trees = tokio::task::spawn_blocking(move || {
+            let list = hive_workspace::list_worktrees(&repo.main_root)?;
+            let dirty: Vec<_> = list
+                .iter()
+                .map(|w| hive_workspace::is_dirty(&w.path).ok())
+                .collect();
+            anyhow::Ok(list.into_iter().zip(dirty).collect::<Vec<_>>())
+        })
+        .await??;
+        let live: Vec<_> = self.sessions.lock().unwrap().values().cloned().collect();
+        Ok(trees
+            .into_iter()
+            .map(|(w, dirty)| WorktreeInfo {
+                sessions: live
+                    .iter()
+                    .filter(|s| s.is_alive() && s.tree_root() == Some(w.path.as_path()))
+                    .map(|s| s.id)
+                    .collect(),
+                path: w.path.display().to_string(),
+                branch: w.branch,
+                main: w.main,
+                dirty,
+            })
+            .collect())
+    }
+
+    /// Removes a linked worktree that no running session uses. A dirty one
+    /// needs `force`. The branch is kept.
+    async fn remove_worktree(&self, path: &str, force: bool) -> anyhow::Result<()> {
+        let path = Path::new(path)
+            .canonicalize()
+            .with_context(|| format!("no such directory: {path}"))?;
+        let users: Vec<_> = self
+            .sessions
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|s| {
+                s.is_alive()
+                    && (s.tree_root() == Some(path.as_path()) || s.cwd().starts_with(&path))
+            })
+            .map(|s| format!("#{}", s.id))
+            .collect();
+        anyhow::ensure!(
+            users.is_empty(),
+            "session {} is running in {}; terminate it first",
+            users.join(", "),
+            path.display()
+        );
+        let target = path.clone();
+        tokio::task::spawn_blocking(move || hive_workspace::remove_worktree(&target, force))
+            .await??;
+        tracing::info!(path = %path.display(), force, "worktree removed");
+        Ok(())
+    }
+
+    /// Republishes sessions whose branch changed (e.g. the agent ran
+    /// `git switch`).
+    fn refresh_branches(&self) {
+        let live: Vec<_> = self.sessions.lock().unwrap().values().cloned().collect();
+        for s in live {
+            if s.refresh_branch() {
+                s.publish();
+            }
+        }
+    }
+
     fn kill_timeout(&self) -> Duration {
         Duration::from_secs(self.config.daemon.kill_timeout_secs)
     }
@@ -196,9 +451,18 @@ impl Daemon {
                 .collect()
         };
         sessions.sort_by_key(|s| s.id);
+        let workspaces = self
+            .workspaces
+            .lock()
+            .unwrap()
+            .values()
+            .map(StoredWorkspace::from_info)
+            .collect();
         let bytes = Store {
             next_session_id: self.next_session.load(Ordering::Relaxed),
             sessions,
+            next_workspace_id: self.next_workspace.load(Ordering::Relaxed),
+            workspaces,
             ..Store::default()
         }
         .to_bytes();
@@ -225,6 +489,21 @@ async fn persist_loop(daemon: Arc<Daemon>) {
         while let Ok(_) | Err(TryRecvError::Lagged(_)) = rx.try_recv() {}
         daemon.persist(true);
     }
+}
+
+async fn branch_loop(daemon: Arc<Daemon>) {
+    let mut tick = tokio::time::interval(BRANCH_REFRESH);
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tick.tick().await;
+        daemon.refresh_branches();
+    }
+}
+
+/// Trimmed and capped; `None` when empty.
+fn clean_name(name: Option<&str>) -> Option<String> {
+    let name: String = name?.trim().chars().take(64).collect();
+    (!name.is_empty()).then_some(name)
 }
 
 /// Aborts the wrapped task when dropped, so background work dies with `run`
@@ -268,6 +547,7 @@ pub async fn run(paths: Paths, config: Config) -> anyhow::Result<()> {
 
     let daemon = Arc::new(Daemon::new(config, paths.state_dir.join("sessions.json")));
     let persister = AbortOnDrop(tokio::spawn(persist_loop(daemon.clone())));
+    let _branches = AbortOnDrop(tokio::spawn(branch_loop(daemon.clone())));
     let mut shutdown = daemon.shutdown.subscribe();
     let mut sigterm = signal(SignalKind::terminate())?;
     let mut sigint = signal(SignalKind::interrupt())?;

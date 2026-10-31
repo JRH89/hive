@@ -12,3 +12,4 @@ hive-protocol = { path = "crates/hive-protocol" }
 hive-core = { path = "crates/hive-core" }
 hive-daemon = { path = "crates/hive-daemon" }
 hive-tui = { path = "crates/hive-tui" }
+hive-workspace = { path = "crates/hive-workspace" }

@@ -17,7 +17,8 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use hive_core::config::Config;
 use hive_core::launch;
 use hive_protocol::{
-    ClientMessage, CreateSession, ServerMessage, SessionId, SessionInfo, SessionState, TermSize,
+    ClientMessage, CreateSession, NewWorktree, ServerMessage, SessionId, SessionInfo, SessionState,
+    TermSize, WorkspaceId, WorkspaceInfo,
 };
 
 use crate::keys;
@@ -64,8 +65,23 @@ pub enum Mode {
         input: String,
     },
     /// Agent picker for a new session; `selected` indexes `App::agents`.
+    /// Launches in `workspace` (or the current directory's), in a new git
+    /// worktree when `worktree` is set.
     NewSession {
         selected: usize,
+        workspace: Option<WorkspaceId>,
+        worktree: bool,
+    },
+    /// Workspace picker; `selected` indexes `App::workspace_order()`.
+    Workspaces {
+        selected: usize,
+    },
+    AddWorkspace {
+        input: String,
+    },
+    RenameWorkspace {
+        workspace: WorkspaceId,
+        input: String,
     },
 }
 
@@ -103,6 +119,7 @@ pub struct View {
 pub struct App {
     pub config: Config,
     pub sessions: BTreeMap<SessionId, SessionInfo>,
+    pub workspaces: BTreeMap<WorkspaceId, WorkspaceInfo>,
     pub view: Option<View>,
     pub mode: Mode,
     pub focus: Focus,
@@ -123,6 +140,29 @@ pub struct App {
     prefer: Option<SessionId>,
     /// A session we created and should attach to once it is confirmed.
     awaiting_create: bool,
+    /// Worktrees to remove once their session is gone (kill with `w`).
+    remove_worktree_after: BTreeMap<SessionId, String>,
+}
+
+/// Result of a key in a one-line text prompt.
+enum Edit {
+    Submit,
+    Cancel,
+    Editing,
+}
+
+fn edit_line(input: &mut String, key: &KeyEvent) -> Edit {
+    match key.code {
+        KeyCode::Enter => return Edit::Submit,
+        KeyCode::Esc => return Edit::Cancel,
+        KeyCode::Backspace => {
+            input.pop();
+        }
+        KeyCode::Char('u') if key.modifiers == KeyModifiers::CONTROL => input.clear(),
+        KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => input.push(c),
+        _ => {}
+    }
+    Edit::Editing
 }
 
 fn nz(v: u16) -> NonZeroU16 {
@@ -154,6 +194,7 @@ impl App {
         let mut app = App {
             config,
             sessions: BTreeMap::new(),
+            workspaces: BTreeMap::new(),
             view: None,
             mode: Mode::Normal,
             focus: Focus::Terminal,
@@ -168,6 +209,7 @@ impl App {
             start: Some(start),
             prefer: None,
             awaiting_create: false,
+            remove_worktree_after: BTreeMap::new(),
         };
         app.set_terminal_size(terminal);
         app
@@ -196,9 +238,72 @@ impl App {
         self.view.as_ref().and_then(|v| self.sessions.get(&v.id))
     }
 
-    /// Session ids in sidebar order (creation order).
+    /// Workspaces in sidebar order (creation order), including any that
+    /// sessions refer to but whose details haven't arrived yet.
+    pub fn workspace_order(&self) -> Vec<WorkspaceId> {
+        let mut ids: Vec<WorkspaceId> = self.workspaces.keys().copied().collect();
+        ids.extend(self.sessions.values().map(|s| s.workspace));
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    }
+
+    /// Sidebar groups: each workspace with its sessions in creation order.
+    pub fn groups(&self) -> Vec<(WorkspaceId, Vec<SessionId>)> {
+        self.workspace_order()
+            .into_iter()
+            .map(|w| {
+                let ids = self
+                    .sessions
+                    .values()
+                    .filter(|s| s.workspace == w)
+                    .map(|s| s.id)
+                    .collect();
+                (w, ids)
+            })
+            .collect()
+    }
+
+    /// Session ids in sidebar order: grouped by workspace, then creation.
     pub fn order(&self) -> Vec<SessionId> {
-        self.sessions.keys().copied().collect()
+        self.groups().into_iter().flat_map(|(_, ids)| ids).collect()
+    }
+
+    pub fn workspace_name(&self, id: WorkspaceId) -> &str {
+        self.workspaces.get(&id).map_or("…", |w| w.name.as_str())
+    }
+
+    /// The workspace new sessions go to: the attached session's, else the
+    /// selected one's, else the one containing the current directory.
+    pub fn active_workspace(&self) -> Option<WorkspaceId> {
+        let of = |id: Option<SessionId>| {
+            id.and_then(|id| self.sessions.get(&id))
+                .map(|s| s.workspace)
+        };
+        of(self.view.as_ref().map(|v| v.id))
+            .or_else(|| of(self.cursor))
+            .or_else(|| {
+                let cwd = std::env::current_dir().ok()?;
+                let key = hive_workspace::workspace_key(&cwd);
+                let roots = self
+                    .workspaces
+                    .values()
+                    .map(|w| (w.id, std::path::Path::new(&w.root)));
+                hive_workspace::best_match(roots, &key)
+            })
+    }
+
+    /// Other running sessions in exactly the same directory (not isolated
+    /// by a worktree).
+    pub fn sharing_dir(&self, id: SessionId) -> Vec<SessionId> {
+        let Some(s) = self.sessions.get(&id).filter(|s| s.state.is_alive()) else {
+            return Vec::new();
+        };
+        self.sessions
+            .values()
+            .filter(|o| o.id != id && o.state.is_alive() && o.cwd == s.cwd)
+            .map(|o| o.id)
+            .collect()
     }
 
     /// True if the status is a notice about who controls input, which is
@@ -213,7 +318,7 @@ impl App {
 
     /// Initial requests once connected.
     pub fn on_connect(&mut self) -> Vec<ClientMessage> {
-        let mut out = vec![ClientMessage::ListSessions];
+        let mut out = vec![ClientMessage::ListWorkspaces, ClientMessage::ListSessions];
         match self.start.take() {
             Some(Start::Attach(id)) => out.push(self.attach(id)),
             Some(Start::Create(mut req)) => {
@@ -283,6 +388,13 @@ impl App {
             ServerMessage::Welcome { .. } => {}
             ServerMessage::Error { message } => {
                 self.awaiting_create = false;
+                let message = match message.strip_suffix(" has uncommitted changes") {
+                    Some(path) => format!(
+                        "Kept worktree {}: it has uncommitted changes. `hive worktree rm --force {path}` discards them.",
+                        base_name(path)
+                    ),
+                    None => message,
+                };
                 self.set_status(Tone::Error, message);
             }
             ServerMessage::SessionList(list) => {
@@ -304,11 +416,24 @@ impl App {
             }
             ServerMessage::SessionCreated(info) => {
                 let id = info.id;
-                self.sessions.insert(id, info);
+                // The reply and the broadcast travel separately: an update
+                // (e.g. an instant exit) may already be here and is newer.
+                self.sessions.entry(id).or_insert(info);
                 if std::mem::take(&mut self.awaiting_create) {
                     out.push(self.attach(id));
                     self.focus = Focus::Terminal;
                     self.status = None;
+                    let shared = self.sharing_dir(id);
+                    if !shared.is_empty() {
+                        let ids: Vec<_> = shared.iter().map(|i| format!("#{i}")).collect();
+                        self.set_status(
+                            Tone::Warning,
+                            format!(
+                                "Same directory as {}: agents may overwrite each other. Leader n, then w, isolates one in a worktree.",
+                                ids.join(", ")
+                            ),
+                        );
+                    }
                 }
             }
             ServerMessage::Attached {
@@ -325,9 +450,7 @@ impl App {
                 self.sessions.insert(session.id, session);
                 if !controller {
                     self.set_status(Tone::Warning, OBSERVING);
-                } else if self.status_is_control_notice()
-                    || !matches!(self.status, Some((Tone::Error | Tone::Warning, _)))
-                {
+                } else if self.status_is_control_notice() {
                     self.status = None;
                 }
             }
@@ -380,6 +503,16 @@ impl App {
             }
             ServerMessage::SessionRemoved(id) => {
                 self.sessions.remove(&id);
+                if matches!(&self.status, Some((Tone::Info, m)) if *m == terminating(id)) {
+                    self.status = None;
+                }
+                if let Some(path) = self.remove_worktree_after.remove(&id) {
+                    self.set_status(
+                        Tone::Info,
+                        format!("Removing worktree {}…", base_name(&path)),
+                    );
+                    out.push(ClientMessage::RemoveWorktree { path, force: false });
+                }
                 if self.mode == Mode::ConfirmKill(id)
                     || matches!(self.mode, Mode::Rename { session, .. } if session == id)
                 {
@@ -388,6 +521,28 @@ impl App {
             }
             ServerMessage::ShuttingDown => {
                 self.exit = Some(Outcome::DaemonGone("the daemon shut down".into()));
+            }
+            ServerMessage::WorkspaceList(list) => {
+                self.workspaces = list.into_iter().map(|w| (w.id, w)).collect();
+            }
+            ServerMessage::WorkspaceCreated(w) | ServerMessage::WorkspaceUpdated(w) => {
+                self.workspaces.insert(w.id, w);
+            }
+            ServerMessage::WorkspaceRemoved(id) => {
+                self.workspaces.remove(&id);
+                if let Mode::Workspaces { selected } = &mut self.mode {
+                    *selected = (*selected).min(self.workspaces.len().saturating_sub(1));
+                }
+            }
+            ServerMessage::WorktreeList { .. } => {}
+            ServerMessage::WorktreeRemoved { path } => {
+                self.set_status(
+                    Tone::Info,
+                    format!(
+                        "Removed worktree {}. Its branch was kept.",
+                        base_name(&path)
+                    ),
+                );
             }
         }
         self.fix_cursor();
@@ -398,7 +553,10 @@ impl App {
         match event {
             Event::Key(key) if key.kind != KeyEventKind::Release => self.on_key(key),
             Event::Paste(text) => {
-                if let Mode::Rename { input, .. } = &mut self.mode {
+                if let Mode::Rename { input, .. }
+                | Mode::AddWorkspace { input }
+                | Mode::RenameWorkspace { input, .. } = &mut self.mode
+                {
                     input.extend(text.chars().filter(|c| !c.is_control()));
                     return Vec::new();
                 }
@@ -452,16 +610,29 @@ impl App {
             }
             Mode::ConfirmKill(id) => {
                 self.mode = Mode::Normal;
-                if matches!(key.code, KeyCode::Char('y' | 'Y')) {
-                    self.set_status(Tone::Info, format!("Terminating session {id}…"));
-                    vec![ClientMessage::KillSession(id)]
-                } else {
-                    self.status = None;
-                    Vec::new()
+                let worktree = self.sessions.get(&id).and_then(|s| s.worktree.clone());
+                match (key.code, worktree) {
+                    (KeyCode::Char('y' | 'Y'), _) => {
+                        self.set_status(Tone::Info, terminating(id));
+                        vec![ClientMessage::KillSession(id)]
+                    }
+                    (KeyCode::Char('w'), Some(path)) => {
+                        self.set_status(Tone::Info, terminating(id));
+                        self.remove_worktree_after.insert(id, path);
+                        vec![ClientMessage::KillSession(id)]
+                    }
+                    _ => {
+                        self.status = None;
+                        Vec::new()
+                    }
                 }
             }
             Mode::Rename { .. } => self.on_rename_key(key),
             Mode::NewSession { .. } => self.on_picker_key(key),
+            Mode::Workspaces { .. } => self.on_workspaces_key(key),
+            Mode::AddWorkspace { .. } | Mode::RenameWorkspace { .. } => {
+                self.on_workspace_prompt_key(key)
+            }
             Mode::Leader => {
                 self.mode = Mode::Normal;
                 self.on_leader_command(key)
@@ -502,7 +673,8 @@ impl App {
                     self.focus = Focus::Terminal;
                 }
             }
-            KeyCode::Char('n') => self.open_picker(),
+            KeyCode::Char('n') => self.open_picker(None),
+            KeyCode::Char('w') => self.open_workspaces(),
             KeyCode::Char('x') => {
                 if let Some(id) = self.cursor {
                     self.mode = Mode::ConfirmKill(id);
@@ -535,7 +707,8 @@ impl App {
         let current = self.view.as_ref().map(|v| v.id);
         match key.code {
             KeyCode::Char('d' | 'q') => return self.detach(),
-            KeyCode::Char('n') => self.open_picker(),
+            KeyCode::Char('n') => self.open_picker(None),
+            KeyCode::Char('w') => self.open_workspaces(),
             KeyCode::Char('j') | KeyCode::Down => return self.switch_relative(1),
             KeyCode::Char('k') | KeyCode::Up => return self.switch_relative(-1),
             KeyCode::Char('s') | KeyCode::Tab => {
@@ -642,6 +815,8 @@ impl App {
             cwd: info.cwd.clone(),
             env,
             size: self.panel,
+            workspace: Some(info.workspace).filter(|w| self.workspaces.contains_key(w)),
+            worktree: None,
         };
         self.awaiting_create = true;
         self.set_status(Tone::Info, format!("Relaunching {}…", info.label));
@@ -680,7 +855,7 @@ impl App {
         }
         self.daemon_pid = Some(daemon_pid);
         self.start = Some(Start::Auto);
-        vec![ClientMessage::ListSessions]
+        vec![ClientMessage::ListWorkspaces, ClientMessage::ListSessions]
     }
 
     fn start_rename(&mut self, id: SessionId) {
@@ -696,27 +871,132 @@ impl App {
         let Mode::Rename { session, input } = &mut self.mode else {
             return Vec::new();
         };
-        match key.code {
-            KeyCode::Enter => {
+        match edit_line(input, &key) {
+            Edit::Submit => {
                 let msg = ClientMessage::RenameSession {
                     session: *session,
                     label: std::mem::take(input),
                 };
                 self.mode = Mode::Normal;
-                return vec![msg];
+                vec![msg]
             }
-            KeyCode::Esc => self.mode = Mode::Normal,
-            KeyCode::Backspace => {
-                input.pop();
+            Edit::Cancel => {
+                self.mode = Mode::Normal;
+                Vec::new()
             }
-            KeyCode::Char('u') if key.modifiers == KeyModifiers::CONTROL => input.clear(),
-            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => input.push(c),
+            Edit::Editing => Vec::new(),
+        }
+    }
+
+    fn open_workspaces(&mut self) {
+        let order = self.workspace_order();
+        let selected = self
+            .active_workspace()
+            .and_then(|w| order.iter().position(|&o| o == w))
+            .unwrap_or(0);
+        self.mode = Mode::Workspaces { selected };
+    }
+
+    fn on_workspaces_key(&mut self, key: KeyEvent) -> Vec<ClientMessage> {
+        let order = self.workspace_order();
+        let Mode::Workspaces { selected } = &mut self.mode else {
+            return Vec::new();
+        };
+        let last = order.len().saturating_sub(1);
+        if let Some(n) = digit(&key).filter(|&n| n <= last) {
+            *selected = n;
+        }
+        let chosen = order.get(*selected).copied();
+        match key.code {
+            KeyCode::Down | KeyCode::Char('j') => *selected = (*selected + 1).min(last),
+            KeyCode::Up | KeyCode::Char('k') => *selected = selected.saturating_sub(1),
+            KeyCode::Esc | KeyCode::Char('q') => self.mode = Mode::Normal,
+            KeyCode::Char('a') => {
+                let input = std::env::current_dir()
+                    .map(|d| d.display().to_string())
+                    .unwrap_or_default();
+                self.mode = Mode::AddWorkspace { input };
+            }
+            KeyCode::Char('n') => {
+                if let Some(w) = chosen {
+                    self.open_picker(Some(w));
+                }
+            }
+            KeyCode::Char('r') => {
+                if let Some(w) = chosen {
+                    let input = self.workspace_name(w).to_string();
+                    self.mode = Mode::RenameWorkspace {
+                        workspace: w,
+                        input,
+                    };
+                }
+            }
+            KeyCode::Char('x') => {
+                if let Some(w) = chosen {
+                    return vec![ClientMessage::RemoveWorkspace(w)];
+                }
+            }
+            KeyCode::Enter | KeyCode::Char('1'..='9') => {
+                if let Some(w) = chosen {
+                    self.mode = Mode::Normal;
+                    return self.open_workspace(w);
+                }
+            }
             _ => {}
         }
         Vec::new()
     }
 
-    fn open_picker(&mut self) {
+    /// Shows the workspace's most recent session, or offers to launch one.
+    fn open_workspace(&mut self, w: WorkspaceId) -> Vec<ClientMessage> {
+        let candidates = || {
+            self.sessions
+                .values()
+                .filter(|s| s.workspace == w && s.state != SessionState::Lost)
+        };
+        let pick = candidates()
+            .filter(|s| s.state.is_alive())
+            .map(|s| s.id)
+            .max()
+            .or_else(|| candidates().map(|s| s.id).max());
+        match pick {
+            Some(id) => self.switch_to(id),
+            None => {
+                self.open_picker(Some(w));
+                Vec::new()
+            }
+        }
+    }
+
+    fn on_workspace_prompt_key(&mut self, key: KeyEvent) -> Vec<ClientMessage> {
+        let (Mode::AddWorkspace { input } | Mode::RenameWorkspace { input, .. }) = &mut self.mode
+        else {
+            return Vec::new();
+        };
+        match edit_line(input, &key) {
+            Edit::Editing => Vec::new(),
+            Edit::Cancel => {
+                self.mode = Mode::Normal;
+                Vec::new()
+            }
+            Edit::Submit => {
+                let msg = match std::mem::replace(&mut self.mode, Mode::Normal) {
+                    Mode::AddWorkspace { input } => {
+                        let path = expand_home(input.trim());
+                        ClientMessage::CreateWorkspace { path, name: None }
+                    }
+                    Mode::RenameWorkspace { workspace, input } => ClientMessage::RenameWorkspace {
+                        workspace,
+                        name: input,
+                    },
+                    _ => unreachable!("matched above"),
+                };
+                vec![msg]
+            }
+        }
+    }
+
+    fn open_picker(&mut self, workspace: Option<WorkspaceId>) {
         let path = std::env::var_os("PATH").unwrap_or_default();
         self.agents = self
             .config
@@ -733,13 +1013,34 @@ impl App {
             .iter()
             .position(|a| a.name == self.config.general.default_agent)
             .unwrap_or(0);
-        self.mode = Mode::NewSession { selected };
+        self.mode = Mode::NewSession {
+            selected,
+            workspace: workspace.or_else(|| self.active_workspace()),
+            worktree: false,
+        };
+    }
+
+    /// Whether the picker's target workspace can host worktrees.
+    pub fn picker_can_worktree(&self) -> bool {
+        match &self.mode {
+            Mode::NewSession {
+                workspace: Some(w), ..
+            } => self.workspaces.get(w).is_some_and(|w| w.is_repo),
+            _ => false,
+        }
     }
 
     fn on_picker_key(&mut self, key: KeyEvent) -> Vec<ClientMessage> {
-        let Mode::NewSession { selected } = &mut self.mode else {
+        let can_worktree = self.picker_can_worktree();
+        let Mode::NewSession {
+            selected,
+            workspace,
+            worktree,
+        } = &mut self.mode
+        else {
             return Vec::new();
         };
+        let (workspace, use_worktree) = (*workspace, *worktree);
         let last = self.agents.len().saturating_sub(1);
         let choose = match (digit(&key), key.code) {
             (Some(n), _) if n <= last => Some(n),
@@ -756,6 +1057,10 @@ impl App {
                 self.mode = Mode::Normal;
                 None
             }
+            (_, KeyCode::Char('w')) if can_worktree => {
+                *worktree = !*worktree;
+                None
+            }
             _ => None,
         };
         match choose
@@ -764,15 +1069,25 @@ impl App {
         {
             Some(agent) => {
                 self.mode = Mode::Normal;
-                self.create_session(&agent)
+                self.create_session(&agent, workspace, use_worktree)
             }
             None => Vec::new(),
         }
     }
 
-    fn create_session(&mut self, agent: &str) -> Vec<ClientMessage> {
-        match launch::create_request(&self.config, agent, None, None, &[], self.panel) {
-            Ok(req) => {
+    fn create_session(
+        &mut self,
+        agent: &str,
+        workspace: Option<WorkspaceId>,
+        worktree: bool,
+    ) -> Vec<ClientMessage> {
+        let root = workspace
+            .and_then(|w| self.workspaces.get(&w))
+            .map(|w| std::path::PathBuf::from(&w.root));
+        match launch::create_request(&self.config, agent, None, root, &[], self.panel) {
+            Ok(mut req) => {
+                req.workspace = workspace;
+                req.worktree = worktree.then_some(NewWorktree { branch: None });
                 self.awaiting_create = true;
                 self.set_status(Tone::Info, format!("Launching {agent}…"));
                 vec![ClientMessage::CreateSession(req)]
@@ -792,6 +1107,27 @@ impl App {
     }
 }
 
+fn terminating(id: SessionId) -> String {
+    format!("Terminating session {id}…")
+}
+
+fn base_name(path: &str) -> &str {
+    path.trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap_or(path)
+}
+
+/// `~` and `~/x` to the home directory, as a shell would.
+fn expand_home(path: &str) -> String {
+    match (path.strip_prefix('~'), std::env::var("HOME")) {
+        (Some(rest), Ok(home)) if rest.is_empty() || rest.starts_with('/') => {
+            format!("{home}{rest}")
+        }
+        _ => path.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -808,6 +1144,9 @@ mod tests {
             size: TermSize::DEFAULT,
             created_at: 0,
             attached_clients: 0,
+            workspace: 1,
+            branch: None,
+            worktree: None,
         }
     }
 
@@ -879,7 +1218,10 @@ mod tests {
     #[test]
     fn auto_start_attaches_newest_live_session() {
         let mut app = App::new(Config::default(), Start::Auto, (80, 26));
-        assert_eq!(app.on_connect(), vec![ClientMessage::ListSessions]);
+        assert_eq!(
+            app.on_connect(),
+            vec![ClientMessage::ListWorkspaces, ClientMessage::ListSessions]
+        );
         let out = app.on_server(ServerMessage::SessionList(vec![
             info(1, SessionState::Running),
             info(2, SessionState::Running),
@@ -1014,7 +1356,7 @@ mod tests {
         );
         let mut app = App::new(config, Start::Auto, (100, 26));
         app.on_terminal_event(ch('n'));
-        let Mode::NewSession { selected } = app.mode else {
+        let Mode::NewSession { selected, .. } = app.mode else {
             panic!("picker not open")
         };
         assert_eq!(app.agents[selected].name, "shell");
@@ -1223,7 +1565,10 @@ mod tests {
                 .contains("before")
         );
 
-        assert_eq!(app.on_reconnected(100), vec![ClientMessage::ListSessions]);
+        assert_eq!(
+            app.on_reconnected(100),
+            vec![ClientMessage::ListWorkspaces, ClientMessage::ListSessions]
+        );
         assert_eq!(app.link, Link::Connected);
         assert!(app.status.is_none(), "same daemon: nothing to warn about");
         let out = app.on_server(ServerMessage::SessionList(
@@ -1302,5 +1647,234 @@ mod tests {
             SessionState::Running,
         )));
         assert_eq!(out, attach_msg(&app, 9));
+    }
+
+    fn ws(id: WorkspaceId, name: &str, is_repo: bool) -> WorkspaceInfo {
+        WorkspaceInfo {
+            id,
+            name: name.into(),
+            root: format!("/src/{name}"),
+            is_repo,
+        }
+    }
+
+    /// `app()` plus workspaces: 1 `web` (repo, sessions 1-3), 2 `api`
+    /// (repo, empty), 3 `notes` (not git, empty).
+    fn app_with_workspaces() -> App {
+        let mut app = app();
+        app.on_server(ServerMessage::WorkspaceList(vec![
+            ws(1, "web", true),
+            ws(2, "api", true),
+            ws(3, "notes", false),
+        ]));
+        app
+    }
+
+    fn choose_shell(app: &mut App) -> Vec<ClientMessage> {
+        let shell = app.agents.iter().position(|a| a.name == "shell").unwrap();
+        let Mode::NewSession { selected, .. } = &mut app.mode else {
+            panic!("picker not open: {:?}", app.mode)
+        };
+        *selected = shell;
+        app.on_terminal_event(key(KeyCode::Enter, KeyModifiers::NONE))
+    }
+
+    #[test]
+    fn new_session_targets_the_active_workspace_and_can_use_a_worktree() {
+        let mut app = app_with_workspaces();
+        app.on_terminal_event(leader());
+        app.on_terminal_event(ch('n'));
+        assert!(matches!(
+            app.mode,
+            Mode::NewSession {
+                workspace: Some(1),
+                worktree: false,
+                ..
+            }
+        ));
+        assert!(app.picker_can_worktree());
+        app.on_terminal_event(ch('w'));
+        assert!(matches!(app.mode, Mode::NewSession { worktree: true, .. }));
+        let out = choose_shell(&mut app);
+        let [ClientMessage::CreateSession(req)] = out.as_slice() else {
+            panic!("expected CreateSession, got {out:?}")
+        };
+        assert_eq!(req.workspace, Some(1));
+        assert_eq!(req.cwd, "/src/web");
+        assert_eq!(req.worktree, Some(NewWorktree { branch: None }));
+    }
+
+    #[test]
+    fn worktree_toggle_is_ignored_outside_git() {
+        let mut app = app_with_workspaces();
+        app.open_picker(Some(3));
+        assert!(!app.picker_can_worktree());
+        app.on_terminal_event(ch('w'));
+        assert!(matches!(
+            app.mode,
+            Mode::NewSession {
+                worktree: false,
+                ..
+            }
+        ));
+        let out = choose_shell(&mut app);
+        let [ClientMessage::CreateSession(req)] = out.as_slice() else {
+            panic!("expected CreateSession, got {out:?}")
+        };
+        assert_eq!((req.workspace, req.worktree.clone()), (Some(3), None));
+    }
+
+    #[test]
+    fn workspace_picker_opens_sessions_or_offers_to_launch() {
+        let mut app = app_with_workspaces();
+        app.on_terminal_event(leader());
+        app.on_terminal_event(ch('w'));
+        assert_eq!(
+            app.mode,
+            Mode::Workspaces { selected: 0 },
+            "starts on the active one"
+        );
+        // Enter on `web` switches to its newest live session.
+        app.on_terminal_event(ch('j'));
+        app.on_terminal_event(ch('k'));
+        assert_eq!(
+            app.on_terminal_event(key(KeyCode::Enter, KeyModifiers::NONE)),
+            attach_msg(&app, 3)
+        );
+        // `api` has no sessions: the agent picker opens for it.
+        app.on_terminal_event(leader());
+        app.on_terminal_event(ch('w'));
+        app.on_terminal_event(ch('2'));
+        assert!(matches!(
+            app.mode,
+            Mode::NewSession {
+                workspace: Some(2),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn workspaces_are_added_renamed_and_removed_from_the_picker() {
+        let mut app = app_with_workspaces();
+        app.open_workspaces();
+        app.on_terminal_event(ch('a'));
+        let Mode::AddWorkspace { input } = &mut app.mode else {
+            panic!("expected the add prompt")
+        };
+        assert!(!input.is_empty(), "prefilled with the current directory");
+        input.clear();
+        app.on_terminal_event(Event::Paste("/src/new".into()));
+        assert_eq!(
+            app.on_terminal_event(key(KeyCode::Enter, KeyModifiers::NONE)),
+            vec![ClientMessage::CreateWorkspace {
+                path: "/src/new".into(),
+                name: None
+            }]
+        );
+
+        app.open_workspaces();
+        app.on_terminal_event(ch('j'));
+        app.on_terminal_event(ch('r'));
+        assert!(
+            matches!(&app.mode, Mode::RenameWorkspace { workspace: 2, input } if input == "api")
+        );
+        app.on_terminal_event(ch('2'));
+        assert_eq!(
+            app.on_terminal_event(key(KeyCode::Enter, KeyModifiers::NONE)),
+            vec![ClientMessage::RenameWorkspace {
+                workspace: 2,
+                name: "api2".into()
+            }]
+        );
+
+        app.open_workspaces();
+        app.on_terminal_event(ch('j'));
+        app.on_terminal_event(ch('j'));
+        assert_eq!(
+            app.on_terminal_event(ch('x')),
+            vec![ClientMessage::RemoveWorkspace(3)]
+        );
+        app.on_server(ServerMessage::WorkspaceRemoved(3));
+        assert_eq!(app.mode, Mode::Workspaces { selected: 1 });
+    }
+
+    #[test]
+    fn killing_with_w_removes_the_worktree_after_the_session_is_gone() {
+        let mut app = app_with_workspaces();
+        let mut s = info(2, SessionState::Running);
+        s.worktree = Some("/wt/web/hive-shell-2".into());
+        app.on_server(ServerMessage::SessionUpdated(s));
+        app.mode = Mode::ConfirmKill(2);
+        assert_eq!(
+            app.on_terminal_event(ch('w')),
+            vec![ClientMessage::KillSession(2)]
+        );
+        assert_eq!(
+            app.on_server(ServerMessage::SessionRemoved(2)),
+            vec![ClientMessage::RemoveWorktree {
+                path: "/wt/web/hive-shell-2".into(),
+                force: false
+            }]
+        );
+        // The notice survives the view moving on to another session.
+        app.on_server(ServerMessage::WorktreeRemoved {
+            path: "/wt/web/hive-shell-2".into(),
+        });
+        attached(&mut app, 1);
+        assert!(
+            matches!(&app.status, Some((Tone::Info, m)) if m.contains("Removed worktree hive-shell-2")),
+            "{:?}",
+            app.status
+        );
+        // A dirty worktree is kept, and the error says how to force it.
+        app.on_server(ServerMessage::Error {
+            message: "/wt/web/hive-shell-2 has uncommitted changes".into(),
+        });
+        assert!(matches!(&app.status, Some((Tone::Error, m)) if m.contains("--force")));
+
+        // `w` means nothing for a session without a worktree: it cancels.
+        app.mode = Mode::ConfirmKill(3);
+        assert!(app.on_terminal_event(ch('w')).is_empty());
+        assert!(app.on_server(ServerMessage::SessionRemoved(3)).is_empty());
+    }
+
+    #[test]
+    fn a_late_created_reply_does_not_undo_a_newer_update() {
+        let mut app = app();
+        let exited = SessionState::Exited {
+            code: Some(3),
+            signal: None,
+        };
+        app.on_server(ServerMessage::SessionUpdated(info(9, exited.clone())));
+        app.on_server(ServerMessage::SessionCreated(info(
+            9,
+            SessionState::Running,
+        )));
+        assert_eq!(app.sessions[&9].state, exited);
+    }
+
+    #[test]
+    fn launching_into_a_busy_directory_warns() {
+        let mut app = app_with_workspaces();
+        app.open_picker(None);
+        choose_shell(&mut app);
+        // `info` sessions all run in "/"; the new one does too.
+        app.on_server(ServerMessage::SessionCreated(info(
+            4,
+            SessionState::Running,
+        )));
+        assert!(
+            matches!(&app.status, Some((Tone::Warning, m)) if m.contains("#1, #2, #3") && m.contains("worktree")),
+            "{:?}",
+            app.status
+        );
+        let mut isolated = info(5, SessionState::Running);
+        isolated.cwd = "/wt/x".into();
+        isolated.worktree = Some("/wt/x".into());
+        app.open_picker(None);
+        choose_shell(&mut app);
+        app.on_server(ServerMessage::SessionCreated(isolated));
+        assert_eq!(app.status, None);
     }
 }

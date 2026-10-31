@@ -2,7 +2,7 @@
 //! partial file is valid.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
@@ -13,6 +13,7 @@ pub struct Config {
     pub branding: Branding,
     pub terminal: Terminal,
     pub daemon: Daemon,
+    pub worktrees: Worktrees,
     /// User-defined or overridden agents, keyed by name.
     pub agents: BTreeMap<String, AgentDef>,
 }
@@ -81,6 +82,25 @@ impl Default for Daemon {
             auto_start: true,
             kill_timeout_secs: 3,
         }
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Worktrees {
+    /// Where Hive creates linked worktrees. Defaults to
+    /// `$XDG_DATA_HOME/hive/worktrees`.
+    pub dir: Option<PathBuf>,
+}
+
+impl Worktrees {
+    pub fn base_dir(&self) -> PathBuf {
+        self.dir.clone().unwrap_or_else(|| {
+            dirs::data_dir()
+                .unwrap_or_else(std::env::temp_dir)
+                .join("hive")
+                .join("worktrees")
+        })
     }
 }
 
@@ -200,6 +220,14 @@ mod tests {
             vec!["/opt/claude/bin/claude", "--verbose", "x"]
         );
         assert_eq!(c.agent("aider").unwrap().env["AIDER_DARK_MODE"], "1");
+    }
+
+    #[test]
+    fn worktree_dir_defaults_to_data_dir_and_can_be_set() {
+        let c = Config::parse("").unwrap();
+        assert!(c.worktrees.base_dir().ends_with("hive/worktrees"));
+        let c = Config::parse("[worktrees]\ndir = \"/x/wt\"").unwrap();
+        assert_eq!(c.worktrees.base_dir(), PathBuf::from("/x/wt"));
     }
 
     #[test]

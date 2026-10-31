@@ -18,10 +18,11 @@ The rule (spec §4): **hived owns processes, PTYs and terminal state. The TUI is
 | `hive-protocol` | Serde message enums and the u32-LE + postcard framing. No I/O beyond `AsyncRead`/`AsyncWrite`. See [[IPC Protocol]] |
 | `hive-core` | `brand` constants, `paths` (runtime/state/config dirs with 0700 enforcement), `config` (TOML and built-in agents), `launch` (agent → `CreateSession`, PATH check), `client` (connect, handshake, auto-start `hived`) |
 | `hive-daemon` | lib: `run()`, `Daemon` registry, `server` (per-connection), `session` (PTY threads), `responder` (terminal query replies). bin: `hived` |
+| `hive-workspace` | git discovery from `.git` files (`discover`, `read_branch`, `workspace_key`, `best_match`) and the git subprocess calls for worktrees. No async, no protocol types |
 | `hive-tui` | `app` (pure state machine returning `ClientMessage`s), `render`, `keys` (crossterm → PTY bytes), `theme` |
 | `hive-cli` | bin `hive`: clap subcommands, launches the TUI |
 
-No `hive-pty`, `hive-agents` or `hive-workspace` crates yet. Spec §5 says not to create empty crates. Split them out when Phase 2 and 4 code gives them a real job.
+No `hive-pty` or `hive-agents` crates yet. Spec §5 says not to create empty crates. `hive-workspace` was split out in Phase 4 once it had a real job.
 
 ## Data flow: output
 1. A per-session **reader thread** does a blocking `read()` on the PTY master (16 KiB).
@@ -46,6 +47,7 @@ PTY I/O and `child.wait()` are blocking, so each session has 3 OS threads (read,
 | socket, lock | `$XDG_RUNTIME_DIR/hive/` (0700), socket 0600 | `HIVE_RUNTIME_DIR` |
 | logs `hived.log`, `hive.log`; `sessions.json` (0600, metadata only) | `$XDG_STATE_HOME/hive/` | `HIVE_STATE_DIR` |
 | config | `~/.config/hive/config.toml` | `HIVE_CONFIG` |
+| worktrees | `$XDG_DATA_HOME/hive/worktrees/<repo>-<hash>/<branch>` | `[worktrees] dir` |
 | daemon binary | sibling of `hive`, then `$PATH` | `HIVE_DAEMON_BIN` |
 
 Log level is set with `HIVE_LOG` (an EnvFilter string). The runtime dir path must fit a Unix socket path (about 107 bytes), so a deep `HIVE_RUNTIME_DIR` fails with "path must be shorter than SUN_LEN".

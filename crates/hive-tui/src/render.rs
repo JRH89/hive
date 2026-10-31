@@ -1,7 +1,7 @@
 //! Drawing. Reads `App` only; never mutates state.
 
 use hive_core::brand;
-use hive_protocol::{SessionInfo, SessionState};
+use hive_protocol::{SessionId, SessionInfo, SessionState, WorkspaceId};
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
@@ -51,7 +51,12 @@ pub fn draw(frame: &mut Frame, app: &App, theme: &Theme) {
     }
     match app.mode {
         Mode::Help => draw_help(frame, body, theme),
-        Mode::NewSession { selected } => draw_picker(frame, body, app, selected, theme),
+        Mode::NewSession {
+            selected,
+            workspace,
+            worktree,
+        } => draw_picker(frame, body, app, selected, workspace, worktree, theme),
+        Mode::Workspaces { selected } => draw_workspaces(frame, body, app, selected, theme),
         _ => {}
     }
 }
@@ -75,9 +80,14 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             format!("  {}", short_path(&s.cwd)),
             bar.fg(theme.muted),
         ));
+        if let Some(branch) = &s.branch {
+            left.push(Span::styled(format!(" ({branch})"), bar.fg(theme.muted)));
+        }
     }
+    let left_width: usize = left.iter().map(|s| s.content.chars().count()).sum();
+    let room = (area.width as usize).saturating_sub(left_width);
     frame.render_widget(Paragraph::new(Line::from(left)).style(bar), area);
-    if app.config.branding.show_tagline {
+    if app.config.branding.show_tagline && room > brand::TAGLINE.chars().count() + 2 {
         let tagline = format!("{} ", brand::TAGLINE);
         frame.render_widget(
             Paragraph::new(Span::styled(tagline, bar.fg(theme.muted))).alignment(Alignment::Right),
@@ -115,6 +125,38 @@ fn dir_name(cwd: &str) -> &str {
         .unwrap_or("/")
 }
 
+/// One sidebar entry. Sessions take two rows, everything else one.
+enum Item {
+    Workspace(WorkspaceId),
+    NoSessions,
+    Session { position: usize, id: SessionId },
+}
+
+impl Item {
+    fn height(&self) -> u16 {
+        match self {
+            Item::Session { .. } => 2,
+            _ => 1,
+        }
+    }
+}
+
+fn sidebar_items(app: &App) -> Vec<Item> {
+    let mut items = Vec::new();
+    let mut position = 0;
+    for (w, ids) in app.groups() {
+        items.push(Item::Workspace(w));
+        if ids.is_empty() {
+            items.push(Item::NoSessions);
+        }
+        for id in ids {
+            items.push(Item::Session { position, id });
+            position += 1;
+        }
+    }
+    items
+}
+
 fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let border = Block::new()
         .borders(Borders::RIGHT)
@@ -129,7 +171,7 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let focused = app.focus == Focus::Sidebar || app.sidebar_keys_active();
     frame.render_widget(
         Paragraph::new(Span::styled(
-            " SESSIONS",
+            " WORKSPACES",
             if focused {
                 heading.fg(theme.accent)
             } else {
@@ -139,81 +181,153 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         Rect { height: 1, ..inner },
     );
 
-    let order = app.order();
-    let rows_available = inner.height.saturating_sub(2) as usize;
-    let per_page = (rows_available / 2).max(1);
-    let cursor_idx = app
-        .cursor
-        .and_then(|c| order.iter().position(|&id| id == c))
-        .unwrap_or(0);
-    let offset = cursor_idx.saturating_sub(per_page - 1);
-    let current = app.view.as_ref().map(|v| v.id);
-    let width = inner.width as usize;
-
-    for (slot, (idx, id)) in order
+    let items = sidebar_items(app);
+    let top = inner.y + 2;
+    let bottom = inner.y + inner.height;
+    let available = bottom.saturating_sub(top);
+    // Scroll just enough that the cursor's session is visible.
+    let cursor_idx = items
         .iter()
-        .enumerate()
-        .skip(offset)
-        .take(per_page)
-        .enumerate()
+        .position(|i| matches!(i, Item::Session { id, .. } if Some(*id) == app.cursor))
+        .unwrap_or(0);
+    let mut start = 0;
+    while start < cursor_idx
+        && items[start..=cursor_idx]
+            .iter()
+            .map(Item::height)
+            .sum::<u16>()
+            > available
     {
-        let Some(s) = app.sessions.get(id) else {
-            continue;
-        };
-        let y = inner.y + 2 + (slot as u16) * 2;
-        if y + 1 >= inner.y + inner.height {
+        start += 1;
+    }
+
+    let current = app.view.as_ref().map(|v| v.id);
+    let current_ws = app.current().map(|s| s.workspace);
+    let width = inner.width as usize;
+    let mut y = top;
+    for item in &items[start..] {
+        if y + item.height() > bottom {
             break;
         }
-        let is_current = current == Some(*id);
-        let is_cursor = focused && app.cursor == Some(*id);
-        let base = if is_cursor {
-            Style::new().bg(theme.surface)
-        } else {
-            Style::new()
-        };
-        let (dot, dot_color) = state_dot(&s.state, theme);
-        let label_style = match (is_current, s.state.is_alive()) {
-            (true, _) => base.fg(theme.accent).add_modifier(Modifier::BOLD),
-            (false, true) => base.fg(theme.text),
-            (false, false) => base.fg(theme.muted),
-        };
-        let number = if idx < 9 {
-            format!("{} ", idx + 1)
-        } else {
-            "  ".into()
-        };
-        let label_width = width.saturating_sub(4 + number.len());
-        let line1 = Line::from(vec![
-            Span::styled(if is_current { "▌" } else { " " }, base.fg(theme.accent)),
-            Span::styled(format!("{dot} "), base.fg(dot_color)),
-            Span::styled(truncate(&s.label, label_width), label_style),
-        ]);
-        let detail = match (&s.state, s.label == s.agent) {
-            (SessionState::Lost, _) => format!("ended · {}", dir_name(&s.cwd)),
-            (_, true) => dir_name(&s.cwd).to_string(),
-            (_, false) => format!("{} · {}", s.agent, dir_name(&s.cwd)),
-        };
-        let line2 = Line::from(Span::styled(
-            format!("   {}", truncate(&detail, width.saturating_sub(4))),
-            base.fg(theme.muted),
-        ));
-        let row1 = Rect {
+        let row = |y| Rect {
             y,
             height: 1,
             ..inner
         };
-        let row2 = Rect {
-            y: y + 1,
-            height: 1,
-            ..inner
-        };
-        frame.render_widget(Paragraph::new(line1).style(base), row1);
-        frame.render_widget(
-            Paragraph::new(Span::styled(number, base.fg(theme.muted))).alignment(Alignment::Right),
-            row1,
-        );
-        frame.render_widget(Paragraph::new(line2).style(base), row2);
+        match item {
+            Item::Workspace(w) => {
+                let style = if current_ws == Some(*w) {
+                    heading.fg(theme.text)
+                } else {
+                    heading
+                };
+                let name = truncate(app.workspace_name(*w), width.saturating_sub(3));
+                frame.render_widget(
+                    Paragraph::new(Line::from(vec![
+                        Span::styled(" ▾ ", Style::new().fg(theme.accent_dim)),
+                        Span::styled(name, style),
+                    ])),
+                    row(y),
+                );
+            }
+            Item::NoSessions => {
+                frame.render_widget(
+                    Paragraph::new(Span::styled("   no sessions", Style::new().fg(theme.muted))),
+                    row(y),
+                );
+            }
+            Item::Session { position, id } => {
+                if let Some(s) = app.sessions.get(id) {
+                    let is_cursor = focused && app.cursor == Some(*id);
+                    let shared = !app.sharing_dir(*id).is_empty();
+                    draw_sidebar_session(
+                        frame,
+                        [row(y), row(y + 1)],
+                        s,
+                        *position,
+                        current == Some(*id),
+                        is_cursor,
+                        shared,
+                        theme,
+                    );
+                }
+            }
+        }
+        y += item.height();
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_sidebar_session(
+    frame: &mut Frame,
+    [row1, row2]: [Rect; 2],
+    s: &SessionInfo,
+    position: usize,
+    is_current: bool,
+    is_cursor: bool,
+    shared: bool,
+    theme: &Theme,
+) {
+    let width = row1.width as usize;
+    let base = if is_cursor {
+        Style::new().bg(theme.surface)
+    } else {
+        Style::new()
+    };
+    let (dot, dot_color) = state_dot(&s.state, theme);
+    let label_style = match (is_current, s.state.is_alive()) {
+        (true, _) => base.fg(theme.accent).add_modifier(Modifier::BOLD),
+        (false, true) => base.fg(theme.text),
+        (false, false) => base.fg(theme.muted),
+    };
+    let number = if position < 9 {
+        format!("{} ", position + 1)
+    } else {
+        "  ".into()
+    };
+    let label_width = width.saturating_sub(4 + number.len() + if shared { 2 } else { 0 });
+    let mut line1 = vec![
+        Span::styled(if is_current { "▌" } else { " " }, base.fg(theme.accent)),
+        Span::styled(format!("{dot} "), base.fg(dot_color)),
+        Span::styled(truncate(&s.label, label_width), label_style),
+    ];
+    if shared {
+        // Another running agent uses the same directory.
+        line1.push(Span::styled(
+            " !",
+            base.fg(theme.warning).add_modifier(Modifier::BOLD),
+        ));
+    }
+    // Branch (or directory) first: it tells sessions apart, so it should
+    // survive truncation.
+    let place = s
+        .branch
+        .clone()
+        .unwrap_or_else(|| dir_name(&s.cwd).to_string());
+    let mut detail = Vec::new();
+    if s.state == SessionState::Lost {
+        detail.push("ended".to_string());
+    }
+    detail.push(place);
+    if s.label != s.agent {
+        detail.push(s.agent.clone());
+    }
+    let mut line2 = vec![Span::styled("   ", base)];
+    let mut room = width.saturating_sub(4);
+    if s.worktree.is_some() {
+        line2.push(Span::styled("wt ", base.fg(theme.accent_dim)));
+        room = room.saturating_sub(3);
+    }
+    line2.push(Span::styled(
+        truncate(&detail.join(" · "), room),
+        base.fg(theme.muted),
+    ));
+    frame.render_widget(Paragraph::new(Line::from(line1)).style(base), row1);
+    frame.render_widget(
+        Paragraph::new(Span::styled(number, base.fg(theme.muted))).alignment(Alignment::Right),
+        row1,
+    );
+    frame.render_widget(Paragraph::new(Line::from(line2)).style(base), row2);
 }
 
 fn draw_status(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
@@ -254,6 +368,7 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 ("1-9", "jump"),
                 ("s", "sidebar"),
                 ("n", "new"),
+                ("w", "workspaces"),
                 ("r", "rename"),
                 ("x", "kill"),
                 ("d", "detach"),
@@ -262,15 +377,41 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             spans
         }
         Mode::ConfirmKill(id) => {
-            let name = app
-                .sessions
-                .get(id)
-                .map(|s| s.label.as_str())
-                .unwrap_or("session");
+            let session = app.sessions.get(id);
+            let name = session.map(|s| s.label.as_str()).unwrap_or("session");
+            let choices = if session.is_some_and(|s| s.worktree.is_some()) {
+                "y terminate · w terminate and remove its worktree · any other key cancels"
+            } else {
+                "y to confirm, any other key cancels"
+            };
             vec![Span::styled(
-                format!(" Terminate {name} (session {id})? y to confirm, any other key cancels "),
+                format!(" Terminate {name} (session {id})? {choices} "),
                 bar.fg(theme.warning).add_modifier(Modifier::BOLD),
             )]
+        }
+        Mode::AddWorkspace { input } => vec![
+            Span::styled(" Add workspace (directory): ", bar.fg(theme.accent)),
+            Span::styled(input.clone(), bar.add_modifier(Modifier::BOLD)),
+            Span::styled("▏", key),
+            Span::styled("  enter add · esc cancel", muted),
+        ],
+        Mode::RenameWorkspace { input, .. } => vec![
+            Span::styled(" Rename workspace: ", bar.fg(theme.accent)),
+            Span::styled(input.clone(), bar.add_modifier(Modifier::BOLD)),
+            Span::styled("▏", key),
+            Span::styled("  enter save · esc cancel · empty resets", muted),
+        ],
+        Mode::Workspaces { .. } => {
+            let mut spans = vec![Span::styled(" Workspaces", bar.fg(theme.accent))];
+            spans.extend(hints(&[
+                ("enter", "open"),
+                ("n", "new session"),
+                ("a", "add"),
+                ("r", "rename"),
+                ("x", "remove"),
+                ("esc", "close"),
+            ]));
+            spans
         }
         Mode::Rename { session, input } => vec![
             Span::styled(format!(" Rename session {session}: "), bar.fg(theme.accent)),
@@ -285,6 +426,9 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 ("enter", "launch"),
                 ("esc", "cancel"),
             ]));
+            if app.picker_can_worktree() {
+                spans.extend(hints(&[("w", "worktree")]));
+            }
             spans
         }
         Mode::Help => vec![Span::styled(" Help · any key to close", muted)],
@@ -301,6 +445,7 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                     ("↑↓", "select"),
                     ("enter", "open"),
                     ("n", "new"),
+                    ("w", "workspaces"),
                     ("r", "rename"),
                     ("x", "kill"),
                     ("q", "detach"),
@@ -337,10 +482,17 @@ fn session_summary<'a>(s: &SessionInfo, app: &App, theme: &Theme, bar: Style) ->
         SessionState::Failed { reason } => format!("failed: {reason}"),
         SessionState::Lost => "ended when hived stopped".to_string(),
     };
+    let mut place = app.workspace_name(s.workspace).to_string();
+    if let Some(branch) = &s.branch {
+        place = format!("{place} · {branch}");
+    }
     let mut spans = vec![
         Span::styled(format!(" {dot} "), bar.fg(color)),
         Span::styled(format!("#{} {}", s.id, s.label), bar),
-        Span::styled(format!(" · {state} · {}", counts(app)), bar.fg(theme.muted)),
+        Span::styled(
+            format!(" · {place} · {state} · {}", counts(app)),
+            bar.fg(theme.muted),
+        ),
     ];
     if app.view.as_ref().is_some_and(|v| !v.controller) {
         spans.push(Span::styled(" · observing", bar.fg(theme.warning)));
@@ -446,16 +598,30 @@ fn popup(
     inner
 }
 
-fn draw_picker(frame: &mut Frame, area: Rect, app: &App, selected: usize, theme: &Theme) {
+fn draw_picker(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    selected: usize,
+    workspace: Option<WorkspaceId>,
+    worktree: bool,
+    theme: &Theme,
+) {
+    let title = match workspace {
+        Some(w) => format!("New session in {}", app.workspace_name(w)),
+        None => "New session".to_string(),
+    };
+    let can_worktree = app.picker_can_worktree();
+    let extra = if can_worktree { 2 } else { 0 };
     let inner = popup(
         frame,
         area,
         48,
-        app.agents.len() as u16 + 2,
-        "New session",
+        app.agents.len() as u16 + 2 + extra,
+        &title,
         theme,
     );
-    let lines: Vec<Line> = app
+    let mut lines: Vec<Line> = app
         .agents
         .iter()
         .enumerate()
@@ -498,6 +664,87 @@ fn draw_picker(frame: &mut Frame, area: Rect, app: &App, selected: usize, theme:
             .style(base)
         })
         .collect();
+    if can_worktree {
+        lines.push(Line::raw(""));
+        lines.push(Line::from(vec![
+            Span::styled(" w ", Style::new().fg(theme.accent)),
+            Span::styled("own git worktree: ", Style::new().fg(theme.muted)),
+            if worktree {
+                Span::styled(
+                    "on (new branch)",
+                    Style::new().fg(theme.accent).add_modifier(Modifier::BOLD),
+                )
+            } else {
+                Span::styled("off (shares the repository)", Style::new().fg(theme.text))
+            },
+        ]));
+    }
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+fn draw_workspaces(frame: &mut Frame, area: Rect, app: &App, selected: usize, theme: &Theme) {
+    let order = app.workspace_order();
+    let inner = popup(
+        frame,
+        area,
+        60,
+        order.len().max(1) as u16 + 2,
+        "Workspaces",
+        theme,
+    );
+    if order.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                " No workspaces yet. a adds one.",
+                Style::new().fg(theme.muted),
+            )),
+            inner,
+        );
+        return;
+    }
+    let lines: Vec<Line> = order
+        .iter()
+        .enumerate()
+        .map(|(i, w)| {
+            let chosen = i == selected;
+            let fg = |c: Color| if chosen { Color::Black } else { c };
+            let base = if chosen {
+                Style::new().bg(theme.accent)
+            } else {
+                Style::new()
+            };
+            let count = app.sessions.values().filter(|s| s.workspace == *w).count();
+            let root = app
+                .workspaces
+                .get(w)
+                .map(|w| short_path(&w.root))
+                .unwrap_or_default();
+            let num = if i < 9 {
+                format!(" {} ", i + 1)
+            } else {
+                "   ".into()
+            };
+            Line::from(vec![
+                Span::styled(num, base.fg(fg(theme.muted))),
+                Span::styled(
+                    format!("{:<14} ", truncate(app.workspace_name(*w), 14)),
+                    base.fg(fg(theme.text)).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!(
+                        "{count:>2} {:<9}",
+                        if count == 1 { "session" } else { "sessions" }
+                    ),
+                    base.fg(fg(theme.muted)),
+                ),
+                Span::styled(
+                    truncate(&root, inner.width.saturating_sub(31) as usize),
+                    base.fg(fg(theme.muted)),
+                ),
+            ])
+            .style(base)
+        })
+        .collect();
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
@@ -530,7 +777,8 @@ fn draw_help(frame: &mut Frame, area: Rect, theme: &Theme) {
         ("Ctrl+Space j / k", "Next / previous session"),
         ("Ctrl+Space 1-9", "Jump to session"),
         ("Ctrl+Space s", "Focus sidebar (↑↓ enter, esc back)"),
-        ("Ctrl+Space n", "New session (pick an agent)"),
+        ("Ctrl+Space n", "New session (w in picker: own worktree)"),
+        ("Ctrl+Space w", "Workspaces (open, add, rename, remove)"),
         ("Ctrl+Space r", "Rename session"),
         ("Ctrl+Space x", "Terminate session"),
         ("Ctrl+Space a", "Take input control back"),
@@ -622,6 +870,18 @@ mod tests {
             size: TermSize::DEFAULT,
             created_at: 0,
             attached_clients: 0,
+            workspace: 1,
+            branch: None,
+            worktree: None,
+        }
+    }
+
+    fn workspace(id: u64, name: &str) -> hive_protocol::WorkspaceInfo {
+        hive_protocol::WorkspaceInfo {
+            id,
+            name: name.into(),
+            root: format!("/home/u/{name}"),
+            is_repo: true,
         }
     }
 
@@ -638,6 +898,7 @@ mod tests {
     #[test]
     fn sidebar_lists_sessions_and_marks_the_current_one() {
         let mut app = App::new(Config::default(), Start::Attach(2), (80, 12));
+        app.on_server(ServerMessage::WorkspaceList(vec![workspace(1, "proj")]));
         app.on_server(ServerMessage::SessionList(vec![
             session(1, "claude", SessionState::Running),
             session(2, "api", SessionState::Running),
@@ -656,12 +917,15 @@ mod tests {
             controller: true,
         });
         let lines = rendered(&app, 80, 12);
-        assert!(lines[1].contains("SESSIONS"));
-        assert!(lines[3].contains("● claude") && lines[3].contains('1'));
-        assert!(lines[4].contains("proj"));
-        assert!(lines[5].starts_with("▌● api"), "{:?}", lines[5]);
-        assert!(lines[6].contains("claude · proj"));
-        assert!(lines[7].contains("○ old"));
+        assert!(lines[1].contains("WORKSPACES"));
+        assert!(lines[3].contains("▾ proj"), "{:?}", lines[3]);
+        assert!(lines[4].contains("● claude") && lines[4].contains('1'));
+        // Both running sessions use /home/u/proj: flagged as sharing.
+        assert!(lines[4].contains(" !"), "{:?}", lines[4]);
+        assert!(lines[5].contains("proj"));
+        assert!(lines[6].starts_with("▌● api"), "{:?}", lines[6]);
+        assert!(lines[7].contains("proj · claude"));
+        assert!(lines[8].contains("○ old") && !lines[8].contains('!'));
         // The agent's screen starts right of the sidebar.
         let panel: String = lines[1]
             .chars()
@@ -669,6 +933,44 @@ mod tests {
             .take(12)
             .collect();
         assert_eq!(panel, "agent output");
+    }
+
+    #[test]
+    fn sidebar_groups_by_workspace_with_branches_and_worktrees() {
+        let mut app = App::new(Config::default(), Start::Attach(2), (80, 14));
+        app.on_server(ServerMessage::WorkspaceList(vec![
+            workspace(1, "web"),
+            workspace(2, "api"),
+            workspace(3, "empty"),
+        ]));
+        let mut wt = session(2, "codex", SessionState::Running);
+        wt.workspace = 2;
+        wt.agent = "codex".into();
+        wt.cwd = "/data/wt/hive-codex-2".into();
+        wt.branch = Some("hive/codex-2".into());
+        wt.worktree = Some(wt.cwd.clone());
+        let mut main = session(1, "claude", SessionState::Running);
+        main.branch = Some("main".into());
+        // Session 3 belongs to web but is created last: it still sorts there.
+        let mut late = session(3, "later", SessionState::Running);
+        late.cwd = "/home/u/other".into();
+        app.on_server(ServerMessage::SessionList(vec![main, wt, late]));
+        assert_eq!(app.order(), vec![1, 3, 2]);
+
+        let lines = rendered(&app, 80, 14);
+        assert!(lines[3].contains("▾ web"));
+        assert!(lines[4].contains("● claude") && lines[4].contains('1'));
+        assert!(
+            lines[5].contains("main"),
+            "branch replaces the directory: {:?}",
+            lines[5]
+        );
+        assert!(lines[6].contains("● later") && lines[6].contains('2'));
+        assert!(lines[8].contains("▾ api"));
+        assert!(lines[9].contains("● codex") && lines[9].contains('3'));
+        assert!(lines[10].contains("wt hive/codex-2"), "{:?}", lines[10]);
+        assert!(lines[11].contains("▾ empty"));
+        assert!(lines[12].contains("no sessions"));
     }
 
     #[test]

@@ -137,7 +137,7 @@ impl Connection {
                 self.send(ServerMessage::SessionList(self.daemon.list()))
                     .await
             }
-            ClientMessage::CreateSession(req) => match self.daemon.create(req) {
+            ClientMessage::CreateSession(req) => match self.daemon.create(req).await {
                 Ok(info) => self.send(ServerMessage::SessionCreated(info)).await,
                 Err(e) => self.error(format!("{e:#}")).await,
             },
@@ -183,6 +183,44 @@ impl Connection {
             ClientMessage::Shutdown => {
                 tracing::info!(client = self.id, "shutdown requested");
                 self.daemon.shutdown.send_replace(true);
+            }
+            ClientMessage::ListWorkspaces => {
+                self.send(ServerMessage::WorkspaceList(self.daemon.list_workspaces()))
+                    .await
+            }
+            ClientMessage::CreateWorkspace { path, name } => {
+                match self.daemon.create_workspace(&path, name) {
+                    Ok(info) => self.send(ServerMessage::WorkspaceCreated(info)).await,
+                    Err(e) => self.error(format!("{e:#}")).await,
+                }
+            }
+            ClientMessage::RenameWorkspace { workspace, name } => {
+                if let Err(e) = self.daemon.rename_workspace(workspace, &name) {
+                    self.error(format!("{e:#}")).await;
+                }
+            }
+            ClientMessage::RemoveWorkspace(id) => {
+                if let Err(e) = self.daemon.remove_workspace(id) {
+                    self.error(format!("{e:#}")).await;
+                }
+            }
+            ClientMessage::ListWorktrees(workspace) => {
+                match self.daemon.list_worktrees(workspace).await {
+                    Ok(worktrees) => {
+                        self.send(ServerMessage::WorktreeList {
+                            workspace,
+                            worktrees,
+                        })
+                        .await
+                    }
+                    Err(e) => self.error(format!("{e:#}")).await,
+                }
+            }
+            ClientMessage::RemoveWorktree { path, force } => {
+                match self.daemon.remove_worktree(&path, force).await {
+                    Ok(()) => self.send(ServerMessage::WorktreeRemoved { path }).await,
+                    Err(e) => self.error(format!("{e:#}")).await,
+                }
             }
         }
     }
@@ -243,14 +281,19 @@ impl Connection {
 async fn forward_events(daemon: Arc<Daemon>, out: mpsc::Sender<ServerMessage>) {
     let mut rx = daemon.events.subscribe();
     loop {
-        let msg = match rx.recv().await {
-            Ok(msg) => msg,
+        let msgs = match rx.recv().await {
+            Ok(msg) => vec![msg],
             // Missed some updates: send the full picture instead.
-            Err(RecvError::Lagged(_)) => ServerMessage::SessionList(daemon.list()),
+            Err(RecvError::Lagged(_)) => vec![
+                ServerMessage::WorkspaceList(daemon.list_workspaces()),
+                ServerMessage::SessionList(daemon.list()),
+            ],
             Err(RecvError::Closed) => break,
         };
-        if out.send(msg).await.is_err() {
-            break;
+        for msg in msgs {
+            if out.send(msg).await.is_err() {
+                return;
+            }
         }
     }
 }

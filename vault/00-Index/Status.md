@@ -4,9 +4,9 @@ updated: 2026-10-30
 ---
 # Status
 
-**Phase 3 complete** (2026-10-30, branch `phase-3-persistence`, not yet committed or merged). The TUI auto-reconnects and auto-starts `hived`; sessions from a crashed daemon come back as `◌ ended` and can be relaunched; a second client observes until it takes control. See [[Phase 3 - Robust Persistence]]. Earlier: [[Phase 2 - Multiplexing]] (merged to master), [[Phase 1 - Foundation]].
+**Phase 4 complete** (2026-10-30, branch `phase-4-workspaces`, not yet committed). Sessions are grouped into workspaces by repository, branches show live, and agents can run in their own git worktrees with safe cleanup. See [[Phase 4 - Workspaces and Git]]. Earlier phases are merged to master: [[Phase 3 - Robust Persistence]], [[Phase 2 - Multiplexing]], [[Phase 1 - Foundation]].
 
-**Next:** [[Roadmap#Phase 4 — Workspaces and Git]]. Workspaces, repo discovery, branch display, optional worktrees.
+**Next:** [[Roadmap#Phase 5 — Product Experience and Branding]]. Command palette, themes, configurable keys, polish.
 
 ## Gate before every change
 ```bash
@@ -21,7 +21,8 @@ cargo test --workspace
 - Shift+Enter is not distinguishable (no kitty keyboard protocol).
 - Processes don't survive a daemon crash (by design, spec §4). Only metadata does, as `Lost` sessions ([[ADR-0009 Persist session metadata, mark lost sessions]]).
 - Killing an interactive shell session waits the full kill timeout (bash ignores SIGTERM).
-- New sessions launched from the TUI use the `hive` process's cwd (no directory prompt yet).
+- New sessions launched from the TUI start in the active workspace's root (or `hive`'s cwd). No free-form directory prompt.
+- Worktrees can't be listed from the TUI, and custom branch names are CLI-only (`hive new -b`).
 - No activity indicator for background sessions (see [[ADR-0007 Switching re-attaches]]).
 
 ## Website (separate from Rust phases)
