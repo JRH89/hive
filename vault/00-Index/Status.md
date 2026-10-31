@@ -29,4 +29,4 @@ cargo test --workspace
 ## Website
 - Next.js static export in `website/`, deployed by Vercel from GitHub (`vercel.json`: framework nextjs, image content types for the extensionless OG/apple-icon routes).
 - SEO (2026-10-30): canonical, title/description/keywords, OG and Twitter large-image cards (generated 1200×630 PNG), robots.txt, sitemap.xml, manifest, apple icon, SoftwareApplication + FAQPage JSON-LD. Content updated to the finished roadmap. Verified by headless Chromium screenshots at 1440 and 390 px and by checking the exported head tags.
-- DNS for codefrontlabs.com is on Cloudflare: `hive` needs a CNAME to `cname.vercel-dns.com` (DNS only).
+- DNS for codefrontlabs.com is on Cloudflare: `hive` is a CNAME to `cname.vercel-dns.com` (DNS only). Live since 2026-10-30, Vercel certificate valid to 2027-01-29.
