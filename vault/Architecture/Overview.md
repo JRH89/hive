@@ -19,7 +19,7 @@ The rule (spec §4): **hived owns processes, PTYs and terminal state. The TUI is
 | `hive-core` | `brand` constants, `paths` (runtime/state/config dirs with 0700 enforcement), `config` (TOML and built-in agents), `launch` (agent → `CreateSession`, PATH check), `client` (connect, handshake, auto-start `hived`) |
 | `hive-daemon` | lib: `run()`, `Daemon` registry, `server` (per-connection), `session` (PTY threads), `responder` (terminal query replies). bin: `hived` |
 | `hive-workspace` | git discovery from `.git` files (`discover`, `read_branch`, `workspace_key`, `best_match`) and the git subprocess calls for worktrees. No async, no protocol types |
-| `hive-tui` | `app` (pure state machine returning `ClientMessage`s), `render`, `keys` (crossterm → PTY bytes), `theme` |
+| `hive-tui` | `app` (pure state machine returning `ClientMessage`s), `render`, `keys` (crossterm → PTY bytes), `keymap` (`Command`s and bindings, [[ADR-0014 Configurable keymap of named commands]]), `theme` (palette + glyphs by depth, [[ADR-0013 Themes degrade by colour depth and glyph set]]) |
 | `hive-cli` | bin `hive`: clap subcommands, launches the TUI |
 
 No `hive-pty` or `hive-agents` crates yet. Spec §5 says not to create empty crates. `hive-workspace` was split out in Phase 4 once it had a real job.

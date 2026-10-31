@@ -2,6 +2,7 @@
 //! so exiting or crashing here leaves every agent running.
 
 mod app;
+mod keymap;
 mod keys;
 mod render;
 mod theme;
@@ -57,20 +58,37 @@ enum Phase {
 
 type Term = ratatui::DefaultTerminal;
 
+/// Validates the frontend parts of the config (theme, keys), so mistakes are
+/// reported before the terminal switches to the alternate screen.
+pub fn check_config(config: &Config) -> anyhow::Result<()> {
+    theme_for(config)?;
+    keymap::Keymap::from_config(&config.keys)?;
+    Ok(())
+}
+
+fn theme_for(config: &Config) -> anyhow::Result<Theme> {
+    Ok(Theme::from_config(
+        &config.general.theme,
+        &config.theme,
+        &theme::Env::current(),
+    )?)
+}
+
 pub async fn run(
     paths: Paths,
     client: Client,
     config: Config,
     start: Start,
 ) -> anyhow::Result<Outcome> {
+    let theme = theme_for(&config)?;
     let mut terminal = ratatui::try_init()?;
     let _guard = TerminalGuard;
     execute!(stdout(), EnableBracketedPaste)?;
 
-    let theme = Theme::detect();
     let size = terminal.size()?;
     let auto_start = config.daemon.auto_start;
     let mut app = App::new(config, start, (size.width, size.height));
+    app.config_path = Some(paths.config_file.display().to_string());
     app.daemon_pid = Some(client.daemon.pid);
     let mut events = EventStream::new();
 
@@ -254,5 +272,18 @@ async fn reconnect(
                 delay = (delay * 2).min(MAX_RECONNECT_DELAY);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn example_config_is_valid() {
+        let config = Config::parse(include_str!("../../../examples/config.toml"))
+            .expect("examples/config.toml parses");
+        check_config(&config).expect("examples/config.toml validates");
+        assert!(config.agents().contains_key("aider"));
     }
 }

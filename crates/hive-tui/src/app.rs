@@ -21,6 +21,7 @@ use hive_protocol::{
     TermSize, WorkspaceId, WorkspaceInfo,
 };
 
+use crate::keymap::{Command, Keymap};
 use crate::keys;
 
 /// Sidebar width including its 1-column border.
@@ -83,6 +84,30 @@ pub enum Mode {
         workspace: WorkspaceId,
         input: String,
     },
+    /// Searchable list of commands, sessions and workspaces. `selected`
+    /// indexes `App::palette_items()`.
+    Palette {
+        query: String,
+        selected: usize,
+        sessions_only: bool,
+    },
+}
+
+/// What a palette entry does when chosen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Target {
+    Command(Command),
+    Session(SessionId),
+    Workspace(WorkspaceId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaletteItem {
+    pub target: Target,
+    pub title: String,
+    pub detail: String,
+    /// Bound key, shown on the right.
+    pub key: Option<String>,
 }
 
 /// State of the connection to the daemon.
@@ -118,6 +143,9 @@ pub struct View {
 
 pub struct App {
     pub config: Config,
+    pub keymap: Keymap,
+    /// Shown by the settings command.
+    pub config_path: Option<String>,
     pub sessions: BTreeMap<SessionId, SessionInfo>,
     pub workspaces: BTreeMap<WorkspaceId, WorkspaceInfo>,
     pub view: Option<View>,
@@ -176,10 +204,34 @@ fn new_parser(size: TermSize, snapshot: &[u8]) -> vt100::Parser {
     p
 }
 
-/// The leader key. Ctrl+Space is NUL on the wire, which agents essentially
-/// never need and terminals report consistently.
-pub fn is_leader(key: &KeyEvent) -> bool {
-    key.code == KeyCode::Char(' ') && key.modifiers == KeyModifiers::CONTROL
+/// Case-insensitive subsequence match. Higher is better: a contiguous
+/// substring wins, then consecutive letters and word starts; gaps cost a
+/// little.
+fn fuzzy(query: &str, text: &str) -> Option<i32> {
+    let lower = text.to_lowercase();
+    let q = query.trim().to_lowercase();
+    let text: Vec<char> = lower.chars().collect();
+    let mut score = if !q.is_empty() && lower.contains(&q) {
+        50
+    } else {
+        0
+    };
+    let mut pos = 0;
+    let mut prev: Option<usize> = None;
+    for q in query.to_lowercase().chars().filter(|c| !c.is_whitespace()) {
+        let found = (pos..text.len()).find(|&i| text[i] == q)?;
+        score += 10;
+        if prev.is_some_and(|p| p + 1 == found) {
+            score += 15;
+        }
+        if found == 0 || matches!(text[found - 1], ' ' | '/' | '-' | '_' | '#' | '.') {
+            score += 20;
+        }
+        score -= (found - pos).min(3) as i32;
+        prev = Some(found);
+        pos = found + 1;
+    }
+    Some(score)
 }
 
 fn digit(key: &KeyEvent) -> Option<usize> {
@@ -191,8 +243,14 @@ fn digit(key: &KeyEvent) -> Option<usize> {
 
 impl App {
     pub fn new(config: Config, start: Start, terminal: (u16, u16)) -> App {
+        let (keymap, key_error) = match Keymap::from_config(&config.keys) {
+            Ok(k) => (k, None),
+            Err(e) => (Keymap::default(), Some(e.to_string())),
+        };
         let mut app = App {
             config,
+            keymap,
+            config_path: None,
             sessions: BTreeMap::new(),
             workspaces: BTreeMap::new(),
             view: None,
@@ -212,6 +270,9 @@ impl App {
             remove_worktree_after: BTreeMap::new(),
         };
         app.set_terminal_size(terminal);
+        if let Some(e) = key_error {
+            app.set_status(Tone::Error, format!("{e}; using default keys"));
+        }
         app
     }
 
@@ -555,7 +616,8 @@ impl App {
             Event::Paste(text) => {
                 if let Mode::Rename { input, .. }
                 | Mode::AddWorkspace { input }
-                | Mode::RenameWorkspace { input, .. } = &mut self.mode
+                | Mode::RenameWorkspace { input, .. }
+                | Mode::Palette { query: input, .. } = &mut self.mode
                 {
                     input.extend(text.chars().filter(|c| !c.is_control()));
                     return Vec::new();
@@ -630,6 +692,7 @@ impl App {
             Mode::Rename { .. } => self.on_rename_key(key),
             Mode::NewSession { .. } => self.on_picker_key(key),
             Mode::Workspaces { .. } => self.on_workspaces_key(key),
+            Mode::Palette { .. } => self.on_palette_key(key),
             Mode::AddWorkspace { .. } | Mode::RenameWorkspace { .. } => {
                 self.on_workspace_prompt_key(key)
             }
@@ -637,7 +700,7 @@ impl App {
                 self.mode = Mode::Normal;
                 self.on_leader_command(key)
             }
-            Mode::Normal if is_leader(&key) => {
+            Mode::Normal if self.keymap.is_leader(&key) => {
                 self.mode = Mode::Leader;
                 Vec::new()
             }
@@ -675,6 +738,8 @@ impl App {
             }
             KeyCode::Char('n') => self.open_picker(None),
             KeyCode::Char('w') => self.open_workspaces(),
+            KeyCode::Char('p') => self.open_palette(false),
+            KeyCode::Char('/') => self.open_palette(true),
             KeyCode::Char('x') => {
                 if let Some(id) = self.cursor {
                     self.mode = Mode::ConfirmKill(id);
@@ -693,45 +758,217 @@ impl App {
     }
 
     fn on_leader_command(&mut self, key: KeyEvent) -> Vec<ClientMessage> {
-        if is_leader(&key) {
-            // Leader twice sends a literal Ctrl+Space (NUL) to the agent.
-            return if self.can_type() {
-                vec![ClientMessage::Input(vec![0])]
-            } else {
-                Vec::new()
+        if self.keymap.is_leader(&key) {
+            // Leader twice sends the leader key itself to the agent.
+            let app_cursor = self
+                .view
+                .as_ref()
+                .is_some_and(|v| v.parser.screen().application_cursor());
+            return match keys::encode(&self.keymap.leader.event(), app_cursor) {
+                Some(bytes) if self.can_type() => vec![ClientMessage::Input(bytes)],
+                _ => Vec::new(),
             };
         }
         if let Some(n) = digit(&key) {
             return self.switch_nth(n);
         }
+        match self.keymap.command(&key) {
+            Some(cmd) => self.run(cmd),
+            None => Vec::new(),
+        }
+    }
+
+    /// Runs a command from a leader key or the palette.
+    pub fn run(&mut self, cmd: Command) -> Vec<ClientMessage> {
         let current = self.view.as_ref().map(|v| v.id);
-        match key.code {
-            KeyCode::Char('d' | 'q') => return self.detach(),
-            KeyCode::Char('n') => self.open_picker(None),
-            KeyCode::Char('w') => self.open_workspaces(),
-            KeyCode::Char('j') | KeyCode::Down => return self.switch_relative(1),
-            KeyCode::Char('k') | KeyCode::Up => return self.switch_relative(-1),
-            KeyCode::Char('s') | KeyCode::Tab => {
+        match cmd {
+            Command::Palette => self.open_palette(false),
+            Command::SearchSessions => self.open_palette(true),
+            Command::NewSession => self.open_picker(None),
+            Command::NewWorktreeSession => {
+                self.open_picker(None);
+                if self.picker_can_worktree() {
+                    if let Mode::NewSession { worktree, .. } = &mut self.mode {
+                        *worktree = true;
+                    }
+                } else {
+                    self.set_status(
+                        Tone::Warning,
+                        "This workspace is not a git repository; the session will share its directory.",
+                    );
+                }
+            }
+            Command::Workspaces => self.open_workspaces(),
+            Command::AddWorkspace => {
+                let input = std::env::current_dir()
+                    .map(|d| d.display().to_string())
+                    .unwrap_or_default();
+                self.mode = Mode::AddWorkspace { input };
+            }
+            Command::RenameWorkspace => {
+                if let Some(w) = self.active_workspace() {
+                    let input = self.workspace_name(w).to_string();
+                    self.mode = Mode::RenameWorkspace {
+                        workspace: w,
+                        input,
+                    };
+                }
+            }
+            Command::NextSession => return self.switch_relative(1),
+            Command::PrevSession => return self.switch_relative(-1),
+            Command::Sidebar => {
                 self.focus = Focus::Sidebar;
                 self.cursor = current.or(self.cursor);
             }
-            KeyCode::Char('x') => {
-                if let Some(id) = current {
-                    self.mode = Mode::ConfirmKill(id);
-                }
-            }
-            KeyCode::Char('r') => {
-                if let Some(id) = current {
+            Command::Rename => {
+                if let Some(id) = current.or(self.cursor) {
                     self.start_rename(id);
                 }
             }
-            KeyCode::Char('a') => {
+            Command::Kill => {
+                if let Some(id) = current.or(self.cursor) {
+                    self.mode = Mode::ConfirmKill(id);
+                }
+            }
+            Command::TakeControl => {
                 if let Some(id) = current {
                     return vec![self.take_control(id)];
                 }
             }
-            KeyCode::Char('?') => self.mode = Mode::Help,
-            _ => {}
+            Command::Detach => return self.detach(),
+            Command::Help => self.mode = Mode::Help,
+            Command::Settings => {
+                let path = self
+                    .config_path
+                    .as_deref()
+                    .unwrap_or("~/.config/hive/config.toml");
+                self.set_status(
+                    Tone::Info,
+                    format!("Settings live in {path}. Changes apply the next time hive starts."),
+                );
+            }
+        }
+        Vec::new()
+    }
+
+    fn open_palette(&mut self, sessions_only: bool) {
+        self.mode = Mode::Palette {
+            query: String::new(),
+            selected: 0,
+            sessions_only,
+        };
+    }
+
+    /// Palette entries matching the current query, best first.
+    pub fn palette_items(&self) -> Vec<PaletteItem> {
+        let Mode::Palette {
+            query,
+            sessions_only,
+            ..
+        } = &self.mode
+        else {
+            return Vec::new();
+        };
+        let mut items: Vec<(PaletteItem, String)> = Vec::new();
+        if !sessions_only {
+            for cmd in Command::ALL {
+                if matches!(cmd, Command::Palette | Command::SearchSessions) {
+                    continue;
+                }
+                let item = PaletteItem {
+                    target: Target::Command(cmd),
+                    title: cmd.title().to_string(),
+                    detail: String::new(),
+                    key: self.keymap.hint(cmd),
+                };
+                items.push((item, cmd.title().to_string()));
+            }
+        }
+        for id in self.order() {
+            let s = &self.sessions[&id];
+            let workspace = self.workspace_name(s.workspace);
+            let mut detail = format!("#{} {} · {workspace}", s.id, s.agent);
+            if let Some(b) = &s.branch {
+                detail = format!("{detail} · {b}");
+            }
+            if s.state == SessionState::Lost {
+                detail.push_str(" · ended");
+            }
+            let haystack = format!("{} {detail}", s.label);
+            items.push((
+                PaletteItem {
+                    target: Target::Session(id),
+                    title: s.label.clone(),
+                    detail,
+                    key: None,
+                },
+                haystack,
+            ));
+        }
+        if !sessions_only {
+            for w in self.workspace_order() {
+                let name = self.workspace_name(w).to_string();
+                let root = self
+                    .workspaces
+                    .get(&w)
+                    .map(|w| w.root.clone())
+                    .unwrap_or_default();
+                items.push((
+                    PaletteItem {
+                        target: Target::Workspace(w),
+                        title: format!("Workspace: {name}"),
+                        detail: root.clone(),
+                        key: None,
+                    },
+                    format!("workspace {name} {root}"),
+                ));
+            }
+        }
+        if query.trim().is_empty() {
+            return items.into_iter().map(|(i, _)| i).collect();
+        }
+        let mut scored: Vec<(i32, PaletteItem)> = items
+            .into_iter()
+            .filter_map(|(item, hay)| fuzzy(query, &hay).map(|score| (score, item)))
+            .collect();
+        // Stable: equal scores keep their natural order.
+        scored.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
+        scored.into_iter().map(|(_, i)| i).collect()
+    }
+
+    fn on_palette_key(&mut self, key: KeyEvent) -> Vec<ClientMessage> {
+        let count = self.palette_items().len();
+        let chosen = match &self.mode {
+            Mode::Palette { selected, .. } => self.palette_items().get(*selected).map(|i| i.target),
+            _ => None,
+        };
+        let Mode::Palette {
+            query, selected, ..
+        } = &mut self.mode
+        else {
+            return Vec::new();
+        };
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        match key.code {
+            KeyCode::Down => *selected = (*selected + 1).min(count.saturating_sub(1)),
+            KeyCode::Char('n') if ctrl => *selected = (*selected + 1).min(count.saturating_sub(1)),
+            KeyCode::Up => *selected = selected.saturating_sub(1),
+            KeyCode::Char('p') if ctrl => *selected = selected.saturating_sub(1),
+            KeyCode::Enter => {
+                self.mode = Mode::Normal;
+                return match chosen {
+                    Some(Target::Command(cmd)) => self.run(cmd),
+                    Some(Target::Session(id)) if self.is_lost(id) => self.relaunch(id),
+                    Some(Target::Session(id)) => self.switch_to(id),
+                    Some(Target::Workspace(w)) => self.open_workspace(w),
+                    None => Vec::new(),
+                };
+            }
+            _ => match edit_line(query, &key) {
+                Edit::Cancel => self.mode = Mode::Normal,
+                Edit::Editing => *selected = 0,
+                Edit::Submit => {}
+            },
         }
         Vec::new()
     }
@@ -1876,5 +2113,135 @@ mod tests {
         choose_shell(&mut app);
         app.on_server(ServerMessage::SessionCreated(isolated));
         assert_eq!(app.status, None);
+    }
+
+    fn typed(app: &mut App, text: &str) {
+        for c in text.chars() {
+            app.on_terminal_event(ch(c));
+        }
+    }
+
+    fn enter() -> Event {
+        key(KeyCode::Enter, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn palette_finds_and_runs_commands() {
+        let mut app = app_with_workspaces();
+        app.on_terminal_event(leader());
+        app.on_terminal_event(ch('p'));
+        assert!(matches!(
+            app.mode,
+            Mode::Palette {
+                sessions_only: false,
+                ..
+            }
+        ));
+        let all = app.palette_items();
+        assert!(
+            all.iter()
+                .any(|i| i.target == Target::Command(Command::Settings))
+        );
+        assert!(all.iter().any(|i| i.target == Target::Session(2)));
+        assert!(all.iter().any(|i| i.target == Target::Workspace(2)));
+        // Navigation keys are typed into the query, not used to move.
+        typed(&mut app, "term");
+        let items = app.palette_items();
+        assert_eq!(items[0].target, Target::Command(Command::Kill));
+        assert_eq!(items[0].key.as_deref(), Some("x"));
+        assert!(app.on_terminal_event(enter()).is_empty());
+        assert_eq!(app.mode, Mode::ConfirmKill(1));
+    }
+
+    #[test]
+    fn session_search_switches_to_the_match() {
+        let mut app = app_with_workspaces();
+        for (id, label) in [(2, "frontend"), (3, "billing api")] {
+            let mut s = info(id, SessionState::Running);
+            s.label = label.into();
+            app.on_server(ServerMessage::SessionUpdated(s));
+        }
+        app.on_terminal_event(leader());
+        app.on_terminal_event(ch('/'));
+        assert!(
+            app.palette_items()
+                .iter()
+                .all(|i| matches!(i.target, Target::Session(_))),
+            "sessions only"
+        );
+        typed(&mut app, "bil");
+        assert_eq!(app.palette_items()[0].target, Target::Session(3));
+        // Ctrl+N / arrows move; Esc would close.
+        app.on_terminal_event(key(KeyCode::Backspace, KeyModifiers::NONE));
+        app.on_terminal_event(key(KeyCode::Backspace, KeyModifiers::NONE));
+        app.on_terminal_event(key(KeyCode::Backspace, KeyModifiers::NONE));
+        app.on_terminal_event(key(KeyCode::Char('n'), KeyModifiers::CONTROL));
+        assert_eq!(app.on_terminal_event(enter()), attach_msg(&app, 2));
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn fuzzy_prefers_word_starts_and_runs() {
+        assert!(fuzzy("ns", "New session") > fuzzy("ns", "Rename session"));
+        assert!(fuzzy("api", "billing api") > fuzzy("api", "a pile"));
+        assert_eq!(fuzzy("xyz", "New session"), None);
+        assert_eq!(fuzzy("", "anything"), Some(0));
+    }
+
+    #[test]
+    fn custom_leader_and_bindings_from_config() {
+        let mut config = Config::default();
+        config.keys.leader = "ctrl+a".into();
+        config.keys.bind.insert(
+            "kill_session".into(),
+            hive_core::config::KeyList::One("X".into()),
+        );
+        let mut app = App::new(config, Start::Attach(1), (100, 26));
+        app.on_server(ServerMessage::SessionList(vec![info(
+            1,
+            SessionState::Running,
+        )]));
+        attached(&mut app, 1);
+        // Ctrl+Space is no longer special: it goes to the agent as NUL.
+        assert_eq!(
+            app.on_terminal_event(leader()),
+            vec![ClientMessage::Input(vec![0])]
+        );
+        let ctrl_a = || key(KeyCode::Char('a'), KeyModifiers::CONTROL);
+        assert!(app.on_terminal_event(ctrl_a()).is_empty());
+        assert_eq!(app.mode, Mode::Leader);
+        // Leader twice sends the leader itself (Ctrl+A is 0x01).
+        assert_eq!(
+            app.on_terminal_event(ctrl_a()),
+            vec![ClientMessage::Input(vec![1])]
+        );
+        app.on_terminal_event(ctrl_a());
+        app.on_terminal_event(ch('x'));
+        assert_eq!(app.mode, Mode::Normal, "x is unbound now");
+        app.on_terminal_event(ctrl_a());
+        app.on_terminal_event(key(KeyCode::Char('X'), KeyModifiers::SHIFT));
+        assert_eq!(app.mode, Mode::ConfirmKill(1));
+    }
+
+    #[test]
+    fn invalid_keys_fall_back_to_defaults_with_an_error() {
+        let mut config = Config::default();
+        config.keys.leader = "a".into();
+        let app = App::new(config, Start::Auto, (100, 26));
+        assert!(
+            app.keymap
+                .is_leader(&KeyEvent::new(KeyCode::Char(' '), KeyModifiers::CONTROL))
+        );
+        assert!(matches!(&app.status, Some((Tone::Error, m)) if m.contains("leader")));
+    }
+
+    #[test]
+    fn settings_shows_the_config_path() {
+        let mut app = app();
+        app.config_path = Some("/home/u/.config/hive/config.toml".into());
+        app.run(Command::Settings);
+        assert!(
+            matches!(&app.status, Some((Tone::Info, m)) if m.contains("/home/u/.config/hive/config.toml"))
+        );
     }
 }

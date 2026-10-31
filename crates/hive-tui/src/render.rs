@@ -7,9 +7,10 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
-use crate::app::{App, Focus, Link, Mode, SIDEBAR_WIDTH, Tone};
+use crate::app::{App, Focus, Link, Mode, SIDEBAR_WIDTH, Target, Tone};
+use crate::keymap::Command;
 use crate::theme::Theme;
 
 pub fn draw(frame: &mut Frame, app: &App, theme: &Theme) {
@@ -31,9 +32,13 @@ pub fn draw(frame: &mut Frame, app: &App, theme: &Theme) {
     } else {
         body
     };
+    let mut agent_cells = None;
     match &app.view {
         Some(view) => {
             draw_terminal(frame.buffer_mut(), panel, view.parser.screen());
+            if theme.glyphs.ascii {
+                agent_cells = Some(snapshot(frame.buffer_mut(), panel));
+            }
             let screen = view.parser.screen();
             if app.can_type() && !screen.hide_cursor() {
                 let (row, col) = screen.cursor_position();
@@ -47,10 +52,62 @@ pub fn draw(frame: &mut Frame, app: &App, theme: &Theme) {
     draw_status(frame, status, app, theme);
     if let Link::Reconnecting { attempt, reason } = &app.link {
         draw_reconnecting(frame, body, *attempt, reason, theme);
-        return;
+    } else {
+        draw_overlay(frame, body, app, theme);
     }
+    if theme.glyphs.ascii {
+        asciify(frame.buffer_mut(), panel, agent_cells.as_deref());
+    }
+}
+
+fn snapshot(buf: &Buffer, area: Rect) -> Vec<String> {
+    area.positions()
+        .map(|p| {
+            buf.cell(p)
+                .map(|c| c.symbol().to_string())
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
+/// ASCII-folds everything Hive drew. Cells of the agent's screen that no
+/// overlay changed are left as the agent wrote them.
+fn asciify(buf: &mut Buffer, panel: Rect, agent: Option<&[String]>) {
+    let area = buf.area;
+    for pos in area.positions() {
+        if panel.contains(pos)
+            && let Some(agent) = agent
+        {
+            let i = (pos.y - panel.y) as usize * panel.width as usize + (pos.x - panel.x) as usize;
+            if buf
+                .cell(pos)
+                .is_some_and(|c| agent.get(i).map(String::as_str) == Some(c.symbol()))
+            {
+                continue;
+            }
+        }
+        if let Some(cell) = buf.cell_mut(pos)
+            && !cell.symbol().is_ascii()
+        {
+            let folded = match cell.symbol() {
+                "·" => ".",
+                "…" => "~",
+                "—" | "─" => "-",
+                "↑" => "^",
+                "↓" => "v",
+                "│" => "|",
+                "╭" | "╮" | "╰" | "╯" => "+",
+                _ => "?",
+            };
+            cell.set_symbol(folded);
+        }
+    }
+}
+
+fn draw_overlay(frame: &mut Frame, body: Rect, app: &App, theme: &Theme) {
     match app.mode {
-        Mode::Help => draw_help(frame, body, theme),
+        Mode::Help => draw_help(frame, body, app, theme),
+        Mode::Palette { selected, .. } => draw_palette(frame, body, app, selected, theme),
         Mode::NewSession {
             selected,
             workspace,
@@ -62,9 +119,9 @@ pub fn draw(frame: &mut Frame, app: &App, theme: &Theme) {
 }
 
 fn draw_header(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
-    let bar = Style::new().bg(theme.surface).fg(theme.text);
+    let bar = theme.bar();
     let mut left = vec![Span::styled(
-        format!(" {} {}", brand::MARK, brand::NAME),
+        format!(" {} {}", theme.glyphs.mark, brand::NAME),
         bar.fg(theme.accent).add_modifier(Modifier::BOLD),
     )];
     if let Some(s) = app.current() {
@@ -97,23 +154,24 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
 }
 
 /// Truncates to `max` characters, ending in an ellipsis when cut.
-fn truncate(s: &str, max: usize) -> String {
+fn truncate(theme: &Theme, s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_string()
     } else {
         let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
-        out.push('…');
+        out.push_str(theme.glyphs.ellipsis);
         out
     }
 }
 
 fn state_dot(state: &SessionState, theme: &Theme) -> (&'static str, Color) {
+    let g = &theme.glyphs;
     match state {
-        SessionState::Starting => ("○", theme.muted),
-        SessionState::Running => ("●", theme.success),
-        SessionState::Exited { .. } => ("○", theme.muted),
-        SessionState::Failed { .. } => ("✕", theme.error),
-        SessionState::Lost => ("◌", theme.muted),
+        SessionState::Starting => (g.stopped, theme.muted),
+        SessionState::Running => (g.running, theme.success),
+        SessionState::Exited { .. } => (g.stopped, theme.muted),
+        SessionState::Failed { .. } => (g.failed, theme.error),
+        SessionState::Lost => (g.lost, theme.muted),
     }
 }
 
@@ -160,7 +218,12 @@ fn sidebar_items(app: &App) -> Vec<Item> {
 fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let border = Block::new()
         .borders(Borders::RIGHT)
-        .border_style(Style::new().fg(theme.surface));
+        .border_set(theme.glyphs.border)
+        .border_style(Style::new().fg(if theme.mono {
+            theme.muted
+        } else {
+            theme.surface
+        }));
     let inner = border.inner(area);
     frame.render_widget(border, area);
     if inner.height == 0 || inner.width < 4 {
@@ -221,10 +284,13 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 } else {
                     heading
                 };
-                let name = truncate(app.workspace_name(*w), width.saturating_sub(3));
+                let name = truncate(theme, app.workspace_name(*w), width.saturating_sub(3));
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![
-                        Span::styled(" ▾ ", Style::new().fg(theme.accent_dim)),
+                        Span::styled(
+                            format!(" {} ", theme.glyphs.group),
+                            Style::new().fg(theme.accent_dim),
+                        ),
                         Span::styled(name, style),
                     ])),
                     row(y),
@@ -270,7 +336,7 @@ fn draw_sidebar_session(
 ) {
     let width = row1.width as usize;
     let base = if is_cursor {
-        Style::new().bg(theme.surface)
+        theme.cursor_row()
     } else {
         Style::new()
     };
@@ -287,9 +353,16 @@ fn draw_sidebar_session(
     };
     let label_width = width.saturating_sub(4 + number.len() + if shared { 2 } else { 0 });
     let mut line1 = vec![
-        Span::styled(if is_current { "▌" } else { " " }, base.fg(theme.accent)),
+        Span::styled(
+            if is_current {
+                theme.glyphs.current
+            } else {
+                " "
+            },
+            base.fg(theme.accent),
+        ),
         Span::styled(format!("{dot} "), base.fg(dot_color)),
-        Span::styled(truncate(&s.label, label_width), label_style),
+        Span::styled(truncate(theme, &s.label, label_width), label_style),
     ];
     if shared {
         // Another running agent uses the same directory.
@@ -319,7 +392,7 @@ fn draw_sidebar_session(
         room = room.saturating_sub(3);
     }
     line2.push(Span::styled(
-        truncate(&detail.join(" · "), room),
+        truncate(theme, &detail.join(" · "), room),
         base.fg(theme.muted),
     ));
     frame.render_widget(Paragraph::new(Line::from(line1)).style(base), row1);
@@ -331,7 +404,7 @@ fn draw_sidebar_session(
 }
 
 fn draw_status(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
-    let bar = Style::new().bg(theme.surface).fg(theme.text);
+    let bar = theme.bar();
     let key = bar.fg(theme.accent);
     let muted = bar.fg(theme.muted);
     let hints = |pairs: &[(&str, &str)]| -> Vec<Span<'static>> {
@@ -358,24 +431,43 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         Mode::Leader => {
             let mut spans = vec![Span::styled(
                 " LEADER ",
-                Style::new()
-                    .bg(theme.accent)
-                    .fg(Color::Black)
-                    .add_modifier(Modifier::BOLD),
+                theme.highlight().add_modifier(Modifier::BOLD),
             )];
-            spans.extend(hints(&[
-                ("j/k", "switch"),
-                ("1-9", "jump"),
-                ("s", "sidebar"),
-                ("n", "new"),
-                ("w", "workspaces"),
-                ("r", "rename"),
-                ("x", "kill"),
-                ("d", "detach"),
-                ("?", "help"),
-            ]));
+            let pairs: Vec<(String, &str)> = [
+                (Command::Palette, "commands"),
+                (Command::NextSession, "next"),
+                (Command::NewSession, "new"),
+                (Command::Workspaces, "workspaces"),
+                (Command::SearchSessions, "search"),
+                (Command::Kill, "kill"),
+                (Command::Detach, "detach"),
+                (Command::Help, "help"),
+            ]
+            .into_iter()
+            .filter_map(|(c, d)| app.keymap.hint(c).map(|k| (k, d)))
+            .chain([("1-9".to_string(), "jump")])
+            .collect();
+            let pairs: Vec<(&str, &str)> = pairs.iter().map(|(k, d)| (k.as_str(), *d)).collect();
+            spans.extend(hints(&pairs));
             spans
         }
+        Mode::Palette {
+            query,
+            sessions_only,
+            ..
+        } => vec![
+            Span::styled(
+                if *sessions_only {
+                    " Search sessions: "
+                } else {
+                    " Command: "
+                },
+                bar.fg(theme.accent),
+            ),
+            Span::styled(query.clone(), bar.add_modifier(Modifier::BOLD)),
+            Span::styled(theme.glyphs.caret, key),
+            Span::styled("  ↑↓ choose · enter run · esc close", muted),
+        ],
         Mode::ConfirmKill(id) => {
             let session = app.sessions.get(id);
             let name = session.map(|s| s.label.as_str()).unwrap_or("session");
@@ -392,13 +484,13 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         Mode::AddWorkspace { input } => vec![
             Span::styled(" Add workspace (directory): ", bar.fg(theme.accent)),
             Span::styled(input.clone(), bar.add_modifier(Modifier::BOLD)),
-            Span::styled("▏", key),
+            Span::styled(theme.glyphs.caret, key),
             Span::styled("  enter add · esc cancel", muted),
         ],
         Mode::RenameWorkspace { input, .. } => vec![
             Span::styled(" Rename workspace: ", bar.fg(theme.accent)),
             Span::styled(input.clone(), bar.add_modifier(Modifier::BOLD)),
-            Span::styled("▏", key),
+            Span::styled(theme.glyphs.caret, key),
             Span::styled("  enter save · esc cancel · empty resets", muted),
         ],
         Mode::Workspaces { .. } => {
@@ -416,7 +508,7 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         Mode::Rename { session, input } => vec![
             Span::styled(format!(" Rename session {session}: "), bar.fg(theme.accent)),
             Span::styled(input.clone(), bar.add_modifier(Modifier::BOLD)),
-            Span::styled("▏", key),
+            Span::styled(theme.glyphs.caret, key),
             Span::styled("  enter save · esc cancel · empty resets", muted),
         ],
         Mode::NewSession { .. } => {
@@ -460,12 +552,17 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     frame.render_widget(Paragraph::new(Line::from(left)).style(bar), area);
 
     if app.mode == Mode::Normal && app.status.is_none() && !app.sidebar_keys_active() {
-        let hint = Line::from(vec![
-            Span::styled("Ctrl+Space", key),
-            Span::styled(" leader · ", muted),
-            Span::styled("?", key),
-            Span::styled(" help ", muted),
-        ]);
+        let mut hint = vec![
+            Span::styled(app.keymap.leader.to_string(), key),
+            Span::styled(" leader", muted),
+        ];
+        if let Some(p) = app.keymap.hint(Command::Palette) {
+            hint.push(Span::styled(" · then ", muted));
+            hint.push(Span::styled(p, key));
+            hint.push(Span::styled(" commands", muted));
+        }
+        hint.push(Span::styled(" ", muted));
+        let hint = Line::from(hint);
         frame.render_widget(Paragraph::new(hint).alignment(Alignment::Right), area);
     }
 }
@@ -528,15 +625,25 @@ fn short_path(p: &str) -> String {
 fn draw_empty(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let muted = Style::new().fg(theme.muted);
     let key = Style::new().fg(theme.accent);
-    let mut lines = vec![
+    let mut lines = Vec::new();
+    // The hexagon mark, when there is room for it.
+    if area.height >= brand::MARK_ART.len() as u16 + 10 {
+        lines.extend(
+            brand::MARK_ART
+                .iter()
+                .map(|l| Line::from(Span::styled(*l, Style::new().fg(theme.accent_dim)))),
+        );
+        lines.push(Line::raw(""));
+    }
+    lines.extend([
         Line::from(Span::styled(
-            format!("{} {}", brand::MARK, brand::NAME),
+            format!("{} {}", theme.glyphs.mark, brand::NAME),
             key.add_modifier(Modifier::BOLD),
         )),
         Line::raw(""),
         Line::from(Span::styled(brand::TAGLINE, Style::new().fg(theme.text))),
         Line::raw(""),
-    ];
+    ]);
     if app.sessions.is_empty() {
         lines.push(Line::from(Span::styled("No active sessions.", muted)));
         lines.push(Line::raw(""));
@@ -586,7 +693,7 @@ fn popup(
     };
     let block = Block::new()
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
+        .border_set(theme.glyphs.border)
         .border_style(Style::new().fg(theme.accent_dim))
         .title(Span::styled(
             format!(" {title} "),
@@ -628,14 +735,14 @@ fn draw_picker(
         .map(|(i, a)| {
             let chosen = i == selected;
             let base = if chosen {
-                Style::new().bg(theme.accent).fg(Color::Black)
+                theme.highlight()
             } else {
                 Style::new()
             };
             let name = if a.installed {
-                base.fg(if chosen { Color::Black } else { theme.text })
+                base.fg(if chosen { theme.on_accent } else { theme.text })
             } else {
-                base.fg(if chosen { Color::Black } else { theme.muted })
+                base.fg(if chosen { theme.on_accent } else { theme.muted })
             };
             let num = if i < 9 {
                 format!(" {} ", i + 1)
@@ -650,15 +757,15 @@ fn draw_picker(
             Line::from(vec![
                 Span::styled(
                     num,
-                    base.fg(if chosen { Color::Black } else { theme.muted }),
+                    base.fg(if chosen { theme.on_accent } else { theme.muted }),
                 ),
                 Span::styled(
                     format!("{:<10} ", a.name),
                     name.add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    truncate(&detail, inner.width.saturating_sub(15) as usize),
-                    base.fg(if chosen { Color::Black } else { theme.muted }),
+                    truncate(theme, &detail, inner.width.saturating_sub(15) as usize),
+                    base.fg(if chosen { theme.on_accent } else { theme.muted }),
                 ),
             ])
             .style(base)
@@ -707,9 +814,9 @@ fn draw_workspaces(frame: &mut Frame, area: Rect, app: &App, selected: usize, th
         .enumerate()
         .map(|(i, w)| {
             let chosen = i == selected;
-            let fg = |c: Color| if chosen { Color::Black } else { c };
+            let fg = |c: Color| if chosen { theme.on_accent } else { c };
             let base = if chosen {
-                Style::new().bg(theme.accent)
+                theme.highlight()
             } else {
                 Style::new()
             };
@@ -727,7 +834,7 @@ fn draw_workspaces(frame: &mut Frame, area: Rect, app: &App, selected: usize, th
             Line::from(vec![
                 Span::styled(num, base.fg(fg(theme.muted))),
                 Span::styled(
-                    format!("{:<14} ", truncate(app.workspace_name(*w), 14)),
+                    format!("{:<14} ", truncate(theme, app.workspace_name(*w), 14)),
                     base.fg(fg(theme.text)).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
@@ -738,7 +845,7 @@ fn draw_workspaces(frame: &mut Frame, area: Rect, app: &App, selected: usize, th
                     base.fg(fg(theme.muted)),
                 ),
                 Span::styled(
-                    truncate(&root, inner.width.saturating_sub(31) as usize),
+                    truncate(theme, &root, inner.width.saturating_sub(31) as usize),
                     base.fg(fg(theme.muted)),
                 ),
             ])
@@ -752,7 +859,7 @@ fn draw_reconnecting(frame: &mut Frame, area: Rect, attempt: u32, reason: &str, 
     let inner = popup(frame, area, 56, 7, "Connection lost", theme);
     let lines = vec![
         Line::from(Span::styled(
-            truncate(reason, inner.width.saturating_sub(2) as usize),
+            truncate(theme, reason, inner.width.saturating_sub(2) as usize),
             Style::new().fg(theme.muted),
         )),
         Line::raw(""),
@@ -772,23 +879,40 @@ fn draw_reconnecting(frame: &mut Frame, area: Rect, attempt: u32, reason: &str, 
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
-fn draw_help(frame: &mut Frame, area: Rect, theme: &Theme) {
-    let rows = [
-        ("Ctrl+Space j / k", "Next / previous session"),
-        ("Ctrl+Space 1-9", "Jump to session"),
-        ("Ctrl+Space s", "Focus sidebar (↑↓ enter, esc back)"),
-        ("Ctrl+Space n", "New session (w in picker: own worktree)"),
-        ("Ctrl+Space w", "Workspaces (open, add, rename, remove)"),
-        ("Ctrl+Space r", "Rename session"),
-        ("Ctrl+Space x", "Terminate session"),
-        ("Ctrl+Space a", "Take input control back"),
-        ("Ctrl+Space d", "Detach (agents keep running)"),
-        ("Ctrl+Space Ctrl+Space", "Send a literal Ctrl+Space"),
-    ];
+/// Generated from the keymap, so it shows the user's own bindings.
+fn draw_help(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
+    let leader = app.keymap.leader.to_string();
+    let mut rows: Vec<(String, String)> = vec![(
+        format!("{leader}, then:"),
+        "everything else goes to the agent".into(),
+    )];
+    for cmd in Command::ALL {
+        let keys = app.keymap.keys_for(cmd);
+        if keys.is_empty() {
+            continue;
+        }
+        let keys: Vec<String> = keys.iter().map(ToString::to_string).collect();
+        rows.push((format!("  {}", keys.join(" ")), cmd.title().to_string()));
+    }
+    rows.push(("  1-9".into(), "Jump to session".into()));
+    rows.push((format!("  {leader}"), format!("Send {leader} to the agent")));
+    rows.push((String::new(), String::new()));
+    rows.push((
+        "Sidebar".into(),
+        "↑↓ select · enter open · n new · x kill · esc".into(),
+    ));
+    rows.push((
+        "New-session picker".into(),
+        "w toggles its own git worktree".into(),
+    ));
+    rows.push((
+        "Unbound commands".into(),
+        "in the command palette; bind in [keys.bind]".into(),
+    ));
     let inner = popup(
         frame,
         area,
-        62,
+        76,
         rows.len() as u16 + 2,
         "Help · any key to close",
         theme,
@@ -797,9 +921,69 @@ fn draw_help(frame: &mut Frame, area: Rect, theme: &Theme) {
         .iter()
         .map(|(k, d)| {
             Line::from(vec![
-                Span::styled(format!(" {k:<22}"), Style::new().fg(theme.accent)),
-                Span::styled(d.to_string(), Style::new().fg(theme.text)),
+                Span::styled(format!(" {k:<24}"), Style::new().fg(theme.accent)),
+                Span::styled(d.clone(), Style::new().fg(theme.text)),
             ])
+        })
+        .collect();
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+fn draw_palette(frame: &mut Frame, area: Rect, app: &App, selected: usize, theme: &Theme) {
+    let items = app.palette_items();
+    let rows = items.len().clamp(1, 14) as u16;
+    let inner = popup(frame, area, 70, rows + 2, "Commands", theme);
+    if items.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Span::styled(" No matches", Style::new().fg(theme.muted))),
+            inner,
+        );
+        return;
+    }
+    let visible = inner.height as usize;
+    let offset = selected.saturating_sub(visible.saturating_sub(1));
+    let width = inner.width as usize;
+    let lines: Vec<Line> = items
+        .iter()
+        .enumerate()
+        .skip(offset)
+        .take(visible)
+        .map(|(i, item)| {
+            let chosen = i == selected;
+            let base = if chosen {
+                theme.highlight()
+            } else {
+                Style::new()
+            };
+            let fg = |c: Color| if chosen { theme.on_accent } else { c };
+            let marker = match item.target {
+                Target::Command(_) => " ",
+                Target::Session(id) => app
+                    .sessions
+                    .get(&id)
+                    .map_or(" ", |s| state_dot(&s.state, theme).0),
+                Target::Workspace(_) => theme.glyphs.group,
+            };
+            let key = item.key.clone().unwrap_or_default();
+            let room = width.saturating_sub(4 + key.chars().count() + 1);
+            let title_w = item.title.chars().count().min(room);
+            let detail_room = room.saturating_sub(title_w + 2);
+            let mut spans = vec![
+                Span::styled(format!(" {marker} "), base.fg(fg(theme.muted))),
+                Span::styled(truncate(theme, &item.title, room), base.fg(fg(theme.text))),
+            ];
+            if !item.detail.is_empty() && detail_room > 3 {
+                spans.push(Span::styled(
+                    format!("  {}", truncate(theme, &item.detail, detail_room)),
+                    base.fg(fg(theme.muted)),
+                ));
+            }
+            let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+            spans.push(Span::styled(
+                format!("{:>w$} ", key, w = width.saturating_sub(used + 1)),
+                base.fg(fg(theme.accent)),
+            ));
+            Line::from(spans).style(base)
         })
         .collect();
     frame.render_widget(Paragraph::new(lines), inner);
@@ -971,6 +1155,68 @@ mod tests {
         assert!(lines[10].contains("wt hive/codex-2"), "{:?}", lines[10]);
         assert!(lines[11].contains("▾ empty"));
         assert!(lines[12].contains("no sessions"));
+    }
+
+    #[test]
+    fn ascii_glyphs_and_mono_render_without_unicode_or_colour() {
+        let mut app = App::new(Config::default(), Start::Attach(1), (80, 10));
+        app.on_server(ServerMessage::WorkspaceList(vec![workspace(1, "proj")]));
+        app.on_server(ServerMessage::SessionList(vec![session(
+            1,
+            "claude",
+            SessionState::Running,
+        )]));
+        app.on_server(ServerMessage::Attached {
+            session: session(1, "claude", SessionState::Running),
+            snapshot: b"ok".to_vec(),
+            controller: true,
+        });
+        let theme = crate::theme::Theme::from_config(
+            "mono",
+            &hive_core::config::ThemeConfig {
+                glyphs: Some("ascii".into()),
+                ..Default::default()
+            },
+            &crate::theme::Env::default(),
+        )
+        .unwrap();
+        let mut term = Terminal::new(TestBackend::new(80, 10)).unwrap();
+        term.draw(|f| draw(f, &app, &theme)).unwrap();
+        let buf = term.backend().buffer();
+        let text: String = buf.content().iter().map(|c| c.symbol()).collect();
+        assert!(text.is_ascii(), "non-ASCII glyph drawn: {text:?}");
+        assert!(text.contains("<> HIVE") && text.contains(">* claude"));
+        assert!(
+            buf.content()
+                .iter()
+                .all(|c| c.fg == Color::Reset && c.bg == Color::Reset),
+            "mono uses no colours"
+        );
+    }
+
+    #[test]
+    fn ascii_mode_leaves_the_agents_own_output_alone() {
+        let mut app = App::new(Config::default(), Start::Attach(1), (50, 6));
+        app.on_server(ServerMessage::Attached {
+            session: session(1, "claude", SessionState::Running),
+            snapshot: "agent → 中".as_bytes().to_vec(),
+            controller: true,
+        });
+        let theme = crate::theme::Theme::from_config(
+            "hive-dark",
+            &hive_core::config::ThemeConfig {
+                glyphs: Some("ascii".into()),
+                ..Default::default()
+            },
+            &crate::theme::Env::default(),
+        )
+        .unwrap();
+        let mut term = Terminal::new(TestBackend::new(50, 6)).unwrap();
+        term.draw(|f| draw(f, &app, &theme)).unwrap();
+        let row: String = (0..50)
+            .map(|x| term.backend().buffer()[(x, 1)].symbol().to_string())
+            .collect();
+        assert!(row.starts_with("agent → 中"), "{row:?}");
     }
 
     #[test]

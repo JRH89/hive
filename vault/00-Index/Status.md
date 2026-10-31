@@ -4,9 +4,9 @@ updated: 2026-10-30
 ---
 # Status
 
-**Phase 4 complete** (2026-10-30, branch `phase-4-workspaces`, not yet committed). Sessions are grouped into workspaces by repository, branches show live, and agents can run in their own git worktrees with safe cleanup. See [[Phase 4 - Workspaces and Git]]. Earlier phases are merged to master: [[Phase 3 - Robust Persistence]], [[Phase 2 - Multiplexing]], [[Phase 1 - Foundation]].
+**Phase 5 complete** (2026-10-30, branch `phase-5-polish`, not yet committed). Themes with colour-depth and ASCII fallback, command palette, session search, configurable keys, brand mark. See [[Phase 5 - Product Experience and Branding]]. Earlier phases are merged to master: [[Phase 4 - Workspaces and Git]], [[Phase 3 - Robust Persistence]], [[Phase 2 - Multiplexing]], [[Phase 1 - Foundation]].
 
-**Next:** [[Roadmap#Phase 5 — Product Experience and Branding]]. Command palette, themes, configurable keys, polish.
+**Next:** [[Roadmap#Phase 6 — Testing and Distribution]].
 
 ## Gate before every change
 ```bash
@@ -23,6 +23,7 @@ cargo test --workspace
 - Killing an interactive shell session waits the full kill timeout (bash ignores SIGTERM).
 - New sessions launched from the TUI start in the active workspace's root (or `hive`'s cwd). No free-form directory prompt.
 - Worktrees can't be listed from the TUI, and custom branch names are CLI-only (`hive new -b`).
+- Sidebar/picker keys aren't configurable; theme is fixed at startup.
 - No activity indicator for background sessions (see [[ADR-0007 Switching re-attaches]]).
 
 ## Website (separate from Rust phases)

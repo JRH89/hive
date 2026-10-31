@@ -9,6 +9,7 @@ Knowledge base for building **Hive**, a terminal multiplexer for AI coding agent
 - [[Phase 2 - Multiplexing]]: sidebar, switching, picker, rename
 - [[Phase 3 - Robust Persistence]]: auto-reconnect, lost sessions, explicit control
 - [[Phase 4 - Workspaces and Git]]: workspaces, branches, worktrees
+- [[Phase 5 - Product Experience and Branding]]: themes, palette, keymap, brand
 
 ## Architecture
 - [[Overview]]: processes, crates, data flow
@@ -28,6 +29,8 @@ Knowledge base for building **Hive**, a terminal multiplexer for AI coding agent
 - [[ADR-0010 Attach observes unless control is free or forced]]
 - [[ADR-0011 Daemon-owned workspaces grouped by repository]]
 - [[ADR-0012 Worktrees created by the daemon, never deleted dirty]]
+- [[ADR-0013 Themes degrade by colour depth and glyph set]]
+- [[ADR-0014 Configurable keymap of named commands]]
 
 ## Ongoing
 - [[Website Design]]: approved website direction, branding, scope and acceptance

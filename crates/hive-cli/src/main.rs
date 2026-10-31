@@ -27,7 +27,15 @@ use hive_tui::{Outcome, Start};
     long_about = "A terminal multiplexer for AI coding agents.\n\n\
         Agents run inside `hived`, a background daemon, so they keep running \
         after you detach or close the terminal. Run `hive` with no arguments \
-        to open the interface."
+        to open the interface.",
+    after_help = "Examples:\n  \
+        hive                      open the interface (reattaches to the newest session)\n  \
+        hive new claude           launch Claude Code here and attach\n  \
+        hive new codex -w         launch Codex in its own git worktree\n  \
+        hive new shell -d -l ops  start a shell in the background\n  \
+        hive list                 see sessions, workspaces and branches\n\n\
+        In the interface, press Ctrl+Space then ? for keys, or Ctrl+Space then p for commands.\n\
+        Config: ~/.config/hive/config.toml (see examples/config.toml)."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -37,6 +45,12 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Launch an agent in a new session and attach to it
+    #[command(after_help = "Examples:\n  \
+        hive new                       the default agent ([general] default_agent)\n  \
+        hive new claude -l api -C ~/src/api\n  \
+        hive new codex -w              own worktree on branch hive/codex-<id>\n  \
+        hive new codex -b fix/login    own worktree on branch fix/login\n  \
+        hive new claude -- --model opus   pass arguments to the agent")]
     New {
         /// Agent name: claude, codex, gemini, opencode, shell, or one from config
         agent: Option<String>,
@@ -597,6 +611,7 @@ fn crossterm_size() -> Option<TermSize> {
 }
 
 async fn tui(paths: &Paths, client: Client, config: Config, start: Start) -> anyhow::Result<()> {
+    hive_tui::check_config(&config).context("invalid config")?;
     match hive_tui::run(paths.clone(), client, config, start).await? {
         Outcome::Detached { session: Some(id) } => {
             println!("detached from session {id} — it keeps running. `hive attach {id}` to return.")

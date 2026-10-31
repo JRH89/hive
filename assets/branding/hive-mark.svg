@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Hive">
+  <title>Hive</title>
+  <!-- One honeycomb cell holding a terminal prompt. -->
+  <polygon points="32,4 56,18 56,46 32,60 8,46 8,18" fill="#111318" stroke="#F2B84B" stroke-width="4" stroke-linejoin="round"/>
+  <polyline points="20,25 28,32 20,39" fill="none" stroke="#F2B84B" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="32" y1="40" x2="44" y2="40" stroke="#E8EAF0" stroke-width="4" stroke-linecap="round"/>
+</svg>

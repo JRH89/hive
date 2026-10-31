@@ -1,0 +1,68 @@
+# Hive configuration: ~/.config/hive/config.toml (or $HIVE_CONFIG).
+# Every key is optional; this file shows the defaults and some examples.
+# A test parses and validates this file, so it stays accurate.
+
+[general]
+default_agent = "claude"
+# hive-dark (default), hive-light, ansi (16 colours), mono (no colour)
+theme = "hive-dark"
+
+[branding]
+show_header = true
+show_tagline = true
+
+[terminal]
+scrollback_lines = 10000
+
+[daemon]
+auto_start = true
+# Seconds between SIGTERM and SIGKILL when terminating a session.
+kill_timeout_secs = 3
+
+[worktrees]
+# Where `hive new -w` creates git worktrees.
+# Default: $XDG_DATA_HOME/hive/worktrees
+# dir = "/home/me/worktrees"
+
+[theme]
+# auto picks from COLORTERM / TERM / NO_COLOR: truecolor, 256, 16 or none.
+colors = "auto"
+# auto picks ascii on the Linux console or without a UTF-8 locale.
+glyphs = "auto"
+# Override any colour of the base theme with #rrggbb:
+# accent = "#F2B84B"
+# accent_dim = "#D99A2B"
+# surface = "#1C2028"
+# text = "#E8EAF0"
+# muted = "#8992A3"
+# success = "#79C99E"
+# warning = "#E8AE55"
+# error = "#E57373"
+
+[keys]
+# Pressed before every Hive command. Everything else goes to the agent.
+# Must use Ctrl or Alt (or be an F-key). Pressing it twice sends it to the agent.
+leader = "ctrl+space"
+
+[keys.bind]
+# Command = key or list of keys, pressed after the leader. Setting a command
+# replaces its default keys; [] unbinds it. 1-9 always jump to sessions.
+# Commands: palette, search_sessions, new_session, new_worktree_session,
+# workspaces, add_workspace, rename_workspace, next_session, prev_session,
+# sidebar, rename_session, kill_session, take_control, detach, help, settings
+palette = "p"
+search_sessions = "/"
+next_session = ["j", "down"]
+prev_session = ["k", "up"]
+new_worktree_session = "N"
+
+# Agents. Built in: claude, codex, gemini, opencode, shell. Add your own or
+# override a built-in. Commands run directly (no shell); args are passed as-is.
+[agents.aider]
+command = "aider"
+args = ["--dark-mode"]
+
+[agents.claude-opus]
+command = "claude"
+args = ["--model", "opus"]
+env = { CLAUDE_CODE_USE_BEDROCK = "0" }

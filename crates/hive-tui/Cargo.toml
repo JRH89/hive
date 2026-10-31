@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+thiserror = "2.0.21"
 anyhow = "1.0.104"
 crossterm = { version = "0.29", features = ["event-stream"] }
 futures-util = "0.3.34"

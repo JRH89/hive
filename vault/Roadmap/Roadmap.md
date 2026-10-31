@@ -31,5 +31,12 @@ Full detail is in `AGENTS.md` §16. **Don't start a phase until the previous one
 - [x] Git branch display, refreshed while sessions run
 - [x] Optional worktree creation and worktree-aware launching ([[ADR-0012 Worktrees created by the daemon, never deleted dirty]])
 - [x] Safe cleanup: never removes dirty or in-use worktrees without force; branches kept
-## Phase 5 — Product Experience and Branding
+## Phase 5 — Product Experience and Branding ✅
+[[Phase 5 - Product Experience and Branding]]
+- [x] Final theme, theme support (4 themes, depth fallback, overrides) ([[ADR-0013 Themes degrade by colour depth and glyph set]])
+- [x] Hexagonal brand mark, branded startup and empty states
+- [x] Command palette, session search, help screen
+- [x] Configurable keybindings ([[ADR-0014 Configurable keymap of named commands]])
+- [x] Custom agent definitions documented (`examples/config.toml`)
+- [x] README branding, terminal screenshots (text captures), CLI help examples
 ## Phase 6 — Testing and Distribution

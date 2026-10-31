@@ -14,6 +14,8 @@ pub struct Config {
     pub terminal: Terminal,
     pub daemon: Daemon,
     pub worktrees: Worktrees,
+    pub theme: ThemeConfig,
+    pub keys: Keys,
     /// User-defined or overridden agents, keyed by name.
     pub agents: BTreeMap<String, AgentDef>,
 }
@@ -81,6 +83,63 @@ impl Default for Daemon {
         Daemon {
             auto_start: true,
             kill_timeout_secs: 3,
+        }
+    }
+}
+
+/// `[theme]`: colour depth, glyph set and per-token colour overrides. The
+/// base palette is chosen by `general.theme`.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ThemeConfig {
+    /// `auto` (default), `truecolor`, `256`, `16` or `none`.
+    pub colors: Option<String>,
+    /// `auto` (default), `unicode` or `ascii`.
+    pub glyphs: Option<String>,
+    /// `#rrggbb` overrides for individual colours.
+    pub surface: Option<String>,
+    pub accent: Option<String>,
+    pub accent_dim: Option<String>,
+    pub text: Option<String>,
+    pub muted: Option<String>,
+    pub success: Option<String>,
+    pub warning: Option<String>,
+    pub error: Option<String>,
+}
+
+/// `[keys]`: the leader key and what each key does after it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Keys {
+    pub leader: String,
+    /// Command name to key(s), e.g. `palette = "p"` or
+    /// `next_session = ["j", "down"]`. Replaces that command's defaults; an
+    /// empty list unbinds it.
+    pub bind: BTreeMap<String, KeyList>,
+}
+
+impl Default for Keys {
+    fn default() -> Self {
+        Keys {
+            leader: "ctrl+space".into(),
+            bind: BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum KeyList {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl KeyList {
+    pub fn keys(&self) -> Vec<&str> {
+        match self {
+            KeyList::One(k) if k.is_empty() => Vec::new(),
+            KeyList::One(k) => vec![k.as_str()],
+            KeyList::Many(ks) => ks.iter().map(String::as_str).collect(),
         }
     }
 }
