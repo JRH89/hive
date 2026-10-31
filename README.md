@@ -10,7 +10,7 @@
 
 A lightweight, Rust-powered terminal multiplexer for AI coding agents.
 
-> **Status: early development (Phase 5 of 6).** Several agents side by side, grouped by repository, optionally each in its own git worktree. Detach, reattach, automatic reconnection, a command palette, themes and configurable keys. See [Roadmap](#roadmap).
+> **Status: pre-release.** All six roadmap phases are implemented on Linux: several agents side by side, grouped by repository, optionally each in its own git worktree; detach, reattach and automatic reconnection; a command palette, themes and configurable keys. No binaries are published yet. See [Roadmap](#roadmap).
 
 ## What works today
 - Launch Claude Code, Codex, Gemini CLI, OpenCode, a shell, or any configured command in a real PTY
@@ -65,13 +65,26 @@ Without Unicode or colour (`TERM=linux`, `NO_COLOR=1`) the same UI falls back to
  * #4 migrations . api . db/migrate . running . 4 active        Ctrl+Space leader . then p commands
 ```
 
-## Build
-Requires Rust ≥ 1.89 on Linux.
+## Install
+Linux (x86_64 and aarch64) is supported. macOS and Windows are not yet.
+
+**Prebuilt binaries** are not published yet. Once a release exists:
 
 ```bash
-cargo build --release
-# binaries: target/release/hive and target/release/hived (keep them side by side)
+curl -fsSL https://github.com/jrh89/hive/releases/latest/download/install.sh | sh
 ```
+
+The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.1.0` to pin a version.
+
+**From source** (Rust ≥ 1.89):
+
+```bash
+git clone https://github.com/jrh89/hive && cd hive
+cargo build --release
+install -m 0755 target/release/hive target/release/hived ~/.local/bin/
+```
+
+Keep `hive` and `hived` in the same directory. Then run `hive doctor` to check the setup.
 
 ## Quick start
 ```bash
@@ -80,6 +93,18 @@ hive new claude        # launch Claude Code and attach
 hive list              # see sessions
 hive                   # reattach to the most recent session
 ```
+
+## Supported agents
+| Agent | Name in Hive | Command |
+|---|---|---|
+| Claude Code | `claude` | `claude` |
+| Codex | `codex` | `codex` |
+| Gemini CLI | `gemini` | `gemini` |
+| OpenCode | `opencode` | `opencode` |
+| Your shell | `shell` | `$SHELL` |
+| Anything else | your choice | see [custom agents](docs/user-guide.md#custom-agents) |
+
+Agents run unmodified in a real terminal. Hive doesn't parse their output or answer their prompts.
 
 ## Commands
 | Command | |
@@ -93,6 +118,7 @@ hive                   # reattach to the most recent session
 | `hive status` | Daemon and session summary |
 | `hive workspace list\|add <dir>\|rename\|rm` | Manage workspaces |
 | `hive worktree list\|rm <path> [--force]` | List or remove worktrees (refuses dirty ones without `--force`) |
+| `hive doctor` | Check config, daemon, terminal support and installed agents |
 | `hive daemon start\|stop\|status` | Manage `hived` (`stop` terminates all sessions) |
 
 ## Keys
@@ -149,8 +175,24 @@ command = "aider"
 args = ["--dark-mode"]
 ```
 
+## Documentation
+- [User guide](docs/user-guide.md): concepts, interface, workspaces and worktrees, configuration, upgrading
+- [Troubleshooting](docs/troubleshooting.md): `hive doctor`, logs, common problems
+- [`examples/config.toml`](examples/config.toml): every configuration key
+
 ## Architecture
 `hived` owns every agent process, PTY and the authoritative terminal state. `hive` is a client that talks to it over a per-user Unix socket. See `vault/Architecture/Overview.md`.
+
+## Development
+```bash
+cargo build                                            # target/debug/hive and hived
+cargo fmt --all
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace                                 # unit, PTY integration and CLI tests
+scripts/smoke.sh target/debug                          # end-to-end check of built binaries
+```
+
+Integration tests run real PTYs with `/bin/sh` scripts against private daemons. No agent CLIs are needed. CI (`.github/workflows/ci.yml`) runs the above, an MSRV check, and static musl builds for x86_64 and aarch64. Pushing a `v*` tag builds release archives and creates a draft GitHub release.
 
 ## Roadmap
 1. ✅ Daemon-first foundation: one session, detach/reattach
@@ -158,7 +200,7 @@ args = ["--dark-mode"]
 3. ✅ Robust persistence: auto-reconnect, multi-client polish
 4. ✅ Workspaces and git worktrees
 5. ✅ Polish: command palette, themes, configurable keys
-6. Testing and distribution
+6. ✅ Testing and distribution: CI, static Linux binaries, docs
 
 ## License
-Not yet chosen.
+[MIT](LICENSE)

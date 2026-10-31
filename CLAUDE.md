@@ -27,7 +27,12 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo test -p hive-daemon --test daemon <name>         # one PTY integration test
 cargo test -p hive-tui app::tests::<name>              # one unit test
+cargo test -p hive-cli --test cli                      # end-to-end tests of the hive binary
+scripts/smoke.sh target/debug                          # smoke-test built binaries (isolated daemon)
+cargo build --release --target x86_64-unknown-linux-musl   # static release build (ADR-0015)
 ```
+
+CI is `.github/workflows/ci.yml`. A `v*` tag runs `release.yml`, which only ever creates a **draft** release. `hive doctor` is the first thing to ask a user for.
 
 Run fmt, clippy and test after every meaningful change and fix failures before moving on.
 
@@ -68,6 +73,7 @@ Phases are in AGENTS.md §16. Status is in `vault/00-Index/Status.md`. Don't sta
 - New user actions get a `Command` variant (ADR-0014), not a hard-coded key.
 - UI text uses plain terms (session, workspace, agent). Bee metaphors are for branding only.
 - Integration tests use real PTYs with `/bin/sh -c` scripts. Wait for an output marker before sending signals or input, to avoid startup races.
+- Tests must hold up on slow, loaded CI machines. Don't assume a throughput or a delay. Wait on an observable condition, e.g. bytes seen by a reading client. Replies and lifecycle broadcasts travel through different tasks and are unordered relative to each other, so fence on the events channel (e.g. a rename) rather than on a reply.
 - Don't answer agents' trust or permission prompts during manual testing, because that writes to the user's real agent config.
 - Never delete worktrees with uncommitted changes. Confirm destructive operations.
 - Don't implement §18 future features (orchestration, plugins, remote daemons).

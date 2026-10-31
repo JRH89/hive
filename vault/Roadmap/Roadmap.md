@@ -39,4 +39,10 @@ Full detail is in `AGENTS.md` §16. **Don't start a phase until the previous one
 - [x] Configurable keybindings ([[ADR-0014 Configurable keymap of named commands]])
 - [x] Custom agent definitions documented (`examples/config.toml`)
 - [x] README branding, terminal screenshots (text captures), CLI help examples
-## Phase 6 — Testing and Distribution
+## Phase 6 — Testing and Distribution ✅
+[[Phase 6 - Testing and Distribution]]
+- [x] Unit, IPC, PTY lifecycle, detach/reattach, stress and resize tests; CLI end-to-end tests
+- [x] CI pipeline (not yet run on GitHub)
+- [x] Static Linux release binaries, draft-release workflow, checksum-verifying installer ([[ADR-0015 Static musl binaries via draft GitHub releases]])
+- [x] Installation instructions, user guide, troubleshooting guide, `hive doctor`
+- [x] macOS/Windows investigated (macOS type-checks; Windows needs a port)

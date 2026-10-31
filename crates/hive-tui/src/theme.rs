@@ -22,6 +22,17 @@ pub enum Depth {
     None,
 }
 
+impl std::fmt::Display for Depth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Depth::TrueColor => "truecolor",
+            Depth::Ansi256 => "256 colours",
+            Depth::Ansi16 => "16 colours",
+            Depth::None => "no colour",
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Glyphs {
     pub mark: &'static str,
@@ -93,6 +104,7 @@ pub struct Theme {
     pub on_accent: Color,
     /// No colours: highlights use reverse video instead of backgrounds.
     pub mono: bool,
+    pub depth: Depth,
     pub glyphs: Glyphs,
 }
 
@@ -302,6 +314,7 @@ impl Theme {
             error: c(p.error),
             on_accent: c(p.on_accent),
             mono: depth == Depth::None,
+            depth,
             glyphs,
         }
     }

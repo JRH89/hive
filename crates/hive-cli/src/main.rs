@@ -24,10 +24,11 @@ use hive_tui::{Outcome, Start};
     name = "hive",
     version,
     about = format!("{} {} — {}", brand::MARK, brand::NAME, brand::TAGLINE),
-    long_about = "A terminal multiplexer for AI coding agents.\n\n\
+    long_about = format!("{} {} — {}\n\n\
+        A terminal multiplexer for AI coding agents.\n\n\
         Agents run inside `hived`, a background daemon, so they keep running \
         after you detach or close the terminal. Run `hive` with no arguments \
-        to open the interface.",
+        to open the interface.", brand::MARK, brand::NAME, brand::TAGLINE),
     after_help = "Examples:\n  \
         hive                      open the interface (reattaches to the newest session)\n  \
         hive new claude           launch Claude Code here and attach\n  \
@@ -97,6 +98,8 @@ enum Command {
         #[command(subcommand)]
         action: WorktreeAction,
     },
+    /// Check the installation: paths, config, daemon, terminal and agents
+    Doctor,
     /// Manage the background daemon
     Daemon {
         #[command(subcommand)]
@@ -191,6 +194,10 @@ fn init_logging(paths: &Paths) {
 }
 
 async fn run(cli: Cli, paths: Paths) -> anyhow::Result<()> {
+    if matches!(cli.command, Some(Command::Doctor)) {
+        // Runs before loading the config so it can report a broken one.
+        return doctor(&paths).await;
+    }
     let config = Config::load(&paths.config_file)?;
     let connect = |auto_start: bool| {
         let paths = paths.clone();
@@ -296,6 +303,7 @@ async fn run(cli: Cli, paths: Paths) -> anyhow::Result<()> {
             }
             Ok(())
         }
+        Some(Command::Doctor) => unreachable!("handled before loading the config"),
         Some(Command::Daemon { action }) => daemon(action, &paths, connect).await,
     }
 }
@@ -618,6 +626,96 @@ async fn tui(paths: &Paths, client: Client, config: Config, start: Start) -> any
         }
         Outcome::Detached { session: None } => {}
         Outcome::DaemonGone(reason) => bail!("disconnected: {reason}"),
+    }
+    Ok(())
+}
+
+/// `hive doctor`: what's needed to diagnose a broken setup. Read-only; it
+/// never starts the daemon.
+async fn doctor(paths: &Paths) -> anyhow::Result<()> {
+    let row = |key: &str, value: String| println!("  {key:<10} {value}");
+    let mut problems = 0;
+    println!("{} {} {}", brand::MARK, brand::NAME, brand::VERSION);
+
+    let config_path = paths.config_file.display();
+    let config = match Config::load(&paths.config_file) {
+        Ok(config) if !paths.config_file.exists() => {
+            row(
+                "config",
+                format!("{config_path} (not found; using defaults)"),
+            );
+            config
+        }
+        Ok(config) => {
+            match hive_tui::check_config(&config) {
+                Ok(()) => row("config", format!("{config_path} (ok)")),
+                Err(e) => {
+                    problems += 1;
+                    row("config", format!("{config_path}: INVALID: {e:#}"));
+                }
+            }
+            config
+        }
+        Err(e) => {
+            problems += 1;
+            row("config", format!("INVALID: {e}"));
+            Config::default()
+        }
+    };
+
+    row("socket", paths.socket.display().to_string());
+    let socket_len = paths.socket.as_os_str().len();
+    if socket_len > 107 {
+        problems += 1;
+        row(
+            "",
+            format!(
+                "socket path is {socket_len} bytes; Unix sockets allow ~107. Set a shorter HIVE_RUNTIME_DIR"
+            ),
+        );
+    }
+    let daemon = match Client::connect(paths, "doctor").await {
+        Ok(client) => format!(
+            "running (hived {}, pid {}, protocol v{})",
+            client.daemon.version,
+            client.daemon.pid,
+            hive_protocol::PROTOCOL_VERSION
+        ),
+        Err(ClientError::NotRunning(_)) if config.daemon.auto_start => {
+            "not running (starts automatically)".into()
+        }
+        Err(ClientError::NotRunning(_)) => "not running ([daemon] auto_start = false)".into(),
+        Err(e) => {
+            problems += 1;
+            format!("PROBLEM: {e}")
+        }
+    };
+    row("daemon", daemon);
+    row(
+        "logs",
+        format!(
+            "{} and hive.log (more detail with HIVE_LOG=debug)",
+            paths.state_dir.join("hived.log").display()
+        ),
+    );
+
+    match hive_tui::describe_terminal(&config) {
+        Ok(t) => row("terminal", t),
+        Err(e) => row("terminal", format!("unknown ({e:#})")),
+    }
+
+    let path_var = std::env::var_os("PATH").unwrap_or_default();
+    println!("  agents");
+    for (name, def) in config.agents() {
+        let found = match launch::find_executable(&def.command, &path_var) {
+            Some(p) => p.display().to_string(),
+            None => format!("`{}` not found on PATH", def.command),
+        };
+        println!("    {name:<12} {found}");
+    }
+
+    if problems > 0 {
+        anyhow::bail!("{problems} problem(s) found");
     }
     Ok(())
 }

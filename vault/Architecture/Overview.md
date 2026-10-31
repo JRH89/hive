@@ -33,7 +33,7 @@ No `hive-pty` or `hive-agents` crates yet. Spec §5 says not to create empty cra
 
 The client mirrors **only the attached session**. Switching re-attaches and gets a fresh snapshot ([[ADR-0007 Switching re-attaches]]), so background sessions cost the frontend nothing.
 
-Attach takes the `state_formatted()` snapshot **and** subscribes under the same `term` lock. That gives no gap and no duplicate. See [[ADR-0004 Lagging clients resync from snapshot]] for the slow-consumer case.
+Attach takes the snapshot (`session::snapshot`: `state_formatted()` plus `?1049h` when the alternate screen is active) **and** subscribes under the same `term` lock. That gives no gap and no duplicate. See [[ADR-0004 Lagging clients resync from snapshot]] for the slow-consumer case. vt100 can't expose the primary grid hidden behind the alternate screen, so the reader publishes `Chunk::Snapshot` (sent to clients as `Resync`) when an app leaves the alternate screen. A client that attached mid-app then gets the restored primary screen.
 
 ## Data flow: input
 Key event → `keys::encode` (honours DECCKM from the client mirror) → `Input` → `Session::input` (only from the controller) → bounded mpsc → **writer thread** → PTY. A full queue makes the client's send await, which is backpressure rather than unbounded buffering.

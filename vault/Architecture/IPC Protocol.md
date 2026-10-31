@@ -31,7 +31,7 @@ Client → `Hello{protocol_version, client}` (within 5 s) → daemon replies `We
 | `RemoveWorktree{path,force}` | refused for the main tree, in use, or dirty without `force`; → `WorktreeRemoved{path}`. Branch kept |
 
 ## Daemon → client (streamed while attached)
-`Output{data}`, `Resized{size}` (ordered with output, so mirrors stay in sync), `Resync{size,snapshot}` (after lag), `Detached` (when the session is removed), `ControlLost{session}`, `ControlReleased{session}` (to observers when the controller leaves).
+`Output{data}`, `Resized{size}` (ordered with output, so mirrors stay in sync), `Resync{size,snapshot}` (after lag, and when an app leaves the alternate screen), `Detached` (when the session is removed), `ControlLost{session}`, `ControlReleased{session}` (to observers when the controller leaves).
 
 ## Broadcasts (every client)
 `SessionUpdated(info)`, `SessionRemoved(id)`, `WorkspaceUpdated(info)`, `WorkspaceRemoved(id)`, `ShuttingDown`. If a client lags on the event channel it gets a full `WorkspaceList` and `SessionList` instead.

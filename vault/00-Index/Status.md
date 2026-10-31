@@ -4,9 +4,9 @@ updated: 2026-10-30
 ---
 # Status
 
-**Phase 5 complete** (2026-10-30, branch `phase-5-polish`, not yet committed). Themes with colour-depth and ASCII fallback, command palette, session search, configurable keys, brand mark. See [[Phase 5 - Product Experience and Branding]]. Earlier phases are merged to master: [[Phase 4 - Workspaces and Git]], [[Phase 3 - Robust Persistence]], [[Phase 2 - Multiplexing]], [[Phase 1 - Foundation]].
+**Phase 6 complete** (2026-10-30, branch `phase-6-distribution`, not yet committed). All six roadmap phases are done. Robustness and stress tests, CLI end-to-end tests, CI and draft-release workflows, static musl binaries, installer, user guide, troubleshooting and `hive doctor`. See [[Phase 6 - Testing and Distribution]]. Phases 1–5 are merged to master.
 
-**Next:** [[Roadmap#Phase 6 — Testing and Distribution]].
+**Before a public release:** choose a license, add a GitHub remote and let CI run, dry-run a tag to a draft release, test on macOS. Spec §18 future features stay out of scope.
 
 ## Gate before every change
 ```bash

@@ -40,6 +40,23 @@ const READ_BUF: usize = 16 * 1024;
 pub(crate) enum Chunk {
     Output(Arc<[u8]>),
     Resized(TermSize),
+    /// A full redraw that replaces the client's screen (see [`snapshot`]).
+    Snapshot(TermSize, Arc<[u8]>),
+}
+
+/// Bytes that rebuild `screen` in a fresh emulator, including whether the
+/// alternate screen is active (`state_formatted` alone leaves it out).
+///
+/// vt100 can't expose the primary grid hidden behind the alternate one, so a
+/// client attaching mid-app gets a blank primary. The reader publishes a
+/// [`Chunk::Snapshot`] when the app leaves the alternate screen to fill it in.
+pub(crate) fn snapshot(screen: &vt100::Screen) -> Vec<u8> {
+    let mut out = Vec::new();
+    if screen.alternate_screen() {
+        out.extend_from_slice(b"\x1b[?1049h");
+    }
+    out.extend_from_slice(screen.state_formatted().as_bytes());
+    out
 }
 
 /// Where a session runs: its workspace and the git working tree of its cwd.
@@ -231,9 +248,21 @@ impl Session {
             };
             let replies = {
                 let mut term = lock(&self.term);
+                let was_alternate = term.parser.screen().alternate_screen();
                 term.parser.process(&buf[..n]);
                 // No receivers is fine: background sessions keep their state.
                 let _ = self.output.send(Chunk::Output(Arc::from(&buf[..n])));
+                let screen = term.parser.screen();
+                if was_alternate && !screen.alternate_screen() {
+                    let (rows, cols) = screen.size();
+                    let size = TermSize {
+                        rows: rows.get(),
+                        cols: cols.get(),
+                    };
+                    let _ = self
+                        .output
+                        .send(Chunk::Snapshot(size, Arc::from(snapshot(screen))));
+                }
                 term.parser.callbacks_mut().take()
             };
             if !replies.is_empty() && self.input.try_send(replies).is_err() {
@@ -349,7 +378,7 @@ impl Session {
             if controller {
                 self.resize_locked(&mut term, size);
             }
-            let snapshot = term.parser.screen().state_formatted().into_bytes();
+            let snapshot = snapshot(term.parser.screen());
             (snapshot, self.output.subscribe(), controller, previous)
         };
         Attachment {
@@ -365,7 +394,7 @@ impl Session {
     pub fn resync(&self) -> (TermSize, Vec<u8>, broadcast::Receiver<Chunk>) {
         let term = lock(&self.term);
         let size = lock(&self.meta).size;
-        let snapshot = term.parser.screen().state_formatted().into_bytes();
+        let snapshot = snapshot(term.parser.screen());
         (size, snapshot, self.output.subscribe())
     }
 

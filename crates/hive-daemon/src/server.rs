@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use hive_core::brand;
 use hive_protocol::{
-    ClientMessage, PROTOCOL_VERSION, ProtocolError, ServerMessage, SessionId, read_frame,
+    ClientMessage, PROTOCOL_VERSION, ProtocolError, ServerMessage, SessionId, TermSize, read_frame,
     write_frame,
 };
 use tokio::net::UnixStream;
@@ -312,6 +312,14 @@ fn resync(session: &Session, rx: &mut broadcast::Receiver<Chunk>) -> ServerMessa
     }
 }
 
+fn redraw(session: SessionId, size: TermSize, snapshot: &[u8]) -> ServerMessage {
+    ServerMessage::Resync {
+        session,
+        size,
+        snapshot: snapshot.to_vec(),
+    }
+}
+
 async fn forward_output(
     session: Arc<Session>,
     mut rx: broadcast::Receiver<Chunk>,
@@ -339,6 +347,10 @@ async fn forward_output(
                             then = Some(ServerMessage::Resized { session: id, size });
                             break;
                         }
+                        Ok(Chunk::Snapshot(size, data)) => {
+                            then = Some(redraw(id, size, &data));
+                            break;
+                        }
                         // try_recv repositions the receiver after reporting a
                         // lag, so the resync must happen now or data is lost.
                         Err(TryRecvError::Lagged(_)) => {
@@ -364,6 +376,7 @@ async fn forward_output(
                 }
             }
             Ok(Chunk::Resized(size)) => ServerMessage::Resized { session: id, size },
+            Ok(Chunk::Snapshot(size, data)) => redraw(id, size, &data),
             Err(RecvError::Lagged(_)) => resync(&session, &mut rx),
             Err(RecvError::Closed) => return,
         };

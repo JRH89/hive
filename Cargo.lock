@@ -703,6 +703,7 @@ dependencies = [
  "hive-tui",
  "hive-workspace",
  "ratatui",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",

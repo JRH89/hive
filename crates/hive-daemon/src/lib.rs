@@ -43,7 +43,7 @@ pub(crate) struct Daemon {
     /// Kept until the user relaunches or removes them.
     lost: Mutex<BTreeMap<SessionId, SessionInfo>>,
     next_session: AtomicU64,
-    // Lock order across these maps: workspaces, then sessions, then lost.
+    // Lock order across these maps: saved, workspaces, then sessions, then lost.
     /// Broadcasts about a workspace are sent while holding this lock, so they
     /// reach clients in the order the changes were made.
     workspaces: Mutex<BTreeMap<WorkspaceId, WorkspaceInfo>>,
@@ -54,8 +54,16 @@ pub(crate) struct Daemon {
     events: broadcast::Sender<ServerMessage>,
     shutdown: watch::Sender<bool>,
     store_path: PathBuf,
+    /// Held for the whole of [`Daemon::persist`], so writes never interleave.
+    saved: Mutex<Saved>,
+}
+
+#[derive(Default)]
+struct Saved {
     /// Last bytes written to `store_path`, to skip redundant writes.
-    saved: Mutex<Vec<u8>>,
+    bytes: Vec<u8>,
+    /// The graceful-shutdown write happened; later live snapshots are stale.
+    closed: bool,
 }
 
 impl Daemon {
@@ -103,7 +111,7 @@ impl Daemon {
             events: broadcast::channel(1024).0,
             shutdown: watch::channel(false).0,
             store_path,
-            saved: Mutex::new(Vec::new()),
+            saved: Mutex::new(Saved::default()),
         };
         // Records from a version-1 store, or whose workspace was lost, are
         // regrouped by directory.
@@ -435,7 +443,16 @@ impl Daemon {
     /// Writes the session store if its contents changed. `include_live` is
     /// false on graceful shutdown: sessions we terminated on purpose are not
     /// "lost".
+    ///
+    /// The persist task can be mid-write when shutdown aborts it, so the lock
+    /// is taken before reading any state: a live snapshot taken before
+    /// `terminate_all` must not land after the final write.
     fn persist(&self, include_live: bool) {
+        let mut saved = self.saved.lock().unwrap();
+        if saved.closed {
+            return;
+        }
+        saved.closed = !include_live;
         let mut sessions: Vec<StoredSession> = if include_live {
             self.list()
                 .iter()
@@ -466,12 +483,11 @@ impl Daemon {
             ..Store::default()
         }
         .to_bytes();
-        let mut saved = self.saved.lock().unwrap();
-        if *saved == bytes {
+        if saved.bytes == bytes {
             return;
         }
         match Store::write_bytes(&self.store_path, &bytes) {
-            Ok(()) => *saved = bytes,
+            Ok(()) => saved.bytes = bytes,
             Err(e) => tracing::warn!("cannot write {}: {e}", self.store_path.display()),
         }
     }

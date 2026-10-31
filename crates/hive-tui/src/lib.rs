@@ -66,6 +66,26 @@ pub fn check_config(config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// How the UI will look in this terminal, for `hive doctor`.
+pub fn describe_terminal(config: &Config) -> anyhow::Result<String> {
+    let env = theme::Env::current();
+    let theme = Theme::from_config(&config.general.theme, &config.theme, &env)?;
+    let show = |v: &Option<String>| v.clone().unwrap_or_else(|| "unset".into());
+    Ok(format!(
+        "theme {}, {}, {} glyphs (TERM={}, COLORTERM={}{})",
+        config.general.theme,
+        theme.depth,
+        if theme.glyphs.ascii {
+            "ASCII"
+        } else {
+            "Unicode"
+        },
+        show(&env.term),
+        show(&env.colorterm),
+        if env.no_color { ", NO_COLOR" } else { "" },
+    ))
+}
+
 fn theme_for(config: &Config) -> anyhow::Result<Theme> {
     Ok(Theme::from_config(
         &config.general.theme,

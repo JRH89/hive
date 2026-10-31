@@ -562,9 +562,27 @@ async fn noisy_session_does_not_starve_others() {
             "echo took {:?} while another session flooded",
             started.elapsed()
         );
-        // Spread the pings out so the flood overruns the stalled client.
         tokio::time::sleep(Duration::from_millis(300)).await;
     }
+
+    // The stalled client lags only once ~8 MiB backs up (socket buffer,
+    // client queue, broadcast). Measure the flood with a reading observer
+    // instead of assuming a rate, so a slow machine can't skip the overrun.
+    let mut meter = h.client().await;
+    let _ = attach_with(&mut meter, noisy, size, false).await;
+    let mut seen = 0usize;
+    timeout(Duration::from_secs(60), async {
+        while seen < 16 << 20 {
+            match meter.recv().await.unwrap().unwrap() {
+                ServerMessage::Output { data, .. } => seen += data.len(),
+                // The meter lagged too: at least a broadcast queue went by.
+                ServerMessage::Resync { .. } => seen += 4 << 20,
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("the flood never produced 16 MiB");
 
     // Once the stalled client finally reads, it must be told to resync
     // rather than having silently lost output.
@@ -645,12 +663,21 @@ async fn removed_session_is_never_resurrected_by_later_updates() {
     })
     .await
     .unwrap();
-    c.send(&ClientMessage::ListSessions).await.unwrap();
+    // Lifecycle events are ordered among themselves (ADR-0008), but not
+    // against replies, so fence on the events channel: a rename of `other`
+    // is broadcast after anything already queued about `doomed`.
+    c.send(&ClientMessage::RenameSession {
+        session: other,
+        label: "fence".into(),
+    })
+    .await
+    .unwrap();
     timeout(T, async {
         loop {
             let m = c.recv().await.unwrap().unwrap();
             note(&m, &mut removed);
-            if matches!(m, ServerMessage::SessionList(_)) {
+            if matches!(&m, ServerMessage::SessionUpdated(i) if i.id == other && i.label == "fence")
+            {
                 break;
             }
         }
@@ -1066,4 +1093,229 @@ async fn workspaces_persist_and_are_removed_only_when_empty() {
     .unwrap()
     .unwrap();
     assert!(workspaces(&mut c).await.iter().all(|w| w.id != ws.id));
+}
+
+/// Opens a raw socket connection, sends `bytes`, and returns what the daemon
+/// wrote back before closing (or `None` if it is still open after a second).
+async fn raw_exchange(paths: &Paths, bytes: &[u8]) -> Option<Vec<u8>> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut s = tokio::net::UnixStream::connect(&paths.socket)
+        .await
+        .unwrap();
+    s.write_all(bytes).await.unwrap();
+    let mut reply = Vec::new();
+    timeout(Duration::from_secs(1), s.read_to_end(&mut reply))
+        .await
+        .ok()
+        .map(|_| reply)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn malformed_clients_are_dropped_without_affecting_the_daemon() {
+    let h = Harness::start().await;
+    let mut c = h.client().await;
+    let id = create(&mut c, sh("echo alive; sleep 60", TermSize::DEFAULT)).await;
+
+    // Garbage, an oversized length prefix, and a valid frame that isn't Hello
+    // are all refused during the handshake.
+    let garbage = raw_exchange(&h.paths, b"\x05\x00\x00\x00\xff\xff\xff\xff\xff").await;
+    assert!(garbage.is_some(), "daemon kept a garbage connection open");
+    let huge = ((hive_protocol::MAX_FRAME_LEN + 1) as u32).to_le_bytes();
+    assert!(raw_exchange(&h.paths, &huge).await.is_some());
+    let not_hello = hive_protocol::encode_frame(&ClientMessage::ListSessions).unwrap();
+    let reply = raw_exchange(&h.paths, &not_hello).await.unwrap();
+    let msg: ServerMessage = hive_protocol::read_frame(&mut reply.as_slice())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(msg, ServerMessage::Error { .. }), "{msg:?}");
+
+    // A client speaking another protocol version is told ours, then closed.
+    let old = hive_protocol::encode_frame(&ClientMessage::Hello {
+        protocol_version: hive_protocol::PROTOCOL_VERSION - 1,
+        client: "old".into(),
+    })
+    .unwrap();
+    let reply = raw_exchange(&h.paths, &old).await.expect("not closed");
+    let msg: ServerMessage = hive_protocol::read_frame(&mut reply.as_slice())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(msg, ServerMessage::Welcome { protocol_version, .. } if protocol_version == hive_protocol::PROTOCOL_VERSION)
+    );
+
+    // A handshaken, attached client that then sends garbage is dropped; its
+    // session keeps running and other clients are unaffected.
+    let mut hello = hive_protocol::encode_frame(&ClientMessage::Hello {
+        protocol_version: hive_protocol::PROTOCOL_VERSION,
+        client: "bad".into(),
+    })
+    .unwrap();
+    hello.extend(
+        hive_protocol::encode_frame(&ClientMessage::Attach {
+            session: id,
+            size: TermSize::DEFAULT,
+            force: true,
+        })
+        .unwrap(),
+    );
+    hello.extend(b"\x03\x00\x00\x00\xff\xff\xff");
+    assert!(raw_exchange(&h.paths, &hello).await.is_some());
+
+    let sessions = list(&mut c).await;
+    let s = sessions.iter().find(|s| s.id == id).unwrap();
+    assert_eq!(s.state, SessionState::Running);
+    let mut screen = attach(&mut c, id, TermSize::DEFAULT).await;
+    wait_for_text(&mut c, &mut screen, "alive").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_observers_resize_does_not_change_the_pty() {
+    let h = Harness::start().await;
+    let mut c1 = h.client().await;
+    let id = create(
+        &mut c1,
+        sh("while read x; do stty size; done", TermSize::DEFAULT),
+    )
+    .await;
+    let small = TermSize {
+        rows: 30,
+        cols: 100,
+    };
+    let mut screen = attach(&mut c1, id, small).await;
+
+    let mut c2 = h.client().await;
+    let (_, controller) = attach_with(
+        &mut c2,
+        id,
+        TermSize {
+            rows: 50,
+            cols: 150,
+        },
+        false,
+    )
+    .await;
+    assert!(!controller);
+    c2.send(&ClientMessage::Resize(TermSize {
+        rows: 55,
+        cols: 160,
+    }))
+    .await
+    .unwrap();
+
+    c1.send(&ClientMessage::Input(b"\r".to_vec()))
+        .await
+        .unwrap();
+    wait_for_text(&mut c1, &mut screen, "30 100").await;
+    assert!(!screen.contents().contains("50 150") && !screen.contents().contains("55 160"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reattach_restores_a_full_screen_app_exactly() {
+    let h = Harness::start().await;
+    let size = TermSize::DEFAULT;
+    let mut c1 = h.client().await;
+    // Alternate screen, a positioned line, and a coloured word, like a TUI.
+    let id = create(
+        &mut c1,
+        sh(
+            r"echo primary-before; printf '\033[?1049h\033[2J\033[5;10Hfull-screen app\033[7;1H\033[31mred\033[0m'; read x; printf '\033[?1049l'; echo primary-after; sleep 60",
+            size,
+        ),
+    )
+    .await;
+    let mut screen = attach(&mut c1, id, size).await;
+    wait_for_text(&mut c1, &mut screen, "red").await;
+    c1.send(&ClientMessage::Detach).await.unwrap();
+    drop(c1);
+
+    let mut c2 = h.client().await;
+    let again = attach(&mut c2, id, size).await;
+    let s = again.0.screen();
+    assert!(s.alternate_screen());
+    assert_eq!(s.contents(), screen.contents());
+    assert_eq!(s.cell(4, 9).unwrap().contents(), "f");
+    assert_eq!(s.cell(6, 0).unwrap().fgcolor(), vt100::Color::Idx(1));
+
+    // When the app quits, the primary screen it hid comes back, even for a
+    // client that only ever saw the alternate one.
+    let mut again = again;
+    c2.send(&ClientMessage::Input(b"\r".to_vec()))
+        .await
+        .unwrap();
+    wait_for_text(&mut c2, &mut again, "primary-after").await;
+    wait_for_text(&mut c2, &mut again, "primary-before").await;
+    assert!(!again.0.screen().alternate_screen());
+    assert!(
+        again.contents().contains("primary-before"),
+        "{}",
+        again.contents()
+    );
+    assert!(!again.contents().contains("full-screen app"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn many_concurrent_sessions_and_clients_stay_correct() {
+    const SESSIONS: u32 = 12;
+    const CLIENTS: u32 = 4;
+    let h = Harness::start().await;
+    let size = TermSize::DEFAULT;
+    let mut c = h.client().await;
+    let mut ids = Vec::new();
+    for n in 1..=SESSIONS {
+        // A burst of output, then wait for input and exit with a distinct code.
+        let script = format!(
+            r#"i=0; while [ $i -lt 400 ]; do echo "s{n} line $i"; i=$((i+1)); done; echo "done-{n}"; read x; exit {n}"#
+        );
+        ids.push((n, create(&mut c, sh(&script, size)).await));
+    }
+
+    // Several clients attach to their share of the sessions concurrently,
+    // switching between them, and answer each one.
+    let mut tasks = Vec::new();
+    for k in 0..CLIENTS {
+        let mine: Vec<_> = ids
+            .iter()
+            .copied()
+            .filter(|(n, _)| n % CLIENTS == k)
+            .collect();
+        let mut client = h.client().await;
+        tasks.push(tokio::spawn(async move {
+            for (n, id) in mine {
+                let mut screen = attach(&mut client, id, size).await;
+                wait_for_text(&mut client, &mut screen, &format!("done-{n}")).await;
+                client
+                    .send(&ClientMessage::Input(b"\r".to_vec()))
+                    .await
+                    .unwrap();
+            }
+        }));
+    }
+    for t in tasks {
+        timeout(T, t).await.unwrap().unwrap();
+    }
+
+    let deadline = tokio::time::Instant::now() + T;
+    loop {
+        let sessions = list(&mut c).await;
+        let codes: Vec<_> = ids
+            .iter()
+            .map(|(n, id)| {
+                let s = sessions.iter().find(|s| s.id == *id).unwrap();
+                match &s.state {
+                    SessionState::Exited { code, .. } => *code == Some(*n),
+                    _ => false,
+                }
+            })
+            .collect();
+        if codes.iter().all(|ok| *ok) {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "not all sessions exited with their own code: {sessions:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
