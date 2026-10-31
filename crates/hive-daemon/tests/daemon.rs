@@ -982,7 +982,10 @@ async fn worktree_sessions_are_isolated_and_cleanup_is_safe() {
     // Canonical on both sides: macOS's temp dir is behind a symlink.
     let worktrees = h.paths.state_dir.join("worktrees").canonicalize().unwrap();
     assert!(path.canonicalize().unwrap().starts_with(worktrees));
-    assert_eq!(PathBuf::from(&wt.cwd), path);
+    assert_eq!(
+        PathBuf::from(&wt.cwd).canonicalize().unwrap(),
+        path.canonicalize().unwrap()
+    );
 
     c.send(&ClientMessage::ListWorktrees(main.workspace))
         .await
