@@ -42,7 +42,8 @@ fn cmd(args: &[&str]) -> CreateSession {
             .map(|s| s.to_string())
             .collect(),
         cwd: std::env::temp_dir().display().to_string(),
-        env: Vec::new(),
+        // As `hive` sends it: the whole client environment (PATH, SystemRoot).
+        env: std::env::vars().collect(),
         size: TermSize::DEFAULT,
         workspace: None,
         worktree: None,
