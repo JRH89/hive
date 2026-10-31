@@ -1,0 +1,14 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+
+[workspace.dependencies]
+hive-protocol = { path = "crates/hive-protocol" }
+hive-core = { path = "crates/hive-core" }
+hive-daemon = { path = "crates/hive-daemon" }
+hive-tui = { path = "crates/hive-tui" }
