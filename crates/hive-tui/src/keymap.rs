@@ -18,6 +18,7 @@ pub enum Command {
     NewAgent,
     NewWorktreeTerminal,
     NewSpace,
+    Usage,
     NewWorktreeSession,
     Workspaces,
     AddWorkspace,
@@ -50,7 +51,7 @@ pub enum Command {
 }
 
 impl Command {
-    pub const ALL: [Command; 35] = [
+    pub const ALL: [Command; 36] = [
         Command::Palette,
         Command::SearchSessions,
         Command::NewSession,
@@ -80,6 +81,7 @@ impl Command {
         Command::Review,
         Command::PullRequest,
         Command::RunTask,
+        Command::Usage,
         Command::Rename,
         Command::Kill,
         Command::TakeControl,
@@ -97,6 +99,7 @@ impl Command {
             Command::NewAgent => "new_agent",
             Command::NewWorktreeTerminal => "new_worktree_terminal",
             Command::NewSpace => "new_space",
+            Command::Usage => "usage",
             Command::NewWorktreeSession => "new_worktree_session",
             Command::Workspaces => "workspaces",
             Command::AddWorkspace => "add_workspace",
@@ -138,6 +141,7 @@ impl Command {
             Command::NewAgent => "New agent (pick one)",
             Command::NewWorktreeTerminal => "New terminal in its own worktree (own branch)",
             Command::NewSpace => "New space (a terminal; cd anywhere)",
+            Command::Usage => "Token usage and cost of your agents",
             Command::NewWorktreeSession => "New agent in its own worktree (pick one)",
             Command::Workspaces => "Switch workspace",
             Command::AddWorkspace => "Add a folder as a space",
@@ -214,6 +218,7 @@ impl Command {
             Command::Help => &["?"],
             Command::NewWorktreeTerminal => &["C"],
             Command::NewSpace => &["S"],
+            Command::Usage => &["U"],
             Command::NewWorktreeSession => &[],
             Command::AddWorkspace | Command::RenameWorkspace | Command::Settings => &[],
         }

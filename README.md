@@ -17,6 +17,7 @@ Run Claude Code, Codex, Gemini CLI, OpenCode or any shell side by side, see at a
 - **Nothing dies with the window.** Agents live in a background daemon (`hived`). Detach, close the laptop lid or the terminal, crash the UI: reattach and get the exact screen back
 - **Several windows, one session.** Others watch; only one types, and taking over is explicit (`Ctrl+Space a`)
 - **Command palette.** `Ctrl+Space :` lists every action, session and space, fuzzy-searchable. Every key is configurable
+- **Right-click menus.** Right-click a space (open, new terminal, rename, close), a tab (rename, split, close) or an agent (open, rename, split, terminate)
 - **Works anywhere.** Truecolor, 256 or 16 colours, `NO_COLOR`, plain ASCII without Nerd Fonts; mouse support throughout
 - **Safe with your work.** Worktrees with uncommitted changes are never removed without `--force` and confirmation; branches are never deleted
 
@@ -35,6 +36,8 @@ Optional, off by default and invisible until enabled. Each opens as an ordinary 
 | **GitHub** | `Ctrl+Space H` | `gh pr checks --watch` for the session's branch |
 | **Tasks** | `Ctrl+Space T` | Pick a just/npm/make/cargo task and run it beside the agent |
 | **Desktop notifications** | | A notification when an agent you aren't viewing finishes or needs input |
+| **Git status** | | Changed files and commits ahead/behind under each repository space (`main ~3 ↑2`) |
+| **Usage** | `Ctrl+Space U` | Token usage and cost of your agents in a pane (`ccusage blocks --live` by default; agents keep the logs, Hive just opens the tool) |
 
 ```toml
 [integrations.obsidian]
@@ -59,7 +62,7 @@ curl -fsSL https://github.com/jrh89/hive/releases/latest/download/install.sh | s
 irm https://github.com/jrh89/hive/releases/latest/download/install.ps1 | iex
 ```
 
-The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.4.7` to pin a version. Later, `hive update` upgrades in place (then `hive daemon stop` to restart the daemon on the new version; this ends running sessions).
+The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.4.8` to pin a version. Later, `hive update` upgrades in place (then `hive daemon stop` to restart the daemon on the new version; this ends running sessions).
 
 **From source** (Rust ≥ 1.89):
 
@@ -140,6 +143,7 @@ The leader is **Ctrl+Space**. Everything else goes to the terminal.
 | `Ctrl+Space :` | Command palette: every command, session and space |
 | `Ctrl+Space c` / `t` | New terminal / new tab in this space |
 | `Ctrl+Space S` | New space (same as `+ new` in the sidebar) |
+| Right-click | Menu for a space, tab or agent: rename, split, close |
 | `Ctrl+Space C` | New terminal in its own worktree (own branch) |
 | `Ctrl+Space A` | New agent from a list |
 | `Ctrl+Space v` / `-` | Split right / below |

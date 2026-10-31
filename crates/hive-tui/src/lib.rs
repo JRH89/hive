@@ -31,6 +31,14 @@ use theme::Theme;
 /// and polls input again (~one frame at 60 Hz).
 const DRAIN_BUDGET: Duration = Duration::from_millis(12);
 
+/// How often `[integrations.git_status]` re-reads the listed repositories.
+const GIT_STATUS_EVERY: Duration = Duration::from_secs(5);
+
+type GitResults = Vec<(
+    hive_protocol::WorkspaceId,
+    Option<hive_workspace::GitCounts>,
+)>;
+
 /// Upper bound on the wait between reconnect attempts.
 const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(2);
 
@@ -245,6 +253,12 @@ async fn connected(
         }
     }
 
+    // git status runs off the UI thread, one poll at a time.
+    let (git_tx, mut git_rx) = mpsc::channel::<GitResults>(1);
+    let mut git_tick = tokio::time::interval(GIT_STATUS_EVERY);
+    git_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut git_busy = false;
+
     let phase = loop {
         terminal.draw(|f| render::draw(f, app, theme))?;
         if std::mem::take(&mut app.bell) {
@@ -261,6 +275,26 @@ async fn connected(
                 Some(Err(e)) => return Err(e.into()),
                 None => break Phase::Exit(Outcome::Detached { session: None }),
             },
+            _ = git_tick.tick(), if !git_busy => {
+                let roots = app.git_roots();
+                if !roots.is_empty() {
+                    git_busy = true;
+                    let tx = git_tx.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let results = roots
+                            .into_iter()
+                            .map(|(w, root)| (w, hive_workspace::status_counts(&root)))
+                            .collect();
+                        let _ = tx.blocking_send(results);
+                    });
+                }
+                Vec::new()
+            }
+            Some(results) = git_rx.recv() => {
+                git_busy = false;
+                app.on_git_status(results);
+                Vec::new()
+            }
             msg = srv_rx.recv() => match msg {
                 Some(Ok(m)) => {
                     let mut out = app.on_server(m);

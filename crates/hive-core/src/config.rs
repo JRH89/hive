@@ -114,6 +114,9 @@ pub struct Integrations {
     pub github: ToolPane,
     pub tasks: Tasks,
     pub desktop_notify: DesktopNotify,
+    pub git_status: GitStatus,
+    /// `[integrations.usage]`: token usage and cost (default `ccusage`).
+    pub usage: ToolPane,
 }
 
 /// `[integrations.review]` / `[integrations.github]`: a tool opened in the
@@ -172,6 +175,14 @@ impl Default for DesktopNotify {
             command: vec!["notify-send".into(), "--app-name=Hive".into()],
         }
     }
+}
+
+/// `[integrations.git_status]`: changed files and ahead/behind counts under
+/// each repository space in the sidebar.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct GitStatus {
+    pub enabled: bool,
 }
 
 /// `[integrations.obsidian]`: open a workspace's Obsidian vault in a pane.

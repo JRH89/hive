@@ -90,6 +90,19 @@ pub enum Mode {
         workspace: WorkspaceId,
         input: String,
     },
+    /// A right-click menu at screen cell `at`; `selected` indexes
+    /// `App::menu_items(target)`.
+    Menu {
+        target: MenuTarget,
+        selected: usize,
+        at: (u16, u16),
+    },
+    RenameTab {
+        tab: usize,
+        input: String,
+    },
+    /// Close a space: terminate its sessions (asks first).
+    ConfirmCloseSpace(WorkspaceId),
     /// Searchable list of commands, sessions and workspaces. `selected`
     /// indexes `App::palette_items()`.
     Palette {
@@ -97,6 +110,43 @@ pub enum Mode {
         selected: usize,
         scope: Scope,
     },
+}
+
+/// What a right-click menu is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuTarget {
+    Space(WorkspaceId),
+    /// An index into `App::tabs`.
+    Tab(usize),
+    Session(SessionId),
+}
+
+/// A right-click menu entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuAction {
+    Open,
+    NewTerminal,
+    Rename,
+    SplitRight,
+    SplitDown,
+    CloseTab,
+    CloseSpace,
+    Terminate,
+}
+
+impl MenuAction {
+    pub fn label(self) -> &'static str {
+        match self {
+            MenuAction::Open => "Open",
+            MenuAction::NewTerminal => "New terminal here",
+            MenuAction::Rename => "Rename",
+            MenuAction::SplitRight => "Split right",
+            MenuAction::SplitDown => "Split below",
+            MenuAction::CloseTab => "Close tab",
+            MenuAction::CloseSpace => "Close space…",
+            MenuAction::Terminate => "Terminate…",
+        }
+    }
 }
 
 /// What the palette lists.
@@ -264,6 +314,9 @@ pub struct App {
     pub tasks: Option<TaskList>,
     /// Side effects for the frontend loop to carry out.
     pub effects: Vec<Effect>,
+    /// Working state of listed repository spaces (`[integrations.git_status]`),
+    /// refreshed by the frontend loop.
+    pub git: BTreeMap<WorkspaceId, hive_workspace::GitCounts>,
     /// When each session's agent started its current turn.
     working_since: BTreeMap<SessionId, std::time::Instant>,
     /// Screen rows of sidebar entries as last drawn (render fills this), so
@@ -349,11 +402,20 @@ fn digit(key: &KeyEvent) -> Option<usize> {
     }
 }
 
+fn split_dir(action: MenuAction) -> Dir {
+    if action == MenuAction::SplitDown {
+        Dir::Down
+    } else {
+        Dir::Right
+    }
+}
+
 /// Agent names of sessions opened by integrations.
 pub const NOTES_AGENT: &str = "notes";
 pub const REVIEW_AGENT: &str = "review";
 pub const GITHUB_AGENT: &str = "checks";
 pub const TASK_AGENT: &str = "task";
+pub const USAGE_AGENT: &str = "usage";
 
 /// Work outside the app state, done by the frontend loop.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -405,6 +467,7 @@ pub fn hidden_commands(config: &Config) -> Vec<Command> {
         (i.review.enabled, Command::Review),
         (i.github.enabled, Command::PullRequest),
         (i.tasks.enabled, Command::RunTask),
+        (i.usage.enabled, Command::Usage),
     ] {
         if !on {
             hidden.push(cmd);
@@ -450,6 +513,7 @@ impl App {
             bell: false,
             tasks: None,
             effects: Vec::new(),
+            git: BTreeMap::new(),
             working_since: BTreeMap::new(),
             sidebar_hits: RefCell::new(Vec::new()),
             space: None,
@@ -755,6 +819,30 @@ impl App {
             .or(self.space.filter(|w| self.workspaces.contains_key(w)))
             .or_else(|| of(self.focused()))
             .or_else(|| self.groups().first().map(|(w, _)| *w))
+    }
+
+    /// Repository spaces the sidebar lists, for git status polling: id and
+    /// root. Empty while `[integrations.git_status]` is off.
+    pub fn git_roots(&self) -> Vec<(WorkspaceId, PathBuf)> {
+        if !self.config.integrations.git_status.enabled {
+            return Vec::new();
+        }
+        self.spaces()
+            .into_iter()
+            .filter_map(|(w, _)| self.workspaces.get(&w))
+            .filter(|w| w.is_repo)
+            .map(|w| (w.id, PathBuf::from(&w.root)))
+            .collect()
+    }
+
+    /// Fresh git counts from the frontend loop; `None` drops a space's.
+    pub fn on_git_status(&mut self, counts: Vec<(WorkspaceId, Option<hive_workspace::GitCounts>)>) {
+        for (w, c) in counts {
+            match c {
+                Some(c) => self.git.insert(w, c),
+                None => self.git.remove(&w),
+            };
+        }
     }
 
     /// The sidebar's AGENTS: every agent in every space, grouped by space,
@@ -1312,6 +1400,9 @@ impl App {
     }
 
     fn on_mouse(&mut self, m: MouseEvent) -> Vec<ClientMessage> {
+        if self.link == Link::Connected && matches!(self.mode, Mode::Menu { .. }) {
+            return self.on_menu_mouse(m);
+        }
         if self.link != Link::Connected || self.mode != Mode::Normal {
             return Vec::new();
         }
@@ -1323,6 +1414,22 @@ impl App {
             .iter()
             .find(|(r, _)| r.contains(at))
             .map(|(_, h)| *h);
+        if matches!(m.kind, MouseEventKind::Down(MouseButton::Right)) {
+            let target = match hit {
+                Some(SidebarHit::Workspace(w)) => Some(MenuTarget::Space(w)),
+                Some(SidebarHit::Tab(i)) => Some(MenuTarget::Tab(i)),
+                Some(SidebarHit::Session(id)) => Some(MenuTarget::Session(id)),
+                _ => None,
+            };
+            if let Some(target) = target {
+                self.mode = Mode::Menu {
+                    target,
+                    selected: 0,
+                    at: (m.column, m.row),
+                };
+                return Vec::new();
+            }
+        }
         let click = matches!(m.kind, MouseEventKind::Down(MouseButton::Left));
         match (click, hit) {
             (true, Some(SidebarHit::Tab(i))) => return self.select_tab(i),
@@ -1458,6 +1565,23 @@ impl App {
                 }
             }
             Mode::Rename { .. } => self.on_rename_key(key),
+            Mode::Menu { .. } => self.on_menu_key(key),
+            Mode::RenameTab { .. } => self.on_rename_tab_key(key),
+            Mode::ConfirmCloseSpace(w) => {
+                self.mode = Mode::Normal;
+                if !matches!(key.code, KeyCode::Char('y' | 'Y')) {
+                    self.status = None;
+                    return Vec::new();
+                }
+                let ids: Vec<SessionId> = self
+                    .sessions
+                    .values()
+                    .filter(|s| s.workspace == w)
+                    .map(|s| s.id)
+                    .collect();
+                self.set_status(Tone::Info, format!("Closing {}…", self.workspace_name(w)));
+                ids.into_iter().map(ClientMessage::KillSession).collect()
+            }
             Mode::NewSession { .. } => self.on_picker_key(key),
             Mode::Workspaces { .. } => self.on_workspaces_key(key),
             Mode::Palette { .. } => self.on_palette_key(key),
@@ -1607,7 +1731,10 @@ impl App {
             Command::RunTask if self.config.integrations.tasks.enabled => {
                 return self.pick_task();
             }
-            Command::Review | Command::PullRequest | Command::RunTask => {}
+            Command::Usage if self.config.integrations.usage.enabled => {
+                return self.open_usage();
+            }
+            Command::Review | Command::PullRequest | Command::RunTask | Command::Usage => {}
             Command::CloseTab => return self.close_tab(),
             Command::NewWorktreeTerminal => return self.new_worktree_terminal(),
             Command::NewSpace => return self.new_space(),
@@ -2178,6 +2305,167 @@ impl App {
         }
     }
 
+    /// Entries of a right-click menu.
+    pub fn menu_items(&self, target: MenuTarget) -> Vec<MenuAction> {
+        use MenuAction::*;
+        match target {
+            MenuTarget::Space(_) => vec![Open, NewTerminal, Rename, CloseSpace],
+            MenuTarget::Tab(_) => vec![Rename, SplitRight, SplitDown, CloseTab],
+            MenuTarget::Session(_) => vec![Open, Rename, SplitRight, SplitDown, Terminate],
+        }
+    }
+
+    /// Where the open menu is drawn: at the click, kept on screen.
+    pub fn menu_rect(&self) -> Option<Rect> {
+        let Mode::Menu { target, at, .. } = self.mode else {
+            return None;
+        };
+        let items = self.menu_items(target);
+        let width = items.iter().map(|a| a.label().len()).max().unwrap_or(0) as u16 + 4;
+        let height = items.len() as u16 + 2;
+        let (cols, rows) = self.terminal;
+        Some(Rect {
+            x: at.0.min(cols.saturating_sub(width)),
+            y: at.1.min(rows.saturating_sub(height)),
+            width: width.min(cols),
+            height: height.min(rows),
+        })
+    }
+
+    fn on_menu_key(&mut self, key: KeyEvent) -> Vec<ClientMessage> {
+        let Mode::Menu {
+            target, selected, ..
+        } = self.mode
+        else {
+            return Vec::new();
+        };
+        let n = self.menu_items(target).len();
+        let next = match key.code {
+            KeyCode::Down | KeyCode::Char('j') => (selected + 1) % n,
+            KeyCode::Up | KeyCode::Char('k') => (selected + n - 1) % n,
+            KeyCode::Enter => {
+                let action = self.menu_items(target)[selected];
+                self.mode = Mode::Normal;
+                return self.menu_action(target, action);
+            }
+            _ => {
+                self.mode = Mode::Normal;
+                return Vec::new();
+            }
+        };
+        if let Mode::Menu { selected, .. } = &mut self.mode {
+            *selected = next;
+        }
+        Vec::new()
+    }
+
+    /// A click on an entry runs it; anywhere else closes the menu.
+    fn on_menu_mouse(&mut self, m: MouseEvent) -> Vec<ClientMessage> {
+        let (Some(rect), &Mode::Menu { target, .. }) = (self.menu_rect(), &self.mode) else {
+            return Vec::new();
+        };
+        let items = self.menu_items(target);
+        let row = m.row.checked_sub(rect.y + 1).map(usize::from);
+        let inside = rect.contains(ratatui::layout::Position::new(m.column, m.row));
+        match m.kind {
+            MouseEventKind::Moved | MouseEventKind::Drag(_) => {
+                if let (true, Some(r)) = (inside, row.filter(|&r| r < items.len()))
+                    && let Mode::Menu { selected, .. } = &mut self.mode
+                {
+                    *selected = r;
+                }
+                Vec::new()
+            }
+            MouseEventKind::Down(MouseButton::Left) if inside => {
+                match row.and_then(|r| items.get(r)).copied() {
+                    Some(action) => {
+                        self.mode = Mode::Normal;
+                        self.menu_action(target, action)
+                    }
+                    None => Vec::new(),
+                }
+            }
+            MouseEventKind::Down(_) => {
+                self.mode = Mode::Normal;
+                Vec::new()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    fn menu_action(&mut self, target: MenuTarget, action: MenuAction) -> Vec<ClientMessage> {
+        use MenuAction::*;
+        match (target, action) {
+            (MenuTarget::Space(w), Open) => self.open_space(w),
+            (MenuTarget::Space(w), NewTerminal) => {
+                let mut out = self.open_space(w);
+                out.extend(self.new_terminal(Place::NewTab));
+                out
+            }
+            (MenuTarget::Space(w), Rename) => {
+                self.mode = Mode::RenameWorkspace {
+                    workspace: w,
+                    input: self.workspace_name(w).to_string(),
+                };
+                Vec::new()
+            }
+            (MenuTarget::Space(w), CloseSpace) => {
+                self.mode = Mode::ConfirmCloseSpace(w);
+                Vec::new()
+            }
+            (MenuTarget::Tab(i), Rename) if i < self.tabs.len() => {
+                self.mode = Mode::RenameTab {
+                    tab: i,
+                    input: self.tabs[i].name.clone().unwrap_or_default(),
+                };
+                Vec::new()
+            }
+            (MenuTarget::Tab(i), SplitRight | SplitDown) => {
+                let mut out = self.select_tab(i);
+                out.extend(self.new_terminal(Place::Split(split_dir(action))));
+                out
+            }
+            (MenuTarget::Tab(i), CloseTab) if i < self.tabs.len() => {
+                let mut out = self.select_tab(i);
+                out.extend(self.close_tab());
+                out
+            }
+            (MenuTarget::Session(id), Open) => self.switch_to(id),
+            (MenuTarget::Session(id), Rename) => {
+                self.start_rename(id);
+                Vec::new()
+            }
+            (MenuTarget::Session(id), SplitRight | SplitDown) => {
+                let mut out = self.switch_to(id);
+                out.extend(self.new_terminal(Place::Split(split_dir(action))));
+                out
+            }
+            (MenuTarget::Session(id), Terminate) => {
+                self.mode = Mode::ConfirmKill(id);
+                Vec::new()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    fn on_rename_tab_key(&mut self, key: KeyEvent) -> Vec<ClientMessage> {
+        let Mode::RenameTab { tab, input } = &mut self.mode else {
+            return Vec::new();
+        };
+        match edit_line(input, &key) {
+            Edit::Submit => {
+                let name = input.trim().to_string();
+                if let Some(t) = self.tabs.get_mut(*tab) {
+                    t.name = (!name.is_empty()).then_some(name);
+                }
+                self.mode = Mode::Normal;
+            }
+            Edit::Cancel => self.mode = Mode::Normal,
+            Edit::Editing => {}
+        }
+        Vec::new()
+    }
+
     fn open_workspaces(&mut self) {
         let order = self.workspace_order();
         let selected = self
@@ -2477,6 +2765,35 @@ impl App {
         let def = argv_def(&argv);
         let label = format!("{label} · {}", hive_workspace::default_name(&cwd));
         self.open_tool(agent, &def, label, cwd, workspace, open_in)
+    }
+
+    /// Token usage and cost (`[integrations.usage]`), by default ccusage's
+    /// live view. Agents keep their own logs; Hive only opens a tool that
+    /// reads them.
+    fn open_usage(&mut self) -> Vec<ClientMessage> {
+        let Some((cwd, workspace, _)) = self.context() else {
+            return Vec::new();
+        };
+        let tool = &self.config.integrations.usage;
+        let argv = if tool.command.is_empty() {
+            ["ccusage", "blocks", "--live"].map(String::from).to_vec()
+        } else {
+            tool.command.clone()
+        };
+        let open_in = tool.open_in;
+        let def = argv_def(&argv);
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        if launch::find_executable(&def.command, &path).is_none() {
+            self.set_status(
+                Tone::Warning,
+                format!(
+                    "{} isn't installed: `npm i -g ccusage`, or set [integrations.usage] command.",
+                    def.command
+                ),
+            );
+            return Vec::new();
+        }
+        self.open_tool(USAGE_AGENT, &def, "usage".into(), cwd, workspace, open_in)
     }
 
     /// Lists the project tasks next to the focused session in the palette.
@@ -3158,6 +3475,27 @@ mod tests {
         attached(&mut app, 1);
         app.on_server(ServerMessage::SessionUpdated(one));
         app
+    }
+
+    #[test]
+    fn usage_is_hidden_until_enabled_and_explains_a_missing_tool() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut off = App::new(Config::default(), Start::Attach(1), (100, 26));
+        assert!(!palette_has(&mut off, Command::Usage));
+
+        let mut app = integrated(dir.path());
+        app.config.integrations.usage.enabled = true;
+        app.config.integrations.usage.command = vec!["no-such-usage-tool".into()];
+        assert!(app.run(Command::Usage).is_empty());
+        assert!(matches!(&app.status, Some((Tone::Warning, m)) if m.contains("isn't installed")));
+
+        app.config.integrations.usage.command = vec!["sh".into()];
+        let out = app.run(Command::Usage);
+        let [ClientMessage::CreateSession(req)] = out.as_slice() else {
+            panic!("expected the usage tool, got {out:?}")
+        };
+        assert_eq!(req.agent, USAGE_AGENT);
+        assert_eq!(req.label, "usage");
     }
 
     #[test]
@@ -4027,6 +4365,111 @@ mod tests {
         };
         *selected = shell;
         app.on_terminal_event(key(KeyCode::Enter, KeyModifiers::NONE))
+    }
+
+    #[test]
+    fn right_click_menus_rename_split_and_close() {
+        let mut app = app_with_workspaces();
+        let right = |x, y| mouse(MouseEventKind::Down(MouseButton::Right), x, y);
+        let left = |x, y| mouse(MouseEventKind::Down(MouseButton::Left), x, y);
+        let set_hits = |app: &App, hits: Vec<(Rect, SidebarHit)>| {
+            *app.sidebar_hits.borrow_mut() = hits;
+        };
+        let hits = vec![
+            (Rect::new(0, 2, 26, 2), SidebarHit::Workspace(1)),
+            (Rect::new(0, 12, 26, 2), SidebarHit::Session(2)),
+            (Rect::new(30, 0, 5, 1), SidebarHit::Tab(0)),
+        ];
+
+        // Space: the menu opens where clicked; "Rename" asks for a name.
+        set_hits(&app, hits.clone());
+        app.on_terminal_event(right(3, 2));
+        assert!(matches!(
+            app.mode,
+            Mode::Menu {
+                target: MenuTarget::Space(1),
+                at: (3, 2),
+                ..
+            }
+        ));
+        let rect = app.menu_rect().unwrap();
+        let rename = app
+            .menu_items(MenuTarget::Space(1))
+            .iter()
+            .position(|a| *a == MenuAction::Rename)
+            .unwrap() as u16;
+        app.on_terminal_event(left(rect.x + 2, rect.y + 1 + rename));
+        assert!(
+            matches!(&app.mode, Mode::RenameWorkspace { workspace: 1, input } if input == "web")
+        );
+        app.on_terminal_event(key(KeyCode::Esc, KeyModifiers::NONE));
+
+        // A click outside closes it without doing anything.
+        app.on_terminal_event(right(3, 2));
+        assert!(app.on_terminal_event(left(90, 25)).is_empty());
+        assert_eq!(app.mode, Mode::Normal);
+
+        // Tab: rename by keyboard, shown in the tab row.
+        set_hits(&app, hits.clone());
+        app.on_terminal_event(right(31, 0));
+        app.on_terminal_event(key(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(app.mode, Mode::RenameTab { tab: 0, .. }));
+        for c in "build".chars() {
+            app.on_terminal_event(ch(c));
+        }
+        app.on_terminal_event(key(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.tabs[0].name.as_deref(), Some("build"));
+
+        // Tab: split right opens a terminal beside it.
+        set_hits(&app, hits.clone());
+        app.on_terminal_event(right(31, 0));
+        app.on_terminal_event(key(KeyCode::Down, KeyModifiers::NONE));
+        let out = app.on_terminal_event(key(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(
+            out.iter()
+                .any(|m| matches!(m, ClientMessage::CreateSession(_)))
+        );
+        assert_eq!(app.place, Place::Split(Dir::Right));
+        app.awaiting_create = false;
+        app.place = Place::Replace;
+
+        // Agent: terminate asks first.
+        set_hits(&app, hits.clone());
+        app.on_terminal_event(right(3, 12));
+        let items = app.menu_items(MenuTarget::Session(2));
+        for _ in 0..items
+            .iter()
+            .position(|a| *a == MenuAction::Terminate)
+            .unwrap()
+        {
+            app.on_terminal_event(key(KeyCode::Down, KeyModifiers::NONE));
+        }
+        app.on_terminal_event(key(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.mode, Mode::ConfirmKill(2));
+        app.on_terminal_event(ch('n'));
+
+        // Space: close terminates its sessions after a y.
+        set_hits(&app, hits);
+        app.on_terminal_event(right(3, 2));
+        app.on_terminal_event(key(KeyCode::Up, KeyModifiers::NONE));
+        app.on_terminal_event(key(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.mode, Mode::ConfirmCloseSpace(1));
+        let out = app.on_terminal_event(ch('y'));
+        let killed: Vec<_> = out
+            .iter()
+            .filter_map(|m| match m {
+                ClientMessage::KillSession(id) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        let in_web: Vec<_> = app
+            .sessions
+            .values()
+            .filter(|s| s.workspace == 1)
+            .map(|s| s.id)
+            .collect();
+        assert!(!killed.is_empty());
+        assert_eq!(killed, in_web);
     }
 
     #[test]

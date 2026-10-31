@@ -196,6 +196,48 @@ fn git(dir: &Path, args: &[&str]) -> Result<String, GitError> {
     }
 }
 
+/// A repository's working state for the sidebar (`[integrations.git_status]`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GitCounts {
+    /// Changed, staged or untracked files.
+    pub changed: usize,
+    /// Commits ahead of / behind the upstream (0 without one).
+    pub ahead: u32,
+    pub behind: u32,
+}
+
+/// Counts for the checkout at `dir`. `--no-optional-locks` so polling never
+/// takes the index lock an agent's own git command may need.
+pub fn status_counts(dir: &Path) -> Option<GitCounts> {
+    git(
+        dir,
+        &[
+            "--no-optional-locks",
+            "status",
+            "--porcelain=v2",
+            "--branch",
+        ],
+    )
+    .ok()
+    .map(|out| parse_status(&out))
+}
+
+/// Parses `git status --porcelain=v2 --branch`.
+pub fn parse_status(out: &str) -> GitCounts {
+    let mut counts = GitCounts::default();
+    for line in out.lines() {
+        if let Some(ab) = line.strip_prefix("# branch.ab ") {
+            let mut parts = ab.split_whitespace();
+            let num = |p: Option<&str>| p.and_then(|s| s[1..].parse().ok()).unwrap_or(0);
+            counts.ahead = num(parts.next());
+            counts.behind = num(parts.next());
+        } else if !line.starts_with('#') && !line.is_empty() {
+            counts.changed += 1;
+        }
+    }
+    counts
+}
+
 /// True if the working tree has staged, unstaged or untracked changes
 /// (ignored files don't count).
 pub fn is_dirty(worktree_root: &Path) -> Result<bool, GitError> {
@@ -334,6 +376,29 @@ mod tests {
             .status()
             .unwrap();
         assert!(st.success(), "git {args:?}");
+    }
+
+    #[test]
+    fn git_status_counts_changes_and_ahead_behind() {
+        let out = "# branch.oid abc\n# branch.head main\n# branch.upstream origin/main\n\
+                   # branch.ab +2 -1\n1 .M N... 100644 100644 100644 a b src/x.rs\n\
+                   ? notes.txt\n";
+        assert_eq!(
+            parse_status(out),
+            GitCounts {
+                changed: 2,
+                ahead: 2,
+                behind: 1
+            }
+        );
+        assert_eq!(parse_status("# branch.head main\n"), GitCounts::default());
+
+        let dir = tempfile::tempdir().unwrap();
+        run(dir.path(), &["init", "-q", "-b", "main"]);
+        run(dir.path(), &["commit", "-q", "--allow-empty", "-m", "init"]);
+        std::fs::write(dir.path().join("new.txt"), "x").unwrap();
+        assert_eq!(status_counts(dir.path()).unwrap().changed, 1);
+        assert_eq!(status_counts(&dir.path().join("missing")), None);
     }
 
     #[test]
