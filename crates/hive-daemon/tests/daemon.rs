@@ -129,6 +129,7 @@ fn sh(script: &str, size: TermSize) -> CreateSession {
         size,
         workspace: None,
         worktree: None,
+        new_space: false,
     }
 }
 
@@ -1051,6 +1052,49 @@ async fn sessions_follow_cd_into_a_plain_folder() {
     // A plain subfolder stays in it.
     let second = enter_and_follow(&mut c, info.id, &projects.join("notes")).await;
     assert_eq!(second.workspace, first.workspace);
+}
+
+#[tokio::test]
+async fn a_new_space_holds_its_session_until_it_moves_out() {
+    let h = Harness::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let start = tmp.path().canonicalize().unwrap().join("start");
+    let elsewhere = tmp.path().canonicalize().unwrap().join("elsewhere");
+    std::fs::create_dir_all(&start).unwrap();
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    let mut c = h.client().await;
+    let plain = create_info(&mut c, sh_in("sleep 60", &start)).await;
+    let script = format!("read x; cd '{}'; echo moved; sleep 60", elsewhere.display());
+    let fresh = create_info(
+        &mut c,
+        CreateSession {
+            new_space: true,
+            ..sh_in(&script, &start)
+        },
+    )
+    .await;
+    // Same directory, separate spaces.
+    assert_ne!(fresh.workspace, plain.workspace);
+    let ws = workspaces(&mut c).await;
+    assert_eq!(
+        ws.iter().find(|w| w.id == fresh.workspace).unwrap().name,
+        "new space"
+    );
+
+    attach(&mut c, fresh.id, TermSize::DEFAULT).await;
+    let moved = enter_and_follow(&mut c, fresh.id, &elsewhere).await;
+    assert_ne!(moved.workspace, fresh.workspace);
+    // The emptied new space goes away.
+    let gone = fresh.workspace;
+    timeout(
+        T,
+        c.recv_until(|m| {
+            matches!(m, ServerMessage::WorkspaceRemoved(w) if w == gone).then_some(())
+        }),
+    )
+    .await
+    .expect("empty new space removed")
+    .unwrap();
 }
 
 #[tokio::test]

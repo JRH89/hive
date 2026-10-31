@@ -17,6 +17,7 @@ pub enum Command {
     NewSession,
     NewAgent,
     NewWorktreeTerminal,
+    NewSpace,
     NewWorktreeSession,
     Workspaces,
     AddWorkspace,
@@ -49,12 +50,13 @@ pub enum Command {
 }
 
 impl Command {
-    pub const ALL: [Command; 34] = [
+    pub const ALL: [Command; 35] = [
         Command::Palette,
         Command::SearchSessions,
         Command::NewSession,
         Command::NewAgent,
         Command::NewWorktreeTerminal,
+        Command::NewSpace,
         Command::NewWorktreeSession,
         Command::Workspaces,
         Command::AddWorkspace,
@@ -94,6 +96,7 @@ impl Command {
             Command::NewSession => "new_session",
             Command::NewAgent => "new_agent",
             Command::NewWorktreeTerminal => "new_worktree_terminal",
+            Command::NewSpace => "new_space",
             Command::NewWorktreeSession => "new_worktree_session",
             Command::Workspaces => "workspaces",
             Command::AddWorkspace => "add_workspace",
@@ -134,9 +137,10 @@ impl Command {
             Command::NewSession => "New terminal",
             Command::NewAgent => "New agent (pick one)",
             Command::NewWorktreeTerminal => "New terminal in its own worktree (own branch)",
+            Command::NewSpace => "New space (a terminal; cd anywhere)",
             Command::NewWorktreeSession => "New agent in its own worktree (pick one)",
             Command::Workspaces => "Switch workspace",
-            Command::AddWorkspace => "New space (a folder)",
+            Command::AddWorkspace => "Add a folder as a space",
             Command::RenameWorkspace => "Rename workspace",
             Command::NextSession => "Next session",
             Command::PrevSession => "Previous session",
@@ -209,6 +213,7 @@ impl Command {
             Command::Detach => &["d", "q"],
             Command::Help => &["?"],
             Command::NewWorktreeTerminal => &["C"],
+            Command::NewSpace => &["S"],
             Command::NewWorktreeSession => &[],
             Command::AddWorkspace | Command::RenameWorkspace | Command::Settings => &[],
         }

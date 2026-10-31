@@ -10,8 +10,17 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    version: "0.4.6",
+    date: "2026-10-31T15:00:00-07:00",
+    title: "+ new opens a new space",
+    changes: [
+      "The sidebar's + new (or Ctrl+Space S) opens a new space with a terminal in your home folder. cd into a repo or folder and the terminal becomes that place's space; the temporary space disappears. The tab row's + still adds a tab to the current space.",
+      "hive with nothing running opens a terminal right away instead of an empty screen.",
+    ],
+  },
+  {
     version: "0.4.5",
-    date: "2026-10-31T13:30:00-07:00",
+    date: "2026-10-31T13:51:08-07:00",
     title: "A space for every folder",
     changes: [
       "cd into any folder, not just a git repository, and the terminal moves to a space for it (e.g. ~/Work). Your home directory's space only holds terminals in home itself.",

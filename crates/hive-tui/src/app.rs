@@ -1045,7 +1045,11 @@ impl App {
                             .filter(|id| self.sessions.contains_key(id) && !self.is_lost(*id));
                         match preferred.or_else(|| self.pick_session(None)) {
                             Some(id) => out.extend(self.show(id)),
-                            None => self.focus = Focus::Sidebar,
+                            // Only ended sessions: offer them for relaunch.
+                            None if !self.sessions.is_empty() => self.focus = Focus::Sidebar,
+                            // Nothing at all: start with a terminal, like
+                            // opening any terminal app.
+                            None => out.extend(self.new_terminal(Place::NewTab)),
                         }
                     }
                 }
@@ -1326,7 +1330,7 @@ impl App {
                     self.open_space(w)
                 }
                 (MouseEventKind::Down(MouseButton::Left), Some(SidebarHit::New)) => {
-                    self.new_terminal(Place::NewTab)
+                    self.new_space()
                 }
                 (MouseEventKind::Down(MouseButton::Left), Some(SidebarHit::Menu)) => {
                     self.run(Command::Palette)
@@ -1598,6 +1602,7 @@ impl App {
             Command::Review | Command::PullRequest | Command::RunTask => {}
             Command::CloseTab => return self.close_tab(),
             Command::NewWorktreeTerminal => return self.new_worktree_terminal(),
+            Command::NewSpace => return self.new_space(),
             Command::NewWorktreeSession => {
                 self.open_picker_for(Place::Replace);
                 if self.picker_can_worktree() {
@@ -1928,6 +1933,29 @@ impl App {
         self.open_terminal(place, false)
     }
 
+    /// A terminal in a new space of its own, starting in the home
+    /// directory. `cd` somewhere and it joins that place's space; the
+    /// daemon drops the emptied new space.
+    fn new_space(&mut self) -> Vec<ClientMessage> {
+        let home = std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(PathBuf::from);
+        match launch::create_request(&self.config, "shell", None, home, &[], self.panel) {
+            Ok(mut req) => {
+                req.new_space = true;
+                self.place = Place::NewTab;
+                self.awaiting_create = true;
+                self.mode = Mode::Normal;
+                self.set_status(Tone::Info, "Opening a new space…");
+                vec![ClientMessage::CreateSession(req)]
+            }
+            Err(e) => {
+                self.set_status(Tone::Error, e.to_string());
+                Vec::new()
+            }
+        }
+    }
+
     /// A shell in a fresh git worktree on its own branch (`hive/shell-N`),
     /// so an agent started there can't touch other checkouts' files.
     fn new_worktree_terminal(&mut self) -> Vec<ClientMessage> {
@@ -2070,6 +2098,7 @@ impl App {
             size: self.panel,
             workspace: Some(info.workspace).filter(|w| self.workspaces.contains_key(w)),
             worktree: None,
+            new_space: false,
         };
         self.awaiting_create = true;
         self.set_status(Tone::Info, format!("Relaunching {}…", info.label));
@@ -3239,10 +3268,11 @@ mod tests {
             }
         ));
         app.on_terminal_event(key(KeyCode::Esc, KeyModifiers::NONE));
-        // "new" opens a terminal in a new tab: `cd` and its space follows.
+        // "new" opens a terminal in a new space of its own.
         let out = app.on_terminal_event(press(2, 10));
         assert!(
-            matches!(out.as_slice(), [ClientMessage::CreateSession(r)] if r.agent == "shell"),
+            matches!(out.as_slice(), [ClientMessage::CreateSession(r)]
+                if r.agent == "shell" && r.new_space),
             "{out:?}"
         );
         assert_eq!(app.place, Place::NewTab);
@@ -3373,6 +3403,27 @@ mod tests {
         plain.on_terminal_event(leader());
         assert!(plain.on_terminal_event(ch('C')).is_empty());
         assert!(matches!(&plain.status, Some((Tone::Warning, m)) if m.contains("git")));
+    }
+
+    #[test]
+    fn leader_s_opens_a_new_space_and_shows_it() {
+        let mut app = app_with_workspaces();
+        app.on_terminal_event(leader());
+        let out = app.on_terminal_event(ch('S'));
+        let [ClientMessage::CreateSession(req)] = out.as_slice() else {
+            panic!("expected a new-space terminal, got {out:?}")
+        };
+        assert!(req.new_space);
+        assert_eq!(req.agent, "shell");
+        let tabs = app.tabs.len();
+        app.on_server(ServerMessage::WorkspaceUpdated(ws(9, "new space", false)));
+        let mut created = info(9, SessionState::Running);
+        created.agent = "shell".into();
+        created.workspace = 9;
+        app.on_server(ServerMessage::SessionCreated(created));
+        assert_eq!(app.shown_space(), Some(9));
+        assert_eq!(app.tabs.len(), tabs + 1);
+        assert_eq!(app.focused(), Some(9));
     }
 
     #[test]
@@ -3873,6 +3924,17 @@ mod tests {
         );
         assert_eq!(app.focus, Focus::Sidebar);
         assert_eq!(app.cursor, Some(1));
+    }
+
+    #[test]
+    fn an_empty_daemon_starts_with_a_terminal() {
+        let mut app = App::new(Config::default(), Start::Auto, (100, 26));
+        app.on_connect();
+        let out = app.on_server(ServerMessage::SessionList(Vec::new()));
+        assert!(
+            matches!(out.as_slice(), [ClientMessage::CreateSession(r)] if r.agent == "shell"),
+            "{out:?}"
+        );
     }
 
     #[test]
