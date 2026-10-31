@@ -1,0 +1,1 @@
+Hive — One terminal. Many agents. A terminal multiplexer for AI coding agents.
