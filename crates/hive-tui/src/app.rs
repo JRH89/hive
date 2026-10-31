@@ -18,7 +18,7 @@ const CONTROL_FREE: &str = "Control is free. Leader then a to take it.";
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
-use hive_core::config::{Config, OpenIn};
+use hive_core::config::{Config, OpenIn, SplitDir};
 use hive_core::launch;
 use hive_protocol::{
     AgentStatus, ClientMessage, CreateSession, NewWorktree, ServerMessage, SessionId, SessionInfo,
@@ -157,6 +157,8 @@ pub enum Scope {
     Sessions,
     /// `TaskList` entries.
     Tasks,
+    /// `[layouts]` entries.
+    Layouts,
 }
 
 /// What a palette entry does when chosen.
@@ -167,6 +169,8 @@ pub enum Target {
     Workspace(WorkspaceId),
     /// Index into `App::tasks`.
     Task(usize),
+    /// Index into `Config::layouts` (in name order).
+    Layout(usize),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -314,6 +318,8 @@ pub struct App {
     pub tasks: Option<TaskList>,
     /// Side effects for the frontend loop to carry out.
     pub effects: Vec<Effect>,
+    /// Panes of a layout still to create, each placed after the previous.
+    layout_queue: std::collections::VecDeque<(CreateSession, Place)>,
     /// Working state of listed repository spaces (`[integrations.git_status]`),
     /// refreshed by the frontend loop.
     pub git: BTreeMap<WorkspaceId, hive_workspace::GitCounts>,
@@ -416,6 +422,7 @@ pub const REVIEW_AGENT: &str = "review";
 pub const GITHUB_AGENT: &str = "checks";
 pub const TASK_AGENT: &str = "task";
 pub const USAGE_AGENT: &str = "usage";
+pub const LAYOUT_AGENT: &str = "layout";
 
 /// Work outside the app state, done by the frontend loop.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -468,6 +475,7 @@ pub fn hidden_commands(config: &Config) -> Vec<Command> {
         (i.github.enabled, Command::PullRequest),
         (i.tasks.enabled, Command::RunTask),
         (i.usage.enabled, Command::Usage),
+        (!config.layouts.is_empty(), Command::Layout),
     ] {
         if !on {
             hidden.push(cmd);
@@ -513,6 +521,7 @@ impl App {
             bell: false,
             tasks: None,
             effects: Vec::new(),
+            layout_queue: Default::default(),
             git: BTreeMap::new(),
             working_since: BTreeMap::new(),
             sidebar_hits: RefCell::new(Vec::new()),
@@ -1101,6 +1110,7 @@ impl App {
             ServerMessage::Welcome { .. } => {}
             ServerMessage::Error { message } => {
                 self.awaiting_create = false;
+                self.layout_queue.clear();
                 let message = match message.strip_suffix(" has uncommitted changes") {
                     Some(path) => format!(
                         "Kept worktree {}: it has uncommitted changes. `hive worktree rm --force {path}` discards them.",
@@ -1157,6 +1167,13 @@ impl App {
                 self.sessions.entry(id).or_insert(info);
                 if std::mem::take(&mut self.awaiting_create) {
                     out.extend(self.place_new(id));
+                    // The next pane of a layout splits the one just placed.
+                    if let Some((req, place)) = self.layout_queue.pop_front() {
+                        self.place = place;
+                        self.awaiting_create = true;
+                        out.push(ClientMessage::CreateSession(req));
+                        return out;
+                    }
                     self.focus = Focus::Terminal;
                     self.status = None;
                     let shared = self.sharing_dir(id);
@@ -1735,6 +1752,7 @@ impl App {
                 return self.open_usage();
             }
             Command::Review | Command::PullRequest | Command::RunTask | Command::Usage => {}
+            Command::Layout => return self.pick_layout(),
             Command::CloseTab => return self.close_tab(),
             Command::NewWorktreeTerminal => return self.new_worktree_terminal(),
             Command::NewSpace => return self.new_space(),
@@ -1839,6 +1857,17 @@ impl App {
                 items.push((item, t.title.clone()));
             }
         }
+        if *scope == Scope::Layouts {
+            for (i, (name, layout)) in self.config.layouts.iter().enumerate() {
+                let item = PaletteItem {
+                    target: Target::Layout(i),
+                    title: name.clone(),
+                    detail: format!("{} panes", layout.panes.len()),
+                    key: None,
+                };
+                items.push((item, name.clone()));
+            }
+        }
         let sessions_only = *scope != Scope::All;
         if !sessions_only {
             let hidden = hidden_commands(&self.config);
@@ -1857,7 +1886,8 @@ impl App {
                 items.push((item, cmd.title().to_string()));
             }
         }
-        for id in self.order().into_iter().filter(|_| *scope != Scope::Tasks) {
+        let lists_sessions = matches!(scope, Scope::All | Scope::Sessions);
+        for id in self.order().into_iter().filter(|_| lists_sessions) {
             let s = &self.sessions[&id];
             let workspace = self.workspace_name(s.workspace);
             let mut detail = format!("#{} {} · {workspace}", s.id, s.agent);
@@ -1935,6 +1965,7 @@ impl App {
                     Some(Target::Session(id)) => self.switch_to(id),
                     Some(Target::Workspace(w)) => self.open_workspace(w),
                     Some(Target::Task(i)) => self.run_task(i),
+                    Some(Target::Layout(i)) => self.apply_layout(i),
                     None => Vec::new(),
                 };
             }
@@ -2796,6 +2827,86 @@ impl App {
         self.open_tool(USAGE_AGENT, &def, "usage".into(), cwd, workspace, open_in)
     }
 
+    /// `Ctrl+Space L`: the layout meant for this space, the only one, or a
+    /// choice in the palette.
+    fn pick_layout(&mut self) -> Vec<ClientMessage> {
+        let space = self
+            .active_workspace()
+            .map(|w| self.workspace_name(w).to_string());
+        let layouts = &self.config.layouts;
+        let meant = layouts
+            .values()
+            .position(|l| space.as_ref().is_some_and(|s| l.spaces.contains(s)));
+        match (meant, layouts.len()) {
+            (Some(i), _) => self.apply_layout(i),
+            (None, 1) => self.apply_layout(0),
+            (None, 0) => Vec::new(),
+            (None, _) => {
+                self.mode = Mode::Palette {
+                    query: String::new(),
+                    selected: 0,
+                    scope: Scope::Layouts,
+                };
+                Vec::new()
+            }
+        }
+    }
+
+    /// Opens layout `i` in a new tab of the current space: the first pane
+    /// fills it, each next one splits the pane before it.
+    fn apply_layout(&mut self, i: usize) -> Vec<ClientMessage> {
+        let Some((name, layout)) = self.config.layouts.iter().nth(i) else {
+            return Vec::new();
+        };
+        let workspace = self.active_workspace();
+        let root = workspace
+            .and_then(|w| self.workspaces.get(&w))
+            .map(|w| PathBuf::from(&w.root));
+        let mut reqs = Vec::new();
+        for pane in &layout.panes {
+            let label = (!pane.label.is_empty()).then(|| pane.label.clone());
+            let req = if pane.run.is_empty() {
+                launch::create_request(
+                    &self.config,
+                    &pane.agent,
+                    label,
+                    root.clone(),
+                    &[],
+                    self.panel,
+                )
+            } else {
+                let def = argv_def(&pane.run);
+                let label = label.or_else(|| Some(pane.run.join(" ")));
+                launch::request_for(&def, LAYOUT_AGENT, label, root.clone(), &[], self.panel)
+            };
+            match req {
+                Ok(mut req) => {
+                    req.workspace = workspace;
+                    let place = match pane.split {
+                        SplitDir::Right => Place::Split(Dir::Right),
+                        SplitDir::Down => Place::Split(Dir::Down),
+                    };
+                    reqs.push((req, place));
+                }
+                Err(e) => {
+                    self.set_status(Tone::Error, format!("layout {name}: {e}"));
+                    return Vec::new();
+                }
+            }
+        }
+        let mut reqs = reqs.into_iter();
+        let Some((first, _)) = reqs.next() else {
+            self.set_status(Tone::Warning, format!("layout {name} has no panes"));
+            return Vec::new();
+        };
+        self.layout_queue = reqs.collect();
+        self.place = Place::NewTab;
+        self.awaiting_create = true;
+        self.mode = Mode::Normal;
+        self.set_status(Tone::Info, format!("Opening layout {name}…"));
+        vec![ClientMessage::CreateSession(first)]
+    }
+
     /// Lists the project tasks next to the focused session in the palette.
     fn pick_task(&mut self) -> Vec<ClientMessage> {
         let Some((cwd, workspace, root)) = self.context() else {
@@ -2929,10 +3040,19 @@ fn expand_home(path: &str) -> String {
     }
 }
 
-/// An agent session, as opposed to a plain terminal: launched as an agent,
-/// or a shell running one (detected or self-reported).
+/// An agent session, as opposed to a plain terminal or a tool pane:
+/// launched as an agent, or running one (detected or self-reported).
 pub fn is_agent(s: &SessionInfo) -> bool {
-    s.agent != "shell" || s.presence.is_some()
+    let not_agents = [
+        "shell",
+        NOTES_AGENT,
+        REVIEW_AGENT,
+        GITHUB_AGENT,
+        TASK_AGENT,
+        USAGE_AGENT,
+        LAYOUT_AGENT,
+    ];
+    !not_agents.contains(&s.agent.as_str()) || s.presence.is_some()
 }
 
 /// `/home/me/x` as `~/x`.
@@ -3776,6 +3896,108 @@ mod tests {
         assert_eq!(app.shown_space(), Some(9));
         assert_eq!(app.tabs.len(), tabs + 1);
         assert_eq!(app.focused(), Some(9));
+    }
+
+    #[test]
+    fn layouts_open_their_panes_one_after_another_in_a_new_tab() {
+        use hive_core::config::{Layout, LayoutPane};
+        assert!(
+            !palette_has(&mut app(), Command::Layout),
+            "hidden without layouts"
+        );
+        let pane = |agent: &str, run: &[&str], split| LayoutPane {
+            agent: agent.into(),
+            run: run.iter().map(|s| s.to_string()).collect(),
+            split,
+            label: String::new(),
+        };
+        let mut config = Config::default();
+        config.layouts.insert(
+            "web".into(),
+            Layout {
+                spaces: vec!["web".into()],
+                panes: vec![
+                    pane("shell", &[], SplitDir::Right),
+                    pane("shell", &["sh", "-c", "top"], SplitDir::Down),
+                ],
+            },
+        );
+        config.layouts.insert(
+            "other".into(),
+            Layout {
+                spaces: vec![],
+                panes: vec![pane("shell", &[], SplitDir::Right)],
+            },
+        );
+        let mut app = App::new(config, Start::Attach(1), (100, 26));
+        app.on_connect();
+        app.on_server(ServerMessage::SessionList(vec![info(
+            1,
+            SessionState::Running,
+        )]));
+        attached(&mut app, 1);
+        app.on_server(ServerMessage::WorkspaceList(vec![ws(1, "web", true)]));
+        assert!(palette_has(&mut app, Command::Layout));
+        let tabs = app.tabs.len();
+
+        // The layout naming this space opens without asking.
+        app.on_terminal_event(leader());
+        let out = app.on_terminal_event(ch('L'));
+        let [ClientMessage::CreateSession(first)] = out.as_slice() else {
+            panic!("expected the first pane, got {out:?}")
+        };
+        assert_eq!(first.agent, "shell");
+        assert_eq!(first.workspace, Some(1));
+        assert_eq!(first.cwd, "/src/web");
+
+        let created = |id| {
+            let mut s = info(id, SessionState::Running);
+            s.agent = "shell".into();
+            ServerMessage::SessionCreated(s)
+        };
+        let out = app.on_server(created(5));
+        let second = out.iter().find_map(|m| match m {
+            ClientMessage::CreateSession(r) => Some(r),
+            _ => None,
+        });
+        let second = second.expect("the second pane follows the first");
+        assert_eq!(second.agent, LAYOUT_AGENT);
+        assert_eq!(second.command, ["sh", "-c", "top"]);
+        assert_eq!(app.tabs.len(), tabs + 1);
+
+        let out = app.on_server(created(6));
+        assert!(
+            !out.iter()
+                .any(|m| matches!(m, ClientMessage::CreateSession(_)))
+        );
+        assert_eq!(app.active_tab().unwrap().root.panes(), [5, 6]);
+    }
+
+    #[test]
+    fn several_layouts_are_chosen_in_the_palette() {
+        use hive_core::config::{Layout, LayoutPane};
+        let mut config = Config::default();
+        for name in ["a", "b"] {
+            let layout = Layout {
+                spaces: vec![],
+                panes: vec![LayoutPane::default()],
+            };
+            config.layouts.insert(name.into(), layout);
+        }
+        let mut app = App::new(config, Start::Attach(1), (100, 26));
+        app.on_connect();
+        app.on_server(ServerMessage::SessionList(vec![info(
+            1,
+            SessionState::Running,
+        )]));
+        attached(&mut app, 1);
+        assert!(app.run(Command::Layout).is_empty());
+        let titles: Vec<_> = app.palette_items().into_iter().map(|i| i.title).collect();
+        assert_eq!(titles, ["a", "b"]);
+        app.on_terminal_event(ch('b'));
+        let out = app.on_terminal_event(key(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(out.as_slice(), [ClientMessage::CreateSession(r)] if r.agent == "shell"));
+        assert!(matches!(app.mode, Mode::Normal));
     }
 
     #[test]

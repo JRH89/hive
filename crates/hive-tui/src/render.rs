@@ -740,6 +740,7 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 match scope {
                     Scope::Sessions => " Search sessions: ",
                     Scope::Tasks => " Run task: ",
+                    Scope::Layouts => " Open layout: ",
                     Scope::All => " Command: ",
                 },
                 bar.fg(theme.accent),
@@ -1299,7 +1300,7 @@ fn draw_palette(frame: &mut Frame, area: Rect, app: &App, selected: usize, theme
                     .get(&id)
                     .map_or(" ", |s| state_dot(&s.state, theme).0),
                 Target::Workspace(_) => theme.glyphs.group,
-                Target::Task(_) => theme.glyphs.caret,
+                Target::Task(_) | Target::Layout(_) => theme.glyphs.caret,
             };
             let key = item.key.clone().unwrap_or_default();
             let room = width.saturating_sub(4 + key.chars().count() + 1);

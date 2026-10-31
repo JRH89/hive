@@ -10,8 +10,17 @@ export type Release = {
 
 export const releases: Release[] = [
   {
-    version: "0.4.8",
+    version: "0.4.9",
     date: "2026-10-31T17:00:00-07:00",
+    title: "Layouts",
+    changes: [
+      "Optional [layouts.<name>]: a set of panes (agents, commands such as npm run dev, terminals) that Ctrl+Space L opens together in a new tab of the current space. A layout listing a space opens there without asking; otherwise you pick one.",
+      "Tool panes (notes, review, checks, tasks, usage) no longer appear in the AGENTS list or set off the shared-directory warning.",
+    ],
+  },
+  {
+    version: "0.4.8",
+    date: "2026-10-31T14:57:53-07:00",
     title: "Right-click menus, git status, usage",
     changes: [
       "Right-click a space (open, new terminal here, rename, close), a tab (rename, split right or below, close) or an agent (open, rename, split, terminate). Tabs can have names.",

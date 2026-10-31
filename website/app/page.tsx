@@ -99,12 +99,18 @@ const integrations = [
     text: "Token usage and estimated cost of your agents in a pane, live, via ccusage or any tool you choose. Agents keep their own logs; Hive puts the numbers beside the work.",
     config: "[integrations.usage]",
   },
+  {
+    name: "Layouts",
+    key: "Ctrl+Space L",
+    text: "Name a set of panes once, say Claude, the dev server and a terminal, and open them together in a new tab. A layout can belong to a space and opens there without asking.",
+    config: "[layouts.<name>]",
+  },
 ];
 
 const faqs = [
   [
     "Is Hive ready to use?",
-    "Yes, on Linux, macOS and Windows. Hive is young but complete: terminals and agents in split panes and tabs, live agent status, detach and reattach, automatic reconnection, spaces that follow your cd, Git worktrees, a command palette, themes and configurable keys. It is tested with real terminals in CI on all three platforms. Version 0.4.8 ships prebuilt binaries and a one-line installer; hive update upgrades in place.",
+    "Yes, on Linux, macOS and Windows. Hive is young but complete: terminals and agents in split panes and tabs, live agent status, detach and reattach, automatic reconnection, spaces that follow your cd, Git worktrees, a command palette, themes and configurable keys. It is tested with real terminals in CI on all three platforms. Version 0.4.9 ships prebuilt binaries and a one-line installer; hive update upgrades in place.",
   ],
   [
     "Which agents can I run?",
@@ -148,7 +154,7 @@ const structuredData = [
     applicationCategory: "DeveloperApplication",
     applicationSubCategory: "Terminal multiplexer",
     operatingSystem: "Linux, macOS, Windows",
-    softwareVersion: "0.4.8",
+    softwareVersion: "0.4.9",
     downloadUrl: `${repoUrl}/releases/latest`,
     installUrl: siteUrl + "#get-started",
     license: "https://opensource.org/licenses/MIT",
@@ -434,7 +440,7 @@ journal = true        # log agent activity to today's note`}</code>
               <h2 id="start-title">Your terminal. Your platform.</h2>
             </div>
             <span className="development-badge">
-              <span className="tiny-square" /> v0.4.8 RELEASED
+              <span className="tiny-square" /> v0.4.9 RELEASED
             </span>
           </div>
           <ReleaseInstall />
@@ -566,7 +572,7 @@ journal = true        # log agent activity to today's note`}</code>
             <article>
               <span className="roadmap-marker current" />
               <div>
-                <span className="roadmap-status available">RELEASED · v0.4.8</span>
+                <span className="roadmap-status available">RELEASED · v0.4.9</span>
                 <h3>Everywhere, terminal first</h3>
                 <p>
                   macOS and Windows binaries. New opens a terminal, spaces

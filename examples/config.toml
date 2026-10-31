@@ -75,6 +75,18 @@ enabled = false
 command = []
 open_in = "split"
 
+# Layouts: panes opened together in a new tab with Leader L. In a space
+# listed in `spaces` it opens without asking; otherwise you pick one.
+# Panes: agent (default "shell"), run (argv instead of an agent),
+# split ("right" or "down", from the previous pane), label.
+# [layouts.web]
+# spaces = ["web"]
+# panes = [
+#   { agent = "claude" },
+#   { run = ["npm", "run", "dev"], split = "right", label = "server" },
+#   { split = "down" },
+# ]
+
 [worktrees]
 # Where `hive new -w` creates git worktrees.
 # Default: $XDG_DATA_HOME/hive/worktrees

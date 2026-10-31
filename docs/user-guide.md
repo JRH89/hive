@@ -85,6 +85,7 @@ Everything you type goes to the agent, except the **leader** key (`Ctrl+Space`) 
 | `X` | Close the pane (the session keeps running) |
 | `t` | New tab with a terminal in this space (or click `+` in the tab bar) |
 | `S` | New space: a terminal in your home folder, in a space of its own (or click **+ new** in the sidebar) |
+| `L` | Open a layout (only with `[layouts]` defined, see below) |
 | `]` / `[` | Next / previous tab |
 | `w` | Workspaces |
 | `r` | Rename session |
@@ -156,6 +157,29 @@ journal_dir = "Daily"         # folder of daily notes in the vault
 ```
 
 Each opens as an ordinary session, so it shows in the sidebar and can be closed like any other. Asking again goes back to the one already open.
+
+### Layouts (optional)
+
+A layout is a set of panes opened together in a new tab of the current space with `Ctrl+Space L` ("layout" in the palette). The command appears once a layout is defined.
+
+```toml
+[layouts.web]
+spaces = ["web"]              # spaces where Ctrl+Space L opens it without asking
+panes = [
+  { agent = "claude" },       # fills the tab
+  { run = ["npm", "run", "dev"], split = "right", label = "server" },
+  { split = "down" },         # a terminal below the server
+]
+```
+
+| Pane key | Default | Meaning |
+|---|---|---|
+| `agent` | `"shell"` | Agent to start (a terminal by default) |
+| `run` | `[]` | argv to run instead, started directly (no shell) |
+| `split` | `"right"` | `"right"` or `"down"`: where it goes relative to the previous pane |
+| `label` | | Session label; empty uses the agent's or the command's name |
+
+Each pane starts in the space's root. With no layout for the space, the only layout opens, or the palette lists them. A layout with no panes or an unknown agent stops `hive` from starting, with the reason.
 
 ### Mouse
 

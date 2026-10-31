@@ -47,6 +47,19 @@ journal = true
 
 All options are in the [user guide](docs/user-guide.md#notes-obsidian-optional) and [`examples/config.toml`](examples/config.toml).
 
+### Layouts
+Name a set of panes once and open them together with `Ctrl+Space L`: in a space a layout names, it opens straight away; otherwise you pick one.
+
+```toml
+[layouts.web]
+spaces = ["web"]          # opens without asking in the web space
+panes = [
+  { agent = "claude" },
+  { run = ["npm", "run", "dev"], split = "right", label = "server" },
+  { split = "down" },     # a terminal
+]
+```
+
 ## Install
 Linux (x86_64 and aarch64), macOS (Apple silicon and Intel) and Windows 10+ (x86_64); CI tests all three. On Windows, agent status comes only from agents that report it (`hive report-agent`).
 
@@ -62,7 +75,7 @@ curl -fsSL https://github.com/jrh89/hive/releases/latest/download/install.sh | s
 irm https://github.com/jrh89/hive/releases/latest/download/install.ps1 | iex
 ```
 
-The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.4.8` to pin a version. Later, `hive update` upgrades in place (then `hive daemon stop` to restart the daemon on the new version; this ends running sessions).
+The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.4.9` to pin a version. Later, `hive update` upgrades in place (then `hive daemon stop` to restart the daemon on the new version; this ends running sessions).
 
 **From source** (Rust ≥ 1.89):
 
@@ -143,6 +156,7 @@ The leader is **Ctrl+Space**. Everything else goes to the terminal.
 | `Ctrl+Space :` | Command palette: every command, session and space |
 | `Ctrl+Space c` / `t` | New terminal / new tab in this space |
 | `Ctrl+Space S` | New space (same as `+ new` in the sidebar) |
+| `Ctrl+Space L` | Open a layout: panes from `[layouts]` in a new tab |
 | Right-click | Menu for a space, tab or agent: rename, split, close |
 | `Ctrl+Space C` | New terminal in its own worktree (own branch) |
 | `Ctrl+Space A` | New agent from a list |
