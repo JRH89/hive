@@ -44,6 +44,7 @@ Run fmt, clippy and test after every meaningful change and fix failures before m
 
 - `hive-protocol`: Serde enums framed as u32-LE length + postcard (8 MiB cap). `Hello`/`Welcome` must stay enum variant 0 (a test enforces this).
 - `hive-core`: `paths` (0700 runtime dir, env overrides), `config` (TOML, built-in agents overlaid by `[agents.*]`), `launch` (agent → argv/env/cwd plus PATH check), `client` (handshake, `recv_until`, daemon auto-start).
+- `hive-agents`: agent catalog, argv-based process identification, herdr-compatible screen manifests (`manifests/`, Apache-2.0, see NOTICE) and the status `Tracker`.
 - `hive-workspace`: git discovery by reading `.git`/`HEAD` (no subprocess) and the git argv calls for worktrees. Shared by the daemon, CLI and TUI.
 - `hive-daemon`: `session.rs` runs 3 threads per session (PTY reader → emulator → `broadcast`, writer, waiter). `server.rs` handles per-connection dispatch and output forwarding. `responder.rs` answers DSR/DA/OSC 10/11 queries for the child.
 - `hive-tui`: `app.rs` is a **pure** state machine (events in, `Vec<ClientMessage>` out), so unit-test it there. `render.rs` copies vt100 cells into a ratatui buffer. `keys.rs` encodes crossterm keys to PTY bytes. `keymap.rs` maps keys to `Command`s (every leader action is a `Command`, dispatched by `App::run`; the palette and help are generated from it). `theme.rs` resolves a palette and glyph set from config and the environment (ADR-0013). `check_config` validates both before the terminal is taken over.
@@ -68,7 +69,7 @@ Phases are in AGENTS.md §16. Status is in `vault/00-Index/Status.md`. Don't sta
 ## Conventions
 
 - Invoke agents directly from argv, never through a shell. Agents are data-driven via TOML.
-- Don't infer agent status from output, and don't show "thinking"/"waiting" indicators unless detection is reliable.
+- Agent status comes only from `hive-agents` manifests (herdr-compatible rules) or the agent's own `hive report-agent`. Agents without rules show `Unknown`, never a guess (ADR-0016). Detection runs in the daemon, not the TUI.
 - The UI must work without Nerd Fonts, in 256/16-colour terminals and with `NO_COLOR`. Take colours and glyphs from `Theme`/`Glyphs`, never hard-code them. In ASCII mode `render::asciify` folds Hive's own cells but leaves the agent's output untouched. Amber is for accents only.
 - New user actions get a `Command` variant (ADR-0014), not a hard-coded key.
 - UI text uses plain terms (session, workspace, agent). Bee metaphors are for branding only.

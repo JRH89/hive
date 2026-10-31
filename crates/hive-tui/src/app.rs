@@ -5,7 +5,7 @@
 //! Switching sessions re-attaches (see ADR-0007): the daemon holds every
 //! session's screen, so the client only ever mirrors the visible one.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU16;
 
 const OBSERVING: &str =
@@ -17,8 +17,8 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use hive_core::config::Config;
 use hive_core::launch;
 use hive_protocol::{
-    ClientMessage, CreateSession, NewWorktree, ServerMessage, SessionId, SessionInfo, SessionState,
-    TermSize, WorkspaceId, WorkspaceInfo,
+    AgentStatus, ClientMessage, CreateSession, NewWorktree, ServerMessage, SessionId, SessionInfo,
+    SessionState, TermSize, WorkspaceId, WorkspaceInfo,
 };
 
 use crate::keymap::{Command, Keymap};
@@ -132,7 +132,36 @@ pub enum Tone {
 pub struct AgentChoice {
     pub name: String,
     pub command: String,
+    /// Display name for known agents, e.g. "Claude Code".
+    pub label: Option<&'static str>,
     pub installed: bool,
+}
+
+/// What a session's agent is doing, as shown in the UI. Ordered by how much
+/// it wants attention, so a workspace shows its most urgent session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Activity {
+    Idle,
+    /// Finished a turn since you last looked at it.
+    Done,
+    Working,
+    /// Waiting for you (a permission prompt or question).
+    Blocked,
+}
+
+impl Activity {
+    pub fn word(self) -> &'static str {
+        match self {
+            Activity::Idle => "idle",
+            Activity::Done => "done",
+            Activity::Working => "working",
+            Activity::Blocked => "needs input",
+        }
+    }
+}
+
+fn agent_status(s: &SessionInfo) -> Option<AgentStatus> {
+    s.presence.as_ref().map(|p| p.status)
 }
 
 pub struct View {
@@ -170,6 +199,10 @@ pub struct App {
     awaiting_create: bool,
     /// Worktrees to remove once their session is gone (kill with `w`).
     remove_worktree_after: BTreeMap<SessionId, String>,
+    /// Sessions whose agent finished working while not viewed.
+    pub done: BTreeSet<SessionId>,
+    /// Ring the terminal bell after this update.
+    pub bell: bool,
 }
 
 /// Result of a key in a one-line text prompt.
@@ -268,6 +301,8 @@ impl App {
             prefer: None,
             awaiting_create: false,
             remove_worktree_after: BTreeMap::new(),
+            done: BTreeSet::new(),
+            bell: false,
         };
         app.set_terminal_size(terminal);
         if let Some(e) = key_error {
@@ -328,6 +363,52 @@ impl App {
     /// Session ids in sidebar order: grouped by workspace, then creation.
     pub fn order(&self) -> Vec<SessionId> {
         self.groups().into_iter().flat_map(|(_, ids)| ids).collect()
+    }
+
+    pub fn activity(&self, id: SessionId) -> Option<Activity> {
+        let s = self.sessions.get(&id).filter(|s| s.state.is_alive())?;
+        match agent_status(s)? {
+            AgentStatus::Blocked => Some(Activity::Blocked),
+            AgentStatus::Working => Some(Activity::Working),
+            AgentStatus::Idle if self.done.contains(&id) => Some(Activity::Done),
+            AgentStatus::Idle => Some(Activity::Idle),
+            AgentStatus::Unknown => None,
+        }
+    }
+
+    /// The most urgent activity among a workspace's sessions.
+    pub fn workspace_activity(&self, w: WorkspaceId) -> Option<Activity> {
+        self.sessions
+            .values()
+            .filter(|s| s.workspace == w)
+            .filter_map(|s| self.activity(s.id))
+            .max()
+    }
+
+    fn viewing(&self, id: SessionId) -> bool {
+        self.view.as_ref().is_some_and(|v| v.id == id)
+    }
+
+    /// Tracks "done" and rings the bell when a session you aren't viewing
+    /// starts needing input or finishes working.
+    fn note_activity(&mut self, old: Option<AgentStatus>, new: &SessionInfo) {
+        let id = new.id;
+        let status = agent_status(new).filter(|_| new.state.is_alive());
+        let unseen = !self.viewing(id);
+        match status {
+            Some(AgentStatus::Idle) if old == Some(AgentStatus::Working) && unseen => {
+                self.done.insert(id);
+                self.bell |= self.config.notifications.bell;
+            }
+            Some(AgentStatus::Idle) => {}
+            Some(AgentStatus::Blocked) if old != Some(AgentStatus::Blocked) && unseen => {
+                self.done.remove(&id);
+                self.bell |= self.config.notifications.bell;
+            }
+            _ => {
+                self.done.remove(&id);
+            }
+        }
     }
 
     pub fn workspace_name(&self, id: WorkspaceId) -> &str {
@@ -508,6 +589,7 @@ impl App {
                     controller,
                 });
                 self.cursor = Some(session.id);
+                self.done.remove(&session.id);
                 self.sessions.insert(session.id, session);
                 if !controller {
                     self.set_status(Tone::Warning, OBSERVING);
@@ -560,10 +642,13 @@ impl App {
                 }
             }
             ServerMessage::SessionUpdated(info) => {
+                let old = self.sessions.get(&info.id).and_then(agent_status);
+                self.note_activity(old, &info);
                 self.sessions.insert(info.id, info);
             }
             ServerMessage::SessionRemoved(id) => {
                 self.sessions.remove(&id);
+                self.done.remove(&id);
                 if matches!(&self.status, Some((Tone::Info, m)) if *m == terminating(id)) {
                     self.status = None;
                 }
@@ -1235,14 +1320,24 @@ impl App {
 
     fn open_picker(&mut self, workspace: Option<WorkspaceId>) {
         let path = std::env::var_os("PATH").unwrap_or_default();
+        // Known agents are offered only when installed; configured ones (and
+        // the default) always, so a missing one is reported, not hidden.
         self.agents = self
             .config
             .agents()
             .into_iter()
             .map(|(name, def)| AgentChoice {
                 installed: launch::find_executable(&def.command, &path).is_some(),
+                label: hive_agents::catalog::by_id(&name)
+                    .filter(|k| k.command == def.command)
+                    .map(|k| k.label),
                 command: def.command,
                 name,
+            })
+            .filter(|a| {
+                a.installed
+                    || self.config.is_configured(&a.name)
+                    || a.name == self.config.general.default_agent
             })
             .collect();
         let selected = self
@@ -1384,6 +1479,7 @@ mod tests {
             workspace: 1,
             branch: None,
             worktree: None,
+            presence: None,
         }
     }
 
@@ -1424,6 +1520,57 @@ mod tests {
             size: app.panel,
             force: false,
         }]
+    }
+
+    fn with_status(id: SessionId, status: AgentStatus) -> SessionInfo {
+        SessionInfo {
+            presence: Some(hive_protocol::AgentPresence {
+                agent: "claude".into(),
+                label: "Claude Code".into(),
+                status,
+                message: None,
+                source: hive_protocol::PresenceSource::Process,
+            }),
+            ..info(id, SessionState::Running)
+        }
+    }
+
+    #[test]
+    fn unseen_sessions_become_done_and_ring_the_bell() {
+        let mut app = app();
+        let update = |app: &mut App, id, status| {
+            app.on_server(ServerMessage::SessionUpdated(with_status(id, status)));
+            std::mem::take(&mut app.bell)
+        };
+        assert!(!update(&mut app, 2, AgentStatus::Working));
+        assert_eq!(app.activity(2), Some(Activity::Working));
+        assert_eq!(app.activity(3), None, "no agent recognised");
+
+        assert!(update(&mut app, 2, AgentStatus::Idle));
+        assert_eq!(app.activity(2), Some(Activity::Done));
+        assert_eq!(app.workspace_activity(1), Some(Activity::Done));
+
+        assert!(update(&mut app, 3, AgentStatus::Blocked));
+        assert!(!update(&mut app, 3, AgentStatus::Blocked), "rings once");
+        assert_eq!(app.workspace_activity(1), Some(Activity::Blocked));
+
+        // The viewed session finishing is not news.
+        update(&mut app, 1, AgentStatus::Working);
+        assert!(!update(&mut app, 1, AgentStatus::Idle));
+        assert_eq!(app.activity(1), Some(Activity::Idle));
+
+        // Looking at a done session clears it.
+        app.on_server(ServerMessage::Attached {
+            session: with_status(2, AgentStatus::Idle),
+            snapshot: Vec::new(),
+            controller: true,
+        });
+        assert_eq!(app.activity(2), Some(Activity::Idle));
+
+        app.config.notifications.bell = false;
+        update(&mut app, 3, AgentStatus::Working);
+        assert!(!update(&mut app, 3, AgentStatus::Idle), "bell disabled");
+        assert_eq!(app.activity(3), Some(Activity::Done));
     }
 
     fn lost(id: SessionId, label: &str) -> SessionInfo {
@@ -1601,7 +1748,15 @@ mod tests {
         assert_eq!(app.agents.last().unwrap().name, "zz-test-sh");
         assert!(app.agents.last().unwrap().installed);
 
-        app.on_terminal_event(ch('j'));
+        // Installed agents (machine-dependent) may sort in between.
+        for _ in 0..app.agents.len() {
+            match app.mode {
+                Mode::NewSession { selected, .. } if app.agents[selected].name == "zz-test-sh" => {
+                    break;
+                }
+                _ => app.on_terminal_event(ch('j')),
+            };
+        }
         let out = app.on_terminal_event(key(KeyCode::Enter, KeyModifiers::NONE));
         let [ClientMessage::CreateSession(req)] = out.as_slice() else {
             panic!("expected CreateSession, got {out:?}")

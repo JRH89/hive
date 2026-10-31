@@ -14,8 +14,8 @@ use hive_core::config::Config;
 use hive_core::launch;
 use hive_core::paths::Paths;
 use hive_protocol::{
-    ClientMessage, NewWorktree, ServerMessage, SessionId, SessionInfo, SessionState, TermSize,
-    WorkspaceInfo, WorktreeInfo,
+    AgentStatus, ClientMessage, NewWorktree, ServerMessage, SessionId, SessionInfo, SessionState,
+    TermSize, WorkspaceInfo, WorktreeInfo,
 };
 use hive_tui::{Outcome, Start};
 
@@ -53,7 +53,7 @@ enum Command {
         hive new codex -b fix/login    own worktree on branch fix/login\n  \
         hive new claude -- --model opus   pass arguments to the agent")]
     New {
-        /// Agent name: claude, codex, gemini, opencode, shell, or one from config
+        /// Agent name (see `hive agents`), `shell`, or one from config
         agent: Option<String>,
         /// Session label (defaults to the agent name)
         #[arg(short, long)]
@@ -97,6 +97,53 @@ enum Command {
     Worktree {
         #[command(subcommand)]
         action: WorktreeAction,
+    },
+    /// List the agents Hive can launch and recognise, and which are installed
+    Agents {
+        /// Also list known agents that are not installed
+        #[arg(short, long)]
+        all: bool,
+    },
+    /// Report an agent's status for a session (for agents to call)
+    #[command(
+        after_help = "Agents running in Hive see HIVE_SESSION_ID and HIVE_BIN_PATH.\n\
+        Example:\n  \
+        \"$HIVE_BIN_PATH\" report-agent --agent truss --state blocked --message 'approve edit?'"
+    )]
+    ReportAgent {
+        /// Session id (defaults to $HIVE_SESSION_ID)
+        session: Option<SessionId>,
+        #[arg(long)]
+        agent: String,
+        /// idle, working, blocked or unknown
+        #[arg(long, value_parser = parse_status)]
+        state: AgentStatus,
+        #[arg(long)]
+        message: Option<String>,
+        /// Reports not numbered above the last one are ignored (defaults to
+        /// the current time in milliseconds)
+        #[arg(long)]
+        seq: Option<u64>,
+        /// Accepted for herdr compatibility; ignored
+        #[arg(long, hide = true)]
+        source: Option<String>,
+        /// Accepted for herdr compatibility; ignored
+        #[arg(long, hide = true)]
+        agent_session_id: Option<String>,
+        /// Accepted for herdr compatibility (resume command); ignored
+        #[arg(last = true, hide = true)]
+        resume: Vec<String>,
+    },
+    /// Clear an agent's status report; screen detection takes over again
+    ReleaseAgent {
+        /// Session id (defaults to $HIVE_SESSION_ID)
+        session: Option<SessionId>,
+        #[arg(long)]
+        agent: String,
+        #[arg(long, hide = true)]
+        source: Option<String>,
+        #[arg(long, hide = true)]
+        seq: Option<u64>,
     },
     /// Check the installation: paths, config, daemon, terminal and agents
     Doctor,
@@ -302,6 +349,39 @@ async fn run(cli: Cli, paths: Paths) -> anyhow::Result<()> {
                 Err(e) => return Err(e.into()),
             }
             Ok(())
+        }
+        Some(Command::Agents { all }) => {
+            print_agents(&config, all);
+            Ok(())
+        }
+        Some(Command::ReportAgent {
+            session,
+            agent,
+            state,
+            message,
+            seq,
+            ..
+        }) => {
+            let session = session_or_env(session)?;
+            let seq = seq.unwrap_or_else(|| {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(1, |d| d.as_millis() as u64)
+            });
+            let mut client = connect(false).await.or_else(not_running)?;
+            let msg = ClientMessage::ReportAgent {
+                session,
+                agent,
+                status: state,
+                message,
+                seq,
+            };
+            request(&mut client, msg).await
+        }
+        Some(Command::ReleaseAgent { session, agent, .. }) => {
+            let session = session_or_env(session)?;
+            let mut client = connect(false).await.or_else(not_running)?;
+            request(&mut client, ClientMessage::ReleaseAgent { session, agent }).await
         }
         Some(Command::Doctor) => unreachable!("handled before loading the config"),
         Some(Command::Daemon { action }) => daemon(action, &paths, connect).await,
@@ -580,8 +660,19 @@ fn print_sessions(sessions: &[SessionInfo], workspaces: &[WorkspaceInfo]) {
     for s in sessions {
         let state = match &s.state {
             SessionState::Starting => "starting".into(),
-            SessionState::Running if s.attached_clients > 0 => "running*".into(),
-            SessionState::Running => "running".into(),
+            SessionState::Running => {
+                let mut state = match s.presence.as_ref().map(|p| p.status) {
+                    Some(AgentStatus::Idle) => "idle",
+                    Some(AgentStatus::Working) => "working",
+                    Some(AgentStatus::Blocked) => "blocked",
+                    Some(AgentStatus::Unknown) | None => "running",
+                }
+                .to_string();
+                if s.attached_clients > 0 {
+                    state.push('*');
+                }
+                state
+            }
             SessionState::Exited { code: Some(c), .. } => format!("exited ({c})"),
             SessionState::Exited { signal, .. } => {
                 format!("killed ({})", signal.as_deref().unwrap_or("?"))
@@ -597,15 +688,77 @@ fn print_sessions(sessions: &[SessionInfo], workspaces: &[WorkspaceInfo]) {
         if s.worktree.is_some() {
             branch.push_str(" (wt)");
         }
+        // The agent actually running, e.g. claude started from a shell.
+        let agent = s.presence.as_ref().map_or(&s.agent, |p| &p.agent);
         println!(
             "{:>4}  {:<10} {:<16} {:<14} {:<12} {:<20} {}",
-            s.id, s.agent, s.label, state, workspace, branch, s.cwd
+            s.id, agent, s.label, state, workspace, branch, s.cwd
         );
     }
     if sessions.iter().any(|s| s.state == SessionState::Lost) {
         println!(
             "\n† was running when hived stopped; relaunch it from the UI (enter in the sidebar)"
         );
+    }
+}
+
+fn parse_status(s: &str) -> Result<AgentStatus, String> {
+    match s {
+        "idle" | "done" => Ok(AgentStatus::Idle),
+        "working" => Ok(AgentStatus::Working),
+        "blocked" => Ok(AgentStatus::Blocked),
+        "unknown" => Ok(AgentStatus::Unknown),
+        _ => Err("expected idle, working, blocked or unknown".into()),
+    }
+}
+
+fn session_or_env(session: Option<SessionId>) -> anyhow::Result<SessionId> {
+    match session {
+        Some(s) => Ok(s),
+        None => std::env::var("HIVE_SESSION_ID")
+            .context("no session given and HIVE_SESSION_ID is not set (not inside Hive?)")?
+            .parse()
+            .context("HIVE_SESSION_ID is not a session id"),
+    }
+}
+
+/// Sends a request that has no reply on success, then fences on a list
+/// (requests are handled in order) so an error is not missed.
+async fn request(client: &mut Client, msg: ClientMessage) -> anyhow::Result<()> {
+    client.send(&msg).await?;
+    client.send(&ClientMessage::ListSessions).await?;
+    let error = client
+        .recv_until(|m| match m {
+            ServerMessage::Error { message } => Some(Some(message)),
+            ServerMessage::SessionList(_) => Some(None),
+            _ => None,
+        })
+        .await?;
+    match error {
+        Some(e) => bail!("{e}"),
+        None => Ok(()),
+    }
+}
+
+fn print_agents(config: &Config, all: bool) {
+    let path_var = std::env::var_os("PATH").unwrap_or_default();
+    let mut hidden = 0;
+    println!("  NAME         AGENT            COMMAND");
+    for (name, def) in config.agents() {
+        let found = launch::find_executable(&def.command, &path_var);
+        if found.is_none() && !all && !config.is_configured(&name) {
+            hidden += 1;
+            continue;
+        }
+        let label = hive_agents::catalog::by_id(&name).map_or("", |k| k.label);
+        let location = match found {
+            Some(p) => p.display().to_string(),
+            None => format!("{} (not installed)", def.command),
+        };
+        println!("  {name:<12} {label:<16} {location}");
+    }
+    if hidden > 0 {
+        println!("\n{hidden} more known agents are not installed (hive agents --all)");
     }
 }
 
@@ -709,6 +862,10 @@ async fn doctor(paths: &Paths) -> anyhow::Result<()> {
     for (name, def) in config.agents() {
         let found = match launch::find_executable(&def.command, &path_var) {
             Some(p) => p.display().to_string(),
+            // Known agents that aren't installed are not a problem.
+            None if !config.is_configured(&name) && name != config.general.default_agent => {
+                continue;
+            }
             None => format!("`{}` not found on PATH", def.command),
         };
         println!("    {name:<12} {found}");

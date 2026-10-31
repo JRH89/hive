@@ -222,6 +222,27 @@ impl Connection {
                     Err(e) => self.error(format!("{e:#}")).await,
                 }
             }
+            ClientMessage::ReportAgent {
+                session,
+                agent,
+                status,
+                message,
+                seq,
+            } => match self.daemon.get(session) {
+                Some(s) => match s.report_agent(&agent, status, message.as_deref(), seq) {
+                    Ok(true) => s.publish(),
+                    Ok(false) => {}
+                    Err(e) => self.error(format!("{e:#}")).await,
+                },
+                None => self.error(format!("no session with id {session}")).await,
+            },
+            ClientMessage::ReleaseAgent { session, agent } => {
+                if let Some(s) = self.daemon.get(session)
+                    && s.release_agent(&agent)
+                {
+                    s.publish();
+                }
+            }
         }
     }
 

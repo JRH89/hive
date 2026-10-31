@@ -7,7 +7,7 @@ mod keys;
 mod render;
 mod theme;
 
-use std::io::stdout;
+use std::io::{Write, stdout};
 use std::time::{Duration, Instant};
 
 use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste, EventStream};
@@ -191,6 +191,10 @@ async fn connected(
 
     let phase = loop {
         terminal.draw(|f| render::draw(f, app, theme))?;
+        if std::mem::take(&mut app.bell) {
+            let mut out = stdout();
+            let _ = out.write_all(b"\x07").and_then(|_| out.flush());
+        }
 
         let out = tokio::select! {
             ev = events.next() => match ev {

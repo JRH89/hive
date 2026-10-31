@@ -6,7 +6,7 @@ source: crates/hive-protocol/src/lib.rs
 
 - Transport: Unix stream socket, per-user dir. The daemon checks `SO_PEERCRED` uid == own uid.
 - Frame: `u32` little-endian length + `postcard` payload. Max 8 MiB (`MAX_FRAME_LEN`). See [[ADR-0003 postcard length-prefixed frames]].
-- `PROTOCOL_VERSION = 4` (v2 added `RenameSession`; v3 added `Attach.force`, `ControlReleased` and `SessionState::Lost`; v4 added workspaces and worktrees). Bump it on any incompatible change. New variants go at the **end** of the enums.
+- `PROTOCOL_VERSION = 5` (v2 added `RenameSession`; v3 added `Attach.force`, `ControlReleased` and `SessionState::Lost`; v4 added workspaces and worktrees; v5 added `SessionInfo.presence`, `ReportAgent`, `ReleaseAgent`, see [[ADR-0016 Agent detection from process and herdr manifests]]). Bump it on any incompatible change. New variants go at the **end** of the enums.
 - **Compat invariant:** `ClientMessage::Hello` and `ServerMessage::Welcome` stay variant 0 with the same shape (a unit test enforces this). That way a mismatched client and daemon can still handshake and report "run `hive daemon stop`".
 
 ## Handshake

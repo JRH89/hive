@@ -6,6 +6,9 @@
 //! - writer: input channel -> PTY
 //! - waiter: blocks on the child's exit and publishes the new state
 //!
+//! Agent presence (which agent is in the foreground, and its status) is
+//! refreshed by the daemon's agent loop through [`Session::detect_agent`].
+//!
 //! The reader feeds the emulator and publishes to the broadcast while holding
 //! the `term` lock. Attaching takes the snapshot and subscribes under the same
 //! lock, so a client never misses or duplicates output.
@@ -14,12 +17,15 @@ use std::collections::BTreeSet;
 use std::io::{Read, Write};
 use std::num::NonZeroU16;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, bail};
+use hive_agents::{AgentKind, Tracker};
 use hive_protocol::{
-    CreateSession, ServerMessage, SessionId, SessionInfo, SessionState, TermSize, WorkspaceId,
+    AgentPresence, AgentStatus, CreateSession, PresenceSource, ServerMessage, SessionId,
+    SessionInfo, SessionState, TermSize, WorkspaceId,
 };
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use rustix::process::{Pid, Signal};
@@ -35,6 +41,11 @@ pub(crate) type ClientId = u64;
 const OUTPUT_QUEUE: usize = 256;
 const INPUT_QUEUE: usize = 256;
 const READ_BUF: usize = 16 * 1024;
+
+/// How often an unrecognised foreground process group is looked at again
+/// (a launcher may start the agent a moment later).
+const REIDENTIFY: Duration = Duration::from_secs(2);
+const MAX_REPORT_MESSAGE: usize = 200;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Chunk {
@@ -75,6 +86,29 @@ struct Meta {
     /// Set once by `remove`. Checked under this lock before publishing so no
     /// `SessionUpdated` can follow the `SessionRemoved` broadcast.
     removed: bool,
+    presence: Option<AgentPresence>,
+}
+
+/// Agent detection state, used only by the agent loop and agent reports.
+/// Lock order: `detect` before `term` and `meta`.
+#[derive(Default)]
+struct Detector {
+    /// Foreground process group last identified, and when.
+    pgid: Option<i32>,
+    identified_at: Option<Instant>,
+    kind: Option<&'static AgentKind>,
+    tracker: Tracker,
+    reported: Option<Reported>,
+    last_seq: u64,
+}
+
+struct Reported {
+    agent: String,
+    status: AgentStatus,
+    message: Option<String>,
+    /// Foreground group when the report arrived; the report lapses when it
+    /// changes (the agent exited without releasing).
+    pgid: Option<i32>,
 }
 
 struct Term {
@@ -93,6 +127,9 @@ pub(crate) struct Session {
     repo: Option<hive_workspace::Repo>,
     meta: Mutex<Meta>,
     term: Mutex<Term>,
+    detect: Mutex<Detector>,
+    /// Set by the reader after new output; cleared when detection reads it.
+    screen_dirty: AtomicBool,
     output: broadcast::Sender<Chunk>,
     input: mpsc::Sender<Vec<u8>>,
     exited: watch::Sender<bool>,
@@ -156,6 +193,9 @@ impl Session {
         cmd.env("COLORTERM", "truecolor");
         cmd.env("HIVE", "1");
         cmd.env("HIVE_SESSION_ID", id.to_string());
+        if let Some(bin) = hive_bin() {
+            cmd.env("HIVE_BIN_PATH", bin);
+        }
 
         let mut child = pair
             .slave
@@ -189,6 +229,7 @@ impl Session {
                 controller: None,
                 attached: BTreeSet::new(),
                 removed: false,
+                presence: None,
             }),
             term: Mutex::new(Term {
                 parser: vt100::Parser::new_with_callbacks(
@@ -199,6 +240,8 @@ impl Session {
                 ),
                 master: pair.master,
             }),
+            detect: Mutex::new(Detector::default()),
+            screen_dirty: AtomicBool::new(true),
             output: output_tx,
             input: input_tx,
             exited: watch::channel(false).0,
@@ -263,6 +306,7 @@ impl Session {
                         .output
                         .send(Chunk::Snapshot(size, Arc::from(snapshot(screen))));
                 }
+                self.screen_dirty.store(true, Ordering::Relaxed);
                 term.parser.callbacks_mut().take()
             };
             if !replies.is_empty() && self.input.try_send(replies).is_err() {
@@ -297,7 +341,152 @@ impl Session {
                 .as_ref()
                 .filter(|r| r.is_linked_worktree())
                 .map(|r| r.worktree_root.display().to_string()),
+            presence: meta.presence.clone().filter(|_| meta.state.is_alive()),
         }
+    }
+
+    /// Re-checks which agent is in the foreground and what it is doing.
+    /// Returns true if the presence changed, in which case the caller should
+    /// `publish`. Blocking (reads `/proc`); run off the async runtime.
+    pub fn detect_agent(&self, now: Instant) -> bool {
+        if !self.is_alive() {
+            return false;
+        }
+        let mut d = lock(&self.detect);
+        let pgid = lock(&self.term).master.process_group_leader();
+        if d.reported.as_ref().is_some_and(|r| r.pgid != pgid) {
+            d.reported = None;
+        }
+        let stale = d.kind.is_none() && d.identified_at.is_none_or(|t| now - t >= REIDENTIFY);
+        let mut kind_changed = false;
+        if d.pgid != pgid || stale {
+            let kind = pgid.and_then(hive_agents::process::identify_group);
+            kind_changed = kind != d.kind;
+            if kind_changed {
+                d.kind = kind;
+                d.tracker = Tracker::default();
+            }
+            d.pgid = pgid;
+            d.identified_at = Some(now);
+        }
+        let manifest = d
+            .kind
+            .and_then(|k| k.manifest)
+            .and_then(hive_agents::manifest::bundled);
+        let dirty = self.screen_dirty.swap(false, Ordering::Relaxed);
+        if let Some(manifest) = manifest
+            && (dirty || kind_changed || d.tracker.is_settling())
+        {
+            let (screen, title, progress) = {
+                let term = lock(&self.term);
+                let cb = term.parser.callbacks();
+                (
+                    term.parser.screen().contents(),
+                    cb.title.clone(),
+                    cb.progress.clone(),
+                )
+            };
+            let detection = manifest.detect(&hive_agents::Input {
+                screen: &screen,
+                title: &title,
+                progress: &progress,
+            });
+            d.tracker.update(&detection, now);
+        }
+        let presence = self.presence(&d);
+        drop(d);
+        self.set_presence(presence)
+    }
+
+    fn presence(&self, d: &Detector) -> Option<AgentPresence> {
+        if let Some(r) = &d.reported {
+            return Some(AgentPresence {
+                agent: r.agent.clone(),
+                label: hive_agents::catalog::by_id(&r.agent)
+                    .map_or_else(|| r.agent.clone(), |k| k.label.to_string()),
+                status: r.status,
+                message: r.message.clone(),
+                source: PresenceSource::Reported,
+            });
+        }
+        let kind = d.kind?;
+        Some(AgentPresence {
+            agent: kind.id.to_string(),
+            label: kind.label.to_string(),
+            status: match (kind.manifest, d.tracker.state()) {
+                (None, _) | (_, hive_agents::State::Unknown) => AgentStatus::Unknown,
+                (_, hive_agents::State::Idle) => AgentStatus::Idle,
+                (_, hive_agents::State::Working) => AgentStatus::Working,
+                (_, hive_agents::State::Blocked) => AgentStatus::Blocked,
+            },
+            message: None,
+            source: if kind.id == self.agent {
+                PresenceSource::Launched
+            } else {
+                PresenceSource::Process
+            },
+        })
+    }
+
+    fn set_presence(&self, presence: Option<AgentPresence>) -> bool {
+        let mut meta = lock(&self.meta);
+        if meta.presence == presence {
+            return false;
+        }
+        meta.presence = presence;
+        true
+    }
+
+    /// An agent's own status report. Returns true if the caller should
+    /// `publish`.
+    pub fn report_agent(
+        &self,
+        agent: &str,
+        status: AgentStatus,
+        message: Option<&str>,
+        seq: u64,
+    ) -> anyhow::Result<bool> {
+        let agent: String = agent.trim().chars().take(64).collect();
+        if agent.is_empty() {
+            bail!("agent name is empty");
+        }
+        if !self.is_alive() {
+            bail!("session {} is not running", self.id);
+        }
+        let mut d = lock(&self.detect);
+        if seq <= d.last_seq {
+            return Ok(false);
+        }
+        d.last_seq = seq;
+        let pgid = lock(&self.term).master.process_group_leader();
+        d.reported = Some(Reported {
+            agent,
+            status,
+            message: message
+                .map(|m| {
+                    m.trim()
+                        .chars()
+                        .take(MAX_REPORT_MESSAGE)
+                        .collect::<String>()
+                })
+                .filter(|m| !m.is_empty()),
+            pgid,
+        });
+        let presence = self.presence(&d);
+        drop(d);
+        Ok(self.set_presence(presence))
+    }
+
+    /// Ends `agent`'s report. Returns true if the caller should `publish`.
+    pub fn release_agent(&self, agent: &str) -> bool {
+        let mut d = lock(&self.detect);
+        if d.reported.as_ref().is_none_or(|r| r.agent != agent.trim()) {
+            return false;
+        }
+        d.reported = None;
+        let presence = self.presence(&d);
+        drop(d);
+        self.set_presence(presence)
     }
 
     /// Root of the git working tree the session runs in, if any.
@@ -482,6 +671,12 @@ impl Session {
 /// by `wait_for` is dropped here so callers can hold the future across awaits.
 pub(crate) async fn wait_true(rx: &mut watch::Receiver<bool>) {
     let _ = rx.wait_for(|&v| v).await;
+}
+
+/// The `hive` CLI next to this `hived`, for agents that report their status.
+fn hive_bin() -> Option<PathBuf> {
+    let bin = std::env::current_exe().ok()?.with_file_name("hive");
+    bin.is_file().then_some(bin)
 }
 
 fn signal_group(pid: Pid, sig: Signal) {

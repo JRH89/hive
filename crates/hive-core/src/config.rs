@@ -14,6 +14,7 @@ pub struct Config {
     pub terminal: Terminal,
     pub daemon: Daemon,
     pub worktrees: Worktrees,
+    pub notifications: Notifications,
     pub theme: ThemeConfig,
     pub keys: Keys,
     /// User-defined or overridden agents, keyed by name.
@@ -84,6 +85,21 @@ impl Default for Daemon {
             auto_start: true,
             kill_timeout_secs: 3,
         }
+    }
+}
+
+/// `[notifications]`: how Hive gets your attention when a session you are
+/// not looking at needs input or finishes.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Notifications {
+    /// Ring the terminal bell.
+    pub bell: bool,
+}
+
+impl Default for Notifications {
+    fn default() -> Self {
+        Notifications { bell: true }
     }
 }
 
@@ -226,20 +242,23 @@ impl Config {
     }
 
     /// Built-in agents overlaid with the user's `[agents.*]` tables.
+    /// Every launchable agent: the known catalog (see `hive-agents`), the
+    /// user's shell, and `[agents.*]`, which override built-ins of the same
+    /// name. Built-ins may not be installed; check before offering them.
     pub fn agents(&self) -> BTreeMap<String, AgentDef> {
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-        let mut agents: BTreeMap<String, AgentDef> = [
-            ("claude", AgentDef::simple("claude")),
-            ("codex", AgentDef::simple("codex")),
-            ("gemini", AgentDef::simple("gemini")),
-            ("opencode", AgentDef::simple("opencode")),
-            ("shell", AgentDef::simple(&shell)),
-        ]
-        .into_iter()
-        .map(|(k, v)| (k.to_string(), v))
-        .collect();
+        let mut agents: BTreeMap<String, AgentDef> = hive_agents::CATALOG
+            .iter()
+            .map(|k| (k.id.to_string(), AgentDef::simple(k.command)))
+            .chain([("shell".to_string(), AgentDef::simple(&shell))])
+            .collect();
         agents.extend(self.agents.clone());
         agents
+    }
+
+    /// Whether `name` is defined in the config file (not only built in).
+    pub fn is_configured(&self, name: &str) -> bool {
+        self.agents.contains_key(name)
     }
 
     pub fn agent(&self, name: &str) -> Option<AgentDef> {
@@ -279,6 +298,15 @@ mod tests {
             vec!["/opt/claude/bin/claude", "--verbose", "x"]
         );
         assert_eq!(c.agent("aider").unwrap().env["AIDER_DARK_MODE"], "1");
+        assert!(c.is_configured("aider") && !c.is_configured("codex"));
+    }
+
+    #[test]
+    fn known_agents_are_built_in() {
+        let c = Config::default();
+        assert_eq!(c.agent("truss").unwrap().command, "truss-tui");
+        assert_eq!(c.agent("cursor").unwrap().command, "cursor-agent");
+        assert!(c.agent("shell").is_some());
     }
 
     #[test]

@@ -154,3 +154,38 @@ fn doctor_reports_the_setup_and_fails_on_a_broken_config() {
     // Doctor never starts the daemon.
     assert!(!env.tmp.path().join("rt").join("hived.sock").exists());
 }
+
+#[test]
+fn agents_are_listed_and_can_report_their_status() {
+    let env = Env::new();
+    let all = env.ok(&["agents", "--all"]);
+    assert!(
+        all.contains("truss") && all.contains("truss-tui") && all.contains("Cursor Agent"),
+        "{all}"
+    );
+
+    assert!(
+        env.ok(&["new", "shell", "-d"])
+            .contains("created session 1")
+    );
+    env.ok(&[
+        "report-agent",
+        "1",
+        "--agent",
+        "truss",
+        "--state",
+        "blocked",
+        "--seq",
+        "5",
+    ]);
+    let list = env.ok(&["list"]);
+    assert!(list.contains("truss") && list.contains("blocked"), "{list}");
+
+    env.ok(&["release-agent", "1", "--agent", "truss"]);
+    assert!(!env.ok(&["list"]).contains("truss"));
+
+    let err = env.fails(&["report-agent", "9", "--agent", "x", "--state", "idle"]);
+    assert!(err.contains("no session with id 9"), "{err}");
+    let err = env.fails(&["report-agent", "1", "--agent", "x", "--state", "busy"]);
+    assert!(err.contains("expected idle, working"), "{err}");
+}

@@ -692,11 +692,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
+name = "hive-agents"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "serde",
+ "toml",
+]
+
+[[package]]
 name = "hive-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "hive-agents",
  "hive-core",
  "hive-daemon",
  "hive-protocol",
@@ -714,6 +724,7 @@ name = "hive-core"
 version = "0.1.0"
 dependencies = [
  "dirs",
+ "hive-agents",
  "hive-protocol",
  "rustix",
  "serde",
@@ -728,6 +739,7 @@ name = "hive-daemon"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "hive-agents",
  "hive-core",
  "hive-protocol",
  "hive-workspace",
@@ -760,6 +772,7 @@ dependencies = [
  "anyhow",
  "crossterm",
  "futures-util",
+ "hive-agents",
  "hive-core",
  "hive-protocol",
  "hive-workspace",

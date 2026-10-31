@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.104"
+hive-agents = { version = "0.1.0", path = "../hive-agents" }
 hive-core = { version = "0.1.0", path = "../hive-core" }
 hive-protocol = { version = "0.1.0", path = "../hive-protocol" }
 hive-workspace = { version = "0.1.0", path = "../hive-workspace" }

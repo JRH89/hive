@@ -1,0 +1,10 @@
+Hive agent detection
+====================
+
+The files in manifests/*.toml are copied unmodified from herdr v0.9.5
+(https://github.com/herdrdev/herdr), Copyright the herdr authors, licensed
+under the Apache License, Version 2.0 (see manifests/LICENSE-APACHE).
+
+The rule-evaluation semantics in src/manifest.rs (gates, priorities and screen
+regions) are reimplemented from herdr's manifest engine so these manifests
+behave the same in Hive. The rest of this crate is MIT licensed like Hive.

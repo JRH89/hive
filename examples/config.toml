@@ -19,6 +19,11 @@ auto_start = true
 # Seconds between SIGTERM and SIGKILL when terminating a session.
 kill_timeout_secs = 3
 
+[notifications]
+# Ring the terminal bell when a session you aren't viewing needs input
+# (blocked) or finishes its turn (done).
+bell = true
+
 [worktrees]
 # Where `hive new -w` creates git worktrees.
 # Default: $XDG_DATA_HOME/hive/worktrees
@@ -56,7 +61,7 @@ next_session = ["j", "down"]
 prev_session = ["k", "up"]
 new_worktree_session = "N"
 
-# Agents. Built in: claude, codex, gemini, opencode, shell. Add your own or
+# Agents. Built in: every agent `hive agents --all` lists, plus shell. Add your own or
 # override a built-in. Commands run directly (no shell); args are passed as-is.
 [agents.aider]
 command = "aider"

@@ -8,6 +8,8 @@ updated: 2026-10-30
 
 **Released v0.1.0** (2026-10-30): https://github.com/JRH89/hive/releases/tag/v0.1.0. Static x86_64/aarch64 musl archives, checksums and `install.sh`. The website install section now shows Linux as available.
 
+**Phase 7 in progress** on branch `phase-7-herdr-parity` (uncommitted): agent discovery, detection and status are done; controls/mouse and panes/tabs are next. See [[Phase 7 - herdr parity]].
+
 **Open:** macOS runtime testing. `mouse_support` and `restore_workspace` config keys are inert.
 
 ## Gate before every change
@@ -26,7 +28,7 @@ cargo test --workspace
 - New sessions launched from the TUI start in the active workspace's root (or `hive`'s cwd). No free-form directory prompt.
 - Worktrees can't be listed from the TUI, and custom branch names are CLI-only (`hive new -b`).
 - Sidebar/picker keys aren't configurable; theme is fixed at startup.
-- No activity indicator for background sessions (see [[ADR-0007 Switching re-attaches]]).
+- ~~No activity indicator for background sessions~~: done in Phase 7 via daemon-side detection ([[ADR-0016 Agent detection from process and herdr manifests]]).
 
 ## Website
 - Next.js static export in `website/`, deployed by Vercel from GitHub (`vercel.json`: framework nextjs, image content types for the extensionless OG/apple-icon routes).

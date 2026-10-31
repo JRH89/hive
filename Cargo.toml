@@ -16,6 +16,7 @@ hive-core = { path = "crates/hive-core" }
 hive-daemon = { path = "crates/hive-daemon" }
 hive-tui = { path = "crates/hive-tui" }
 hive-workspace = { path = "crates/hive-workspace" }
+hive-agents = { path = "crates/hive-agents" }
 
 [profile.release]
 lto = "thin"

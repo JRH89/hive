@@ -46,3 +46,12 @@ Full detail is in `AGENTS.md` §16. **Don't start a phase until the previous one
 - [x] Static Linux release binaries, draft-release workflow, checksum-verifying installer ([[ADR-0015 Static musl binaries via draft GitHub releases]])
 - [x] Installation instructions, user guide, troubleshooting guide, `hive doctor`
 - [x] macOS/Windows investigated (macOS type-checks; Windows needs a port)
+## Phase 7 — herdr parity (in progress)
+[[Phase 7 - herdr parity]]
+- [x] Agent discovery: 27-agent catalog, `hive agents`, picker shows installed agents ([[ADR-0016 Agent detection from process and herdr manifests]])
+- [x] Agent detection from the foreground process (incl. agents started from a shell)
+- [x] Status (working/blocked/idle/done) from herdr manifests; self-report via `hive report-agent`
+- [x] Sidebar status glyphs, workspace rollup, bell on done/blocked
+- [ ] herdr-style controls (prefix-free chords, tmux-like defaults) and mouse
+- [ ] Split panes and tabs (multi-attach)
+- [ ] truss reports to Hive (needs the user's OK: their repo)

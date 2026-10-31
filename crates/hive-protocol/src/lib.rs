@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Bumped on any incompatible change to the message types below.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// Upper bound on a single frame. Protects both sides from unbounded
 /// allocations caused by a corrupt or hostile length prefix.
@@ -80,6 +80,42 @@ pub struct SessionInfo {
     pub branch: Option<String>,
     /// Root of the linked git worktree `cwd` is in, if any.
     pub worktree: Option<String>,
+    /// The agent running in the session's foreground right now, if Hive
+    /// recognises one. Not persisted.
+    pub presence: Option<AgentPresence>,
+}
+
+/// What an agent is doing, from screen rules or its own report.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AgentStatus {
+    /// Running, but its state can't be told (no rules for it).
+    Unknown,
+    Idle,
+    Working,
+    /// Waiting for the user: a permission prompt or question.
+    Blocked,
+}
+
+/// How Hive knows which agent is running.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PresenceSource {
+    /// The foreground process is the agent the session was launched with.
+    Launched,
+    /// The foreground process was recognised (e.g. started from a shell).
+    Process,
+    /// The agent reported itself (`hive report-agent`).
+    Reported,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct AgentPresence {
+    /// Catalog id (e.g. `claude`) or the name a reporting agent gave.
+    pub agent: String,
+    pub label: String,
+    pub status: AgentStatus,
+    /// Short note from a reporting agent, e.g. what it is waiting on.
+    pub message: Option<String>,
+    pub source: PresenceSource,
 }
 
 /// A named group of sessions, usually one repository.
@@ -186,6 +222,20 @@ pub enum ClientMessage {
     RemoveWorktree {
         path: String,
         force: bool,
+    },
+    /// An agent reporting its own status, overriding screen detection until
+    /// released. Reports with a `seq` not above the last one are ignored.
+    ReportAgent {
+        session: SessionId,
+        agent: String,
+        status: AgentStatus,
+        message: Option<String>,
+        seq: u64,
+    },
+    /// Ends a report by `agent`; detection takes over again.
+    ReleaseAgent {
+        session: SessionId,
+        agent: String,
     },
 }
 

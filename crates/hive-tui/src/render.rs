@@ -9,7 +9,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
-use crate::app::{App, Focus, Link, Mode, SIDEBAR_WIDTH, Target, Tone};
+use crate::app::{Activity, App, Focus, Link, Mode, SIDEBAR_WIDTH, Target, Tone};
 use crate::keymap::Command;
 use crate::theme::Theme;
 
@@ -175,6 +175,24 @@ fn state_dot(state: &SessionState, theme: &Theme) -> (&'static str, Color) {
     }
 }
 
+fn activity_dot(a: Activity, theme: &Theme) -> (&'static str, Color) {
+    let g = &theme.glyphs;
+    match a {
+        Activity::Idle => (g.running, theme.success),
+        Activity::Done => (g.done, theme.success),
+        Activity::Working => (g.working, theme.accent),
+        Activity::Blocked => (g.blocked, theme.warning),
+    }
+}
+
+/// The session's dot: agent activity when known, else process state.
+fn session_dot(s: &SessionInfo, app: &App, theme: &Theme) -> (&'static str, Color) {
+    match app.activity(s.id) {
+        Some(a) => activity_dot(a, theme),
+        None => state_dot(&s.state, theme),
+    }
+}
+
 fn dir_name(cwd: &str) -> &str {
     cwd.trim_end_matches('/')
         .rsplit('/')
@@ -284,7 +302,7 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 } else {
                     heading
                 };
-                let name = truncate(theme, app.workspace_name(*w), width.saturating_sub(3));
+                let name = truncate(theme, app.workspace_name(*w), width.saturating_sub(6));
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![
                         Span::styled(
@@ -295,6 +313,15 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                     ])),
                     row(y),
                 );
+                // Idle is the norm; only flag what deserves a look.
+                if let Some(a) = app.workspace_activity(*w).filter(|a| *a != Activity::Idle) {
+                    let (glyph, color) = activity_dot(a, theme);
+                    frame.render_widget(
+                        Paragraph::new(Span::styled(format!("{glyph} "), Style::new().fg(color)))
+                            .alignment(Alignment::Right),
+                        row(y),
+                    );
+                }
             }
             Item::NoSessions => {
                 frame.render_widget(
@@ -309,6 +336,7 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                     draw_sidebar_session(
                         frame,
                         [row(y), row(y + 1)],
+                        app,
                         s,
                         *position,
                         current == Some(*id),
@@ -327,6 +355,7 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
 fn draw_sidebar_session(
     frame: &mut Frame,
     [row1, row2]: [Rect; 2],
+    app: &App,
     s: &SessionInfo,
     position: usize,
     is_current: bool,
@@ -340,7 +369,7 @@ fn draw_sidebar_session(
     } else {
         Style::new()
     };
-    let (dot, dot_color) = state_dot(&s.state, theme);
+    let (dot, dot_color) = session_dot(s, app, theme);
     let label_style = match (is_current, s.state.is_alive()) {
         (true, _) => base.fg(theme.accent).add_modifier(Modifier::BOLD),
         (false, true) => base.fg(theme.text),
@@ -381,9 +410,16 @@ fn draw_sidebar_session(
     if s.state == SessionState::Lost {
         detail.push("ended".to_string());
     }
+    if let Some(a) = app.activity(s.id).filter(|a| *a != Activity::Idle) {
+        detail.push(a.word().to_string());
+    }
     detail.push(place);
-    if s.label != s.agent {
-        detail.push(s.agent.clone());
+    // The agent actually running, e.g. Claude Code started from a shell.
+    match s.presence.as_ref().filter(|_| s.state.is_alive()) {
+        Some(p) if p.label != s.label => detail.push(p.label.clone()),
+        Some(_) => {}
+        None if s.label != s.agent => detail.push(s.agent.clone()),
+        None => {}
     }
     let mut line2 = vec![Span::styled("   ", base)];
     let mut room = width.saturating_sub(4);
@@ -568,10 +604,20 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
 }
 
 fn session_summary<'a>(s: &SessionInfo, app: &App, theme: &Theme, bar: Style) -> Vec<Span<'a>> {
-    let (dot, color) = state_dot(&s.state, theme);
+    let (dot, color) = session_dot(s, app, theme);
     let state = match &s.state {
         SessionState::Starting => "starting".to_string(),
-        SessionState::Running => "running".to_string(),
+        SessionState::Running => {
+            let mut state = match (&s.presence, app.activity(s.id)) {
+                (Some(p), Some(a)) => format!("{} {}", p.label, a.word()),
+                (Some(p), None) => p.label.clone(),
+                _ => "running".to_string(),
+            };
+            if let Some(m) = s.presence.as_ref().and_then(|p| p.message.as_ref()) {
+                state = format!("{state}: {m}");
+            }
+            state
+        }
         SessionState::Exited { code: Some(c), .. } => format!("exited ({c})"),
         SessionState::Exited { signal, .. } => {
             format!("killed ({})", signal.as_deref().unwrap_or("signal"))
@@ -723,7 +769,7 @@ fn draw_picker(
     let inner = popup(
         frame,
         area,
-        48,
+        56,
         app.agents.len() as u16 + 2 + extra,
         &title,
         theme,
@@ -749,10 +795,14 @@ fn draw_picker(
             } else {
                 "   ".into()
             };
+            let what = match a.label {
+                Some(label) => format!("{label} · {}", a.command),
+                None => a.command.clone(),
+            };
             let detail = if a.installed {
-                a.command.clone()
+                what
             } else {
-                format!("{} (not installed)", a.command)
+                format!("{what} (not installed)")
             };
             Line::from(vec![
                 Span::styled(
@@ -760,11 +810,11 @@ fn draw_picker(
                     base.fg(if chosen { theme.on_accent } else { theme.muted }),
                 ),
                 Span::styled(
-                    format!("{:<10} ", a.name),
+                    format!("{:<12} ", a.name),
                     name.add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    truncate(theme, &detail, inner.width.saturating_sub(15) as usize),
+                    truncate(theme, &detail, inner.width.saturating_sub(17) as usize),
                     base.fg(if chosen { theme.on_accent } else { theme.muted }),
                 ),
             ])
@@ -1057,6 +1107,7 @@ mod tests {
             workspace: 1,
             branch: None,
             worktree: None,
+            presence: None,
         }
     }
 

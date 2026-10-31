@@ -33,6 +33,7 @@ Knowledge base for building **Hive**, a terminal multiplexer for AI coding agent
 - [[ADR-0013 Themes degrade by colour depth and glyph set]]
 - [[ADR-0014 Configurable keymap of named commands]]
 - [[ADR-0015 Static musl binaries via draft GitHub releases]]
+- [[ADR-0016 Agent detection from process and herdr manifests]]
 
 ## Ongoing
 - [[Website Design]]: approved website direction, branding, scope and acceptance

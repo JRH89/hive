@@ -9,8 +9,8 @@ use hive_core::client::Client;
 use hive_core::config::Config;
 use hive_core::paths::Paths;
 use hive_protocol::{
-    ClientMessage, CreateSession, NewWorktree, ServerMessage, SessionId, SessionInfo, SessionState,
-    TermSize, WorkspaceInfo,
+    AgentPresence, AgentStatus, ClientMessage, CreateSession, NewWorktree, PresenceSource,
+    ServerMessage, SessionId, SessionInfo, SessionState, TermSize, WorkspaceInfo,
 };
 use tokio::time::timeout;
 
@@ -1318,4 +1318,119 @@ async fn many_concurrent_sessions_and_clients_stay_correct() {
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+}
+
+/// Waits for a `SessionUpdated` for `id` whose presence satisfies `want`.
+async fn wait_presence(
+    c: &mut Client,
+    id: SessionId,
+    what: &str,
+    want: impl Fn(Option<&AgentPresence>) -> bool,
+) -> Option<AgentPresence> {
+    timeout(
+        T,
+        c.recv_until(|m| match m {
+            ServerMessage::SessionUpdated(i) if i.id == id && want(i.presence.as_ref()) => {
+                Some(i.presence)
+            }
+            _ => None,
+        }),
+    )
+    .await
+    .unwrap_or_else(|_| panic!("timed out waiting for {what}"))
+    .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn agents_are_recognised_and_their_status_tracked() {
+    let h = Harness::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    // A stand-in `claude`: a busy title spinner until input, then idle.
+    let fake = tmp.path().join("claude");
+    std::fs::write(
+        &fake,
+        "#!/bin/sh\nprintf '\\033]0;\\342\\240\\213 Claude Code\\007busy\\n'\n\
+         read x\nprintf '\\033]0;Claude Code\\007done\\n'\nsleep 60\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+
+    let mut c = h.client().await;
+    let s = create_info(&mut c, sh(&fake.display().to_string(), TermSize::DEFAULT)).await;
+    let p = wait_presence(&mut c, s.id, "working claude", |p| {
+        p.is_some_and(|p| p.agent == "claude" && p.status == AgentStatus::Working)
+    })
+    .await
+    .unwrap();
+    assert_eq!(p.label, "Claude Code");
+    assert_eq!(p.source, PresenceSource::Process, "launched as `shell`");
+
+    let mut screen = attach(&mut c, s.id, TermSize::DEFAULT).await;
+    wait_for_text(&mut c, &mut screen, "busy").await;
+    c.send(&ClientMessage::Input(b"go\r".to_vec()))
+        .await
+        .unwrap();
+    wait_presence(&mut c, s.id, "idle claude", |p| {
+        p.is_some_and(|p| p.status == AgentStatus::Idle)
+    })
+    .await;
+
+    // A self-report overrides detection until released; stale reports are
+    // ignored.
+    let report = |status, seq| ClientMessage::ReportAgent {
+        session: s.id,
+        agent: "truss".into(),
+        status,
+        message: Some("approve edit?".into()),
+        seq,
+    };
+    c.send(&report(AgentStatus::Blocked, 2)).await.unwrap();
+    let p = wait_presence(&mut c, s.id, "reported truss", |p| {
+        p.is_some_and(|p| p.source == PresenceSource::Reported)
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        (
+            p.agent.as_str(),
+            p.label.as_str(),
+            p.status,
+            p.message.as_deref()
+        ),
+        (
+            "truss",
+            "Truss",
+            AgentStatus::Blocked,
+            Some("approve edit?")
+        )
+    );
+    c.send(&report(AgentStatus::Working, 1)).await.unwrap();
+    c.send(&ClientMessage::ReleaseAgent {
+        session: s.id,
+        agent: "truss".into(),
+    })
+    .await
+    .unwrap();
+    let p = wait_presence(&mut c, s.id, "release", |p| {
+        p.is_some_and(|p| p.source != PresenceSource::Reported)
+    })
+    .await
+    .unwrap();
+    assert_eq!((p.agent.as_str(), p.status), ("claude", AgentStatus::Idle));
+    assert!(
+        list(&mut c).await[0].presence.is_some(),
+        "listed sessions carry presence"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plain_shell_has_no_agent_presence() {
+    let h = Harness::start().await;
+    let mut c = h.client().await;
+    let s = create_info(&mut c, sh("echo ready; sleep 60", TermSize::DEFAULT)).await;
+    let mut screen = attach(&mut c, s.id, TermSize::DEFAULT).await;
+    wait_for_text(&mut c, &mut screen, "ready").await;
+    // Several detection rounds pass; nothing is ever reported.
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    assert_eq!(list(&mut c).await[0].presence, None);
 }

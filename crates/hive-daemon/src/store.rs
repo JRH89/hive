@@ -96,6 +96,7 @@ impl StoredSession {
             workspace: self.workspace,
             branch: None,
             worktree: self.worktree,
+            presence: None,
         }
     }
 }

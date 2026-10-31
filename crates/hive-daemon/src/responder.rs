@@ -12,15 +12,26 @@ use vt100::{Callbacks, Screen};
 const OSC_FG: &str = "rgb:e8e8/eaea/f0f0";
 const OSC_BG: &str = "rgb:1111/1313/1818";
 
+/// Longest window title or progress payload kept for agent detection.
+const MAX_SIGNAL: usize = 256;
+
 #[derive(Default)]
 pub(crate) struct Responder {
     pending: Vec<u8>,
+    /// Last window title (OSC 0/2), for agent status detection.
+    pub(crate) title: String,
+    /// Last OSC 9;4 progress payload without the leading `9;`, e.g. `4;1;50`.
+    pub(crate) progress: String,
 }
 
 impl Responder {
     pub(crate) fn take(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.pending)
     }
+}
+
+fn capped(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(&bytes[..bytes.len().min(MAX_SIGNAL)]).into_owned()
 }
 
 fn first_param(params: &[&[u16]]) -> u16 {
@@ -59,7 +70,17 @@ impl Callbacks for Responder {
         }
     }
 
+    fn set_window_title(&mut self, _screen: &mut Screen, title: &[u8]) {
+        self.title = capped(title);
+    }
+
     fn unhandled_osc(&mut self, _screen: &mut Screen, params: &[&[u8]]) {
+        // ConEmu-style progress (OSC 9;4;state;percent), which several agents
+        // emit while busy.
+        if params.first() == Some(&&b"9"[..]) && params.get(1) == Some(&&b"4"[..]) {
+            self.progress = capped(&params[1..].join(&b';'));
+            return;
+        }
         if params.len() == 2 && params[1] == b"?" {
             let color = match params[0] {
                 b"10" => OSC_FG,
@@ -111,6 +132,17 @@ mod tests {
             p.callbacks_mut().take(),
             format!("\x1b]11;{OSC_BG}\x1b\\").as_bytes()
         );
+    }
+
+    #[test]
+    fn captures_title_and_progress() {
+        let mut p = parser();
+        p.process(b"\x1b]0;\xe2\xa0\x8b Claude Code\x07\x1b]9;4;3;\x1b\\");
+        assert_eq!(p.callbacks().title, "⠋ Claude Code");
+        assert_eq!(p.callbacks().progress, "4;3;");
+        p.process(b"\x1b]9;hello\x07");
+        assert_eq!(p.callbacks().progress, "4;3;");
+        assert!(p.callbacks_mut().take().is_empty());
     }
 
     #[test]

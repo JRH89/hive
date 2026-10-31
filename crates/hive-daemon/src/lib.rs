@@ -32,6 +32,9 @@ use store::{Store, StoredSession, StoredWorkspace};
 /// How often running sessions' branches are re-read (a small file read each).
 const BRANCH_REFRESH: Duration = Duration::from_secs(2);
 
+/// How often each session's foreground agent and status are re-checked.
+const AGENT_REFRESH: Duration = Duration::from_millis(500);
+
 #[derive(Debug, thiserror::Error)]
 #[error("another hived is already running")]
 pub struct AlreadyRunning;
@@ -418,6 +421,17 @@ impl Daemon {
         }
     }
 
+    /// Republishes sessions whose agent presence or status changed.
+    fn detect_agents(&self) {
+        let live: Vec<_> = self.sessions.lock().unwrap().values().cloned().collect();
+        let now = std::time::Instant::now();
+        for s in live {
+            if s.detect_agent(now) {
+                s.publish();
+            }
+        }
+    }
+
     fn kill_timeout(&self) -> Duration {
         Duration::from_secs(self.config.daemon.kill_timeout_secs)
     }
@@ -516,6 +530,22 @@ async fn branch_loop(daemon: Arc<Daemon>) {
     }
 }
 
+async fn agent_loop(daemon: Arc<Daemon>) {
+    let mut tick = tokio::time::interval(AGENT_REFRESH);
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tick.tick().await;
+        let d = daemon.clone();
+        // Reads /proc and runs screen rules: keep it off the runtime threads.
+        if tokio::task::spawn_blocking(move || d.detect_agents())
+            .await
+            .is_err()
+        {
+            tracing::error!("agent detection panicked");
+        }
+    }
+}
+
 /// Trimmed and capped; `None` when empty.
 fn clean_name(name: Option<&str>) -> Option<String> {
     let name: String = name?.trim().chars().take(64).collect();
@@ -564,6 +594,7 @@ pub async fn run(paths: Paths, config: Config) -> anyhow::Result<()> {
     let daemon = Arc::new(Daemon::new(config, paths.state_dir.join("sessions.json")));
     let persister = AbortOnDrop(tokio::spawn(persist_loop(daemon.clone())));
     let _branches = AbortOnDrop(tokio::spawn(branch_loop(daemon.clone())));
+    let _agents = AbortOnDrop(tokio::spawn(agent_loop(daemon.clone())));
     let mut shutdown = daemon.shutdown.subscribe();
     let mut sigterm = signal(SignalKind::terminate())?;
     let mut sigint = signal(SignalKind::interrupt())?;
