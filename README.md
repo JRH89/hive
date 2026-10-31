@@ -10,7 +10,7 @@
 
 A lightweight, Rust-powered terminal multiplexer for AI coding agents.
 
-> **Status: pre-release.** All seven roadmap phases are implemented on Linux: several agents in split panes and tabs with live status (working, needs input, done), grouped by repository, optionally each in its own git worktree; detach, reattach and automatic reconnection; a command palette, themes and configurable keys. Version 0.3.0 ships static Linux binaries. See [Roadmap](#roadmap).
+> **Status: pre-release.** All seven roadmap phases are implemented on Linux: several agents in split panes and tabs with live status (working, needs input, done), grouped by repository, optionally each in its own git worktree; detach, reattach and automatic reconnection; a command palette, themes and configurable keys. Version 0.4.0 ships binaries for Linux, macOS and Windows. See [Roadmap](#roadmap).
 
 ## What works today
 - Launch Claude Code, Codex, Gemini CLI, OpenCode, a shell, or any configured command in a real PTY
@@ -137,7 +137,8 @@ The leader is **Ctrl+Space**. Everything else goes to the agent.
 | `Ctrl+Space j` / `k` | Next / previous session |
 | `Ctrl+Space 1`–`9` | Jump to session |
 | `Ctrl+Space s` | Focus the sidebar (`↑↓` select, `enter` open, `esc` back) |
-| `Ctrl+Space n` | New session (pick an agent; `w` toggles its own worktree) |
+| `Ctrl+Space c` | New terminal (type `claude`, `codex`, ... to start an agent) |
+| `Ctrl+Space A` | New agent from a list (`w` toggles its own worktree) |
 | `Ctrl+Space w` | Workspaces (open, add, rename, remove) |
 | `Ctrl+Space r` | Rename session |
 | `Ctrl+Space x` | Terminate session (asks to confirm) |

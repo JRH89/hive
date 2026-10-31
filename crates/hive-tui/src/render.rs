@@ -19,24 +19,22 @@ use crate::theme::Theme;
 pub fn draw(frame: &mut Frame, app: &App, theme: &Theme) {
     // Clickable areas are recorded as they are drawn.
     app.sidebar_hits.borrow_mut().clear();
-    let [header, body, status] = Layout::vertical([
-        Constraint::Length(app.header_rows()),
-        Constraint::Min(1),
-        Constraint::Length(1),
-    ])
-    .areas(frame.area());
-
-    if header.height > 0 {
-        draw_header(frame, header, app, theme);
-    }
-    let panel = if app.sidebar_visible {
-        let [sidebar, panel] =
+    let [body, status] =
+        Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(frame.area());
+    // The sidebar runs full height; the tab row sits above the panes only.
+    let right = if app.sidebar_visible {
+        let [sidebar, right] =
             Layout::horizontal([Constraint::Length(SIDEBAR_WIDTH), Constraint::Min(1)]).areas(body);
         draw_sidebar(frame, sidebar, app, theme);
-        panel
+        right
     } else {
         body
     };
+    let [header, panel] =
+        Layout::vertical([Constraint::Length(app.header_rows()), Constraint::Min(1)]).areas(right);
+    if header.height > 0 {
+        draw_header(frame, header, app, theme);
+    }
     let mut agent_cells = None;
     let (panes, gaps) = app.pane_areas();
     if panes.is_empty() {
@@ -183,87 +181,46 @@ fn draw_overlay(frame: &mut Frame, body: Rect, app: &App, theme: &Theme) {
     }
 }
 
+/// herdr-style tab row above the panes: tab numbers, `+` for a new
+/// terminal tab, and the space's name on the right. Every tab is clickable.
 fn draw_header(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
-    let bar = theme.bar();
-    let mut left = vec![Span::styled(
-        format!(" {} {}", theme.glyphs.mark, brand::NAME),
-        bar.fg(theme.accent).add_modifier(Modifier::BOLD),
-    )];
-    if let Some(s) = app.current() {
-        left.push(Span::styled("  ", bar));
-        left.push(Span::styled(
-            s.agent.to_uppercase(),
-            bar.add_modifier(Modifier::BOLD),
-        ));
-        if s.label != s.agent {
-            left.push(Span::styled(format!(" — {}", s.label), bar));
-        }
-        left.push(Span::styled(
-            format!("  {}", short_path(&s.cwd)),
-            bar.fg(theme.muted),
-        ));
-        if let Some(branch) = &s.branch {
-            left.push(Span::styled(format!(" ({branch})"), bar.fg(theme.muted)));
-        }
+    let muted = Style::new().fg(theme.muted);
+    let mut spans = vec![Span::raw(" ")];
+    let mut x = area.x + 1;
+    let mut hits = app.sidebar_hits.borrow_mut();
+    for i in 0..app.tabs.len() {
+        let label = format!("  {}  ", i + 1);
+        let width = label.chars().count() as u16;
+        hits.push((Rect::new(x, area.y, width, 1), SidebarHit::Tab(i)));
+        let style = if i == app.tab {
+            theme.highlight()
+        } else {
+            muted
+        };
+        spans.push(Span::styled(label, style));
+        spans.push(Span::raw("  "));
+        x += width + 2;
     }
-    let left_width: usize = left.iter().map(|s| s.content.chars().count()).sum();
-    let room = (area.width as usize).saturating_sub(left_width);
-    frame.render_widget(Paragraph::new(Line::from(left)).style(bar), area);
-    if !app.tabs.is_empty() {
-        // Tab bar in place of the tagline, herdr-style: every tab named by
-        // its focused session, then `+` for a new terminal tab. Names are
-        // dropped (numbers only) when it doesn't fit.
-        for named in [true, false] {
-            let mut spans = Vec::new();
-            let mut hits_at = Vec::new();
-            for (i, t) in app.tabs.iter().enumerate() {
-                let label = if named {
-                    let name = app
-                        .sessions
-                        .get(&t.focus)
-                        .map_or_else(|| format!("#{}", t.focus), |s| s.label.clone());
-                    format!(" {}:{} ", i + 1, truncate(theme, &name, 14))
-                } else {
-                    format!(" {} ", i + 1)
-                };
-                let style = if i == app.tab {
-                    theme.highlight()
-                } else {
-                    bar.fg(theme.muted)
-                };
-                hits_at.push((label.chars().count() as u16, SidebarHit::Tab(i)));
-                spans.push(Span::styled(label, style));
-                spans.push(Span::styled(" ", bar));
-            }
-            hits_at.push((3, SidebarHit::NewTab));
-            spans.push(Span::styled(
-                " + ",
-                bar.fg(theme.accent).add_modifier(Modifier::BOLD),
-            ));
-            spans.push(Span::styled(" ", bar));
-            let width: usize = spans.iter().map(|s| s.content.chars().count()).sum();
-            if width + 2 > room {
-                continue;
-            }
-            // Right-aligned, so the bar starts `width` cells from the edge.
-            let mut x = area.x + area.width - width as u16;
-            let mut hits = app.sidebar_hits.borrow_mut();
-            for (w, hit) in hits_at {
-                hits.push((Rect::new(x, area.y, w, 1), hit));
-                x += w + 1;
-            }
-            frame.render_widget(
-                Paragraph::new(Line::from(spans)).alignment(Alignment::Right),
-                area,
-            );
-            break;
-        }
-        return;
-    }
-    if app.config.branding.show_tagline && room > brand::TAGLINE.chars().count() + 2 {
-        let tagline = format!("{} ", brand::TAGLINE);
+    hits.push((Rect::new(x, area.y, 3, 1), SidebarHit::NewTab));
+    spans.push(Span::styled(
+        " + ",
+        Style::new().fg(theme.accent).add_modifier(Modifier::BOLD),
+    ));
+    let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+
+    let name = app
+        .shown_space()
+        .map(|w| app.workspace_name(w).to_string())
+        .unwrap_or_default();
+    let room = (area.width as usize).saturating_sub(used + 2);
+    if !name.is_empty() && room > 4 {
         frame.render_widget(
-            Paragraph::new(Span::styled(tagline, bar.fg(theme.muted))).alignment(Alignment::Right),
+            Paragraph::new(Span::styled(
+                format!("{} ", truncate(theme, &name, room - 1)),
+                muted,
+            ))
+            .alignment(Alignment::Right),
             area,
         );
     }
@@ -1383,20 +1340,20 @@ mod tests {
             controller: true,
         });
         let lines = rendered(&app, 80, 18);
-        assert!(lines[1].contains("SPACES"));
+        assert!(lines[0].contains("SPACES"));
         assert!(
-            lines[3].contains("● proj") && lines[3].contains('3'),
+            lines[2].contains("● proj") && lines[2].contains('3'),
             "{:?}",
-            lines[3]
+            lines[2]
         );
-        assert!(lines[6].contains("+ new") && lines[6].contains("menu"));
-        assert!(lines[8].contains("AGENTS"));
-        assert!(lines[10].contains("● claude") && lines[10].contains('1'));
+        assert!(lines[5].contains("+ new") && lines[5].contains("menu"));
+        assert!(lines[7].contains("AGENTS"));
+        assert!(lines[9].contains("● claude") && lines[9].contains('1'));
         // Both running sessions use /home/u/proj: flagged as sharing.
-        assert!(lines[10].contains(" !"), "{:?}", lines[10]);
-        assert!(lines[12].starts_with("▌● api"), "{:?}", lines[12]);
-        assert!(lines[13].contains("proj · claude"));
-        assert!(lines[14].contains("○ old") && !lines[14].contains('!'));
+        assert!(lines[9].contains(" !"), "{:?}", lines[9]);
+        assert!(lines[11].starts_with("▌● api"), "{:?}", lines[11]);
+        assert!(lines[12].contains("proj · claude"));
+        assert!(lines[13].contains("○ old") && !lines[13].contains('!'));
         // The agent's screen starts right of the sidebar.
         let panel: String = lines[1]
             .chars()
@@ -1432,13 +1389,13 @@ mod tests {
         // Spaces with their branch (the main checkout's) and agent count;
         // the agents listed are the selected space's.
         let lines = rendered(&app, 80, 24);
-        assert!(lines[3].contains("· web") && lines[3].contains('2'));
-        assert!(lines[4].contains("main"), "{:?}", lines[4]);
-        assert!(lines[5].contains("● api"), "selected: {:?}", lines[5]);
-        assert!(lines[6].contains("hive/codex-2"));
-        assert!(lines[7].contains("· empty"));
-        assert!(lines[14].contains("● codex") && lines[14].contains('1'));
-        assert!(lines[15].contains("wt hive/codex-2"), "{:?}", lines[15]);
+        assert!(lines[2].contains("· web") && lines[2].contains('2'));
+        assert!(lines[3].contains("main"), "{:?}", lines[3]);
+        assert!(lines[4].contains("● api"), "selected: {:?}", lines[4]);
+        assert!(lines[5].contains("hive/codex-2"));
+        assert!(lines[6].contains("· empty"));
+        assert!(lines[13].contains("● codex") && lines[13].contains('1'));
+        assert!(lines[14].contains("wt hive/codex-2"), "{:?}", lines[14]);
         assert!(!lines.iter().any(|l| l.contains("later")), "other space");
 
         // Clicking a space lists its agents, numbered from 1 for Alt+digit.
@@ -1449,11 +1406,11 @@ mod tests {
             .find(|(_, h)| *h == SidebarHit::Workspace(1))
             .map(|(r, _)| *r)
             .unwrap();
-        assert_eq!(hit.y, 3);
+        assert_eq!(hit.y, 2);
         app.cursor = Some(1);
         assert_eq!(app.space_sessions(), vec![1, 3]);
         let lines = rendered(&app, 80, 24);
-        assert!(lines[16].contains("● later") && lines[16].contains('2'));
+        assert!(lines[15].contains("● later") && lines[15].contains('2'));
     }
 
     #[test]
@@ -1485,7 +1442,7 @@ mod tests {
         let buf = term.backend().buffer();
         let text: String = buf.content().iter().map(|c| c.symbol()).collect();
         assert!(text.is_ascii(), "non-ASCII glyph drawn: {text:?}");
-        assert!(text.contains("<> HIVE") && text.contains(">* claude"));
+        assert!(text.contains("SPACES") && text.contains(">* claude"));
         assert!(
             buf.content()
                 .iter()
