@@ -1,0 +1,66 @@
+# Runs the real installers (scripts/install.sh, install.ps1) against the
+# published release on each platform, then starts a daemon and a session.
+name: installers
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+  pull_request:
+    paths: ["scripts/install.sh", "scripts/install.ps1", ".github/workflows/installers.yml"]
+  push:
+    branches: [master]
+    paths: ["scripts/install.sh", "scripts/install.ps1", ".github/workflows/installers.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  unix:
+    name: install.sh (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-15]
+    runs-on: ${{ matrix.os }}
+    env:
+      HIVE_INSTALL_DIR: ${{ github.workspace }}/bin
+      HIVE_RUNTIME_DIR: /tmp/hive-inst
+      HIVE_STATE_DIR: ${{ github.workspace }}/state
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh scripts/install.sh
+      - name: Run the installed binaries
+        run: |
+          set -eux
+          "$HIVE_INSTALL_DIR/hive" --version
+          "$HIVE_INSTALL_DIR/hive" new shell -d -- -c 'sleep 30'
+          "$HIVE_INSTALL_DIR/hive" list | grep -q running
+          "$HIVE_INSTALL_DIR/hive" daemon stop
+
+  windows:
+    name: install.ps1 (windows)
+    runs-on: windows-latest
+    env:
+      HIVE_INSTALL_DIR: ${{ github.workspace }}\bin
+      HIVE_STATE_DIR: ${{ github.workspace }}\state
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        run: ./scripts/install.ps1
+      - name: Run the installed binaries
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $hive = Join-Path $env:HIVE_INSTALL_DIR 'hive.exe'
+          & $hive --version
+          if ($LASTEXITCODE) { exit 1 }
+          & $hive new shell -d -- -NoProfile -Command 'Start-Sleep 30'
+          if ($LASTEXITCODE) { exit 1 }
+          $list = & $hive list | Out-String
+          Write-Output $list
+          if ($list -notmatch 'running') { exit 1 }
+          & $hive daemon stop
+          if ($LASTEXITCODE) { exit 1 }
+          # The installer adds the directory to the user PATH.
+          if (-not ([Environment]::GetEnvironmentVariable('Path', 'User') -split ';' -contains $env:HIVE_INSTALL_DIR)) { exit 1 }
