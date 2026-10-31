@@ -211,8 +211,33 @@ pub fn spawn_daemon(paths: &Paths) -> Result<(), ClientError> {
         // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP: no console, no Ctrl+C
         // from ours.
         cmd.creation_flags(0x0000_0008 | 0x0000_0200);
+        disinherit_std_handles();
     }
     cmd.spawn().map(drop).map_err(ClientError::Spawn)
+}
+
+/// Windows hands a child every inheritable handle, not just its stdio, so
+/// the long-lived daemon would hold our stdout open and a caller reading it
+/// (`hive list | ...`) would never see EOF. Children that inherit stdio on
+/// purpose still get it: std duplicates those handles for each spawn.
+#[cfg(windows)]
+fn disinherit_std_handles() {
+    use windows_sys::Win32::Foundation::{
+        HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, SetHandleInformation,
+    };
+    use windows_sys::Win32::System::Console::{
+        GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    };
+    for id in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+        // SAFETY: plain Win32 calls on our own std handles; failures are
+        // harmless (the handle stays as it was).
+        unsafe {
+            let h = GetStdHandle(id);
+            if !h.is_null() && h != INVALID_HANDLE_VALUE {
+                SetHandleInformation(h, HANDLE_FLAG_INHERIT, 0);
+            }
+        }
+    }
 }
 
 /// Stops a daemon we can't speak to (another protocol version) with
