@@ -132,6 +132,12 @@ pub struct Keys {
     /// `next_session = ["j", "down"]`. Replaces that command's defaults; an
     /// empty list unbinds it.
     pub bind: BTreeMap<String, KeyList>,
+    /// Command name to prefix-free key(s), active even while typing to an
+    /// agent, e.g. `next_session = "alt+right"`. Must use Ctrl/Alt.
+    pub global: BTreeMap<String, KeyList>,
+    /// Modifier that makes 1-9 jump to sessions without the leader:
+    /// `alt` (default), `ctrl+alt`, or `""` to turn it off.
+    pub jump_modifier: String,
 }
 
 impl Default for Keys {
@@ -139,6 +145,8 @@ impl Default for Keys {
         Keys {
             leader: "ctrl+space".into(),
             bind: BTreeMap::new(),
+            global: BTreeMap::new(),
+            jump_modifier: "alt".into(),
         }
     }
 }

@@ -18,8 +18,17 @@ Goal (user, 2026-10-30): "match the control and stuff of herdr better… it shou
 | Plain shell shows nothing | daemon test `a_plain_shell_has_no_agent_presence` |
 | Gate | fmt, clippy `-D warnings`, `cargo test --workspace` all green |
 
+## Step B: controls and mouse ✅
+| Criterion | Evidence |
+|---|---|
+| herdr/tmux leader defaults | keymap test `defaults_cover_the_documented_keys` (`c`, `n`, `p`, `:`, `b`) |
+| Prefix-free chords, configurable, validated | `global_chords_default_like_herdr_and_validate`; app test `global_chords_switch_without_the_leader`; tmux: `M-2` switched one → two |
+| Mouse: sidebar clicks, forwarding, wheel | app test `mouse_clicks_sessions_and_reaches_agents_that_ask_for_it`, keys test for X10/SGR encodings and mode filtering; tmux: injected SGR click on row of `one` opened it |
+| Sidebar toggle resizes the agent | `toggling_the_sidebar_gives_the_agent_the_full_width`; tmux: leader `b` → panel full width |
+| Docs | user guide key tables, global chords, mouse, agent status; `examples/config.toml` (validated by test) |
+
 ## Next
-- (B) controls + mouse; (D) panes + tabs (multi-attach protocol).
+- (D) panes + tabs (multi-attach protocol).
 - Offer truss a Hive reporter (mirror of its herdr one, using `HIVE_SESSION_ID`/`HIVE_BIN_PATH`). Ask first: user's repo.
 - Website: say the install one-liner alone is enough (Download is optional).
 

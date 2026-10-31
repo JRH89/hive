@@ -13,6 +13,9 @@ show_tagline = true
 
 [terminal]
 scrollback_lines = 10000
+# Click sessions, scroll, and pass the mouse to agents that use it.
+# Hold Shift to select text natively.
+mouse_support = true
 
 [daemon]
 auto_start = true
@@ -48,18 +51,29 @@ glyphs = "auto"
 # Pressed before every Hive command. Everything else goes to the agent.
 # Must use Ctrl or Alt (or be an F-key). Pressing it twice sends it to the agent.
 leader = "ctrl+space"
+# Alt+1-9 jump to sessions without the leader. "ctrl+alt", or "" for off.
+jump_modifier = "alt"
 
 [keys.bind]
 # Command = key or list of keys, pressed after the leader. Setting a command
 # replaces its default keys; [] unbinds it. 1-9 always jump to sessions.
 # Commands: palette, search_sessions, new_session, new_worktree_session,
 # workspaces, add_workspace, rename_workspace, next_session, prev_session,
-# sidebar, rename_session, kill_session, take_control, detach, help, settings
-palette = "p"
-search_sessions = "/"
-next_session = ["j", "down"]
-prev_session = ["k", "up"]
-new_worktree_session = "N"
+# next_workspace, prev_workspace, sidebar, toggle_sidebar, rename_session,
+# kill_session, take_control, detach, help, settings
+palette = [":", "P"]
+new_session = "c"
+next_session = ["n", "j", "down"]
+prev_session = ["p", "k", "up"]
+toggle_sidebar = "b"
+
+[keys.global]
+# Prefix-free keys, active even while typing to an agent (need Ctrl or Alt).
+# Same command names. [] frees a key for the agent.
+next_session = "alt+right"
+prev_session = "alt+left"
+next_workspace = "alt+down"
+prev_workspace = "alt+up"
 
 # Agents. Built in: every agent `hive agents --all` lists, plus shell. Add your own or
 # override a built-in. Commands run directly (no shell); args are passed as-is.

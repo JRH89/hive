@@ -62,7 +62,7 @@ Without Unicode or colour (`TERM=linux`, `NO_COLOR=1`) the same UI falls back to
  * billing             3 |
 >* migrations          4 |
    wt db/migrate . shell |
- * #4 migrations . api . db/migrate . running . 4 active        Ctrl+Space leader . then p commands
+ * #4 migrations . api . db/migrate . running . 4 active        Ctrl+Space leader . then : commands
 ```
 
 ## Install

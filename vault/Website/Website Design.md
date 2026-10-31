@@ -67,3 +67,8 @@ Production export and typecheck succeed. At 375px and desktop widths the page re
 - Added Linux/macOS/Windows selector, shell commands for Linux/macOS and PowerShell command for Windows. Proposed GitHub asset contract: `install.sh` / `install.ps1`, using documented latest/download links. Commands labeled planned/not available; installer copying absent and binary downloads disabled until assets are actually published.
 - Current Linux source steps remain in a compact native disclosure. macOS/Windows support stays explicitly planned. No packaging/installer implementation, release publication, or Rust changes.
 - Fresh reviewer checked release section: no critical/important findings, accurate unavailable states, named OS controls and internal scrolling for long commands. No final browser interaction result claimed.
+
+## Agent marks and navigation — 2026-10-30
+- Context: agent strip used font-dependent Unicode placeholders (Claude rendered as an emoji); narrow layouts hid navigation links.
+- Decision: use local Lobe Icons SVG marks for Claude, Codex, Gemini and OpenCode, with their MIT license and source attribution. Keep the restrained monochrome treatment. Fix the header at the top with matching document/anchor offsets; expose all links in a mobile menu with expanded state, Escape handling and focus-exit dismissal. Footer explicitly reads “A Codefront Labs product. Built with Rust.”
+- Consequences: no third-party asset requests. Mobile navigation uses a small client component. Browser interaction/visual QA remains unverified in this session because no browser surfaces are connected.

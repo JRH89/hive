@@ -35,7 +35,7 @@ use hive_tui::{Outcome, Start};
         hive new codex -w         launch Codex in its own git worktree\n  \
         hive new shell -d -l ops  start a shell in the background\n  \
         hive list                 see sessions, workspaces and branches\n\n\
-        In the interface, press Ctrl+Space then ? for keys, or Ctrl+Space then p for commands.\n\
+        In the interface, press Ctrl+Space then ? for keys, or Ctrl+Space then : for commands.\n\
         Config: ~/.config/hive/config.toml (see examples/config.toml)."
 )]
 struct Cli {

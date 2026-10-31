@@ -1,7 +1,8 @@
 //! Converts crossterm key events back into the byte sequences a terminal
 //! would send, so input reaches the agent as if typed directly.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
+use vt100::{MouseProtocolEncoding, MouseProtocolMode};
 
 /// xterm modifier parameter: 1 + shift + 2*alt + 4*ctrl.
 fn modifier_param(mods: KeyModifiers) -> u8 {
@@ -118,6 +119,68 @@ pub fn encode_paste(text: &str, bracketed: bool) -> Vec<u8> {
     }
 }
 
+/// Encodes a mouse event at the session's `(col, row)` (0-based) the way an
+/// xterm would, honouring the mode and encoding the agent asked for. `None`
+/// when the agent doesn't want this kind of event.
+pub fn encode_mouse(
+    kind: MouseEventKind,
+    mods: KeyModifiers,
+    (col, row): (u16, u16),
+    mode: MouseProtocolMode,
+    encoding: MouseProtocolEncoding,
+) -> Option<Vec<u8>> {
+    use MouseProtocolMode as M;
+    let button = |b: MouseButton| match b {
+        MouseButton::Left => 0,
+        MouseButton::Middle => 1,
+        MouseButton::Right => 2,
+    };
+    // (button code, is a release)
+    let (mut code, release) = match kind {
+        MouseEventKind::Down(b) => (button(b), false),
+        MouseEventKind::Up(b) if mode != M::Press => (button(b), true),
+        MouseEventKind::Drag(b) if matches!(mode, M::ButtonMotion | M::AnyMotion) => {
+            (button(b) + 32, false)
+        }
+        MouseEventKind::Moved if mode == M::AnyMotion => (3 + 32, false),
+        MouseEventKind::ScrollUp => (64, false),
+        MouseEventKind::ScrollDown => (65, false),
+        MouseEventKind::ScrollLeft => (66, false),
+        MouseEventKind::ScrollRight => (67, false),
+        _ => return None,
+    };
+    if mode == M::None {
+        return None;
+    }
+    code += 4 * mods.contains(KeyModifiers::SHIFT) as u16
+        + 8 * mods.contains(KeyModifiers::ALT) as u16
+        + 16 * mods.contains(KeyModifiers::CONTROL) as u16;
+    let (x, y) = (col + 1, row + 1);
+    Some(match encoding {
+        MouseProtocolEncoding::Sgr => {
+            format!("\x1b[<{code};{x};{y}{}", if release { 'm' } else { 'M' }).into_bytes()
+        }
+        _ => {
+            // X10 style: releases don't say which button.
+            let code = if release { 3 + (code & !3) } else { code };
+            let mut out = b"\x1b[M".to_vec();
+            let utf8 = encoding == MouseProtocolEncoding::Utf8;
+            for v in [code, x, y] {
+                let v = u32::from(v) + 32;
+                if utf8 {
+                    let c = char::from_u32(v.min(2047))?;
+                    let mut buf = [0; 4];
+                    out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+                } else {
+                    // Coordinates beyond 223 can't be expressed.
+                    out.push(u8::try_from(v).ok()?);
+                }
+            }
+            out
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,5 +270,82 @@ mod tests {
         assert_eq!(encode_paste("a\nb", false), b"a\rb");
         assert_eq!(encode_paste("a\nb", true), b"\x1b[200~a\nb\x1b[201~");
         assert_eq!(encode_paste("x\x1b[201~y", true), b"\x1b[200~xy\x1b[201~");
+    }
+
+    #[test]
+    fn mouse_events_follow_the_agents_mode_and_encoding() {
+        use MouseProtocolEncoding as E;
+        use MouseProtocolMode as M;
+        let left = MouseEventKind::Down(MouseButton::Left);
+        let none = KeyModifiers::NONE;
+        assert_eq!(
+            encode_mouse(left, none, (4, 2), M::PressRelease, E::Sgr),
+            Some(b"\x1b[<0;5;3M".to_vec())
+        );
+        assert_eq!(
+            encode_mouse(
+                MouseEventKind::Up(MouseButton::Left),
+                none,
+                (4, 2),
+                M::PressRelease,
+                E::Sgr
+            ),
+            Some(b"\x1b[<0;5;3m".to_vec())
+        );
+        assert_eq!(
+            encode_mouse(
+                MouseEventKind::ScrollDown,
+                KeyModifiers::CONTROL,
+                (0, 0),
+                M::Press,
+                E::Sgr
+            ),
+            Some(b"\x1b[<81;1;1M".to_vec())
+        );
+        assert_eq!(
+            encode_mouse(left, none, (0, 0), M::Press, E::Default),
+            Some(vec![0x1b, b'[', b'M', 32, 33, 33])
+        );
+        assert_eq!(
+            encode_mouse(
+                MouseEventKind::Up(MouseButton::Right),
+                none,
+                (0, 0),
+                M::PressRelease,
+                E::Default
+            ),
+            Some(vec![0x1b, b'[', b'M', 35, 33, 33])
+        );
+        // Not asked for.
+        assert_eq!(encode_mouse(left, none, (0, 0), M::None, E::Sgr), None);
+        assert_eq!(
+            encode_mouse(
+                MouseEventKind::Up(MouseButton::Left),
+                none,
+                (0, 0),
+                M::Press,
+                E::Sgr
+            ),
+            None
+        );
+        assert_eq!(
+            encode_mouse(MouseEventKind::Moved, none, (0, 0), M::ButtonMotion, E::Sgr),
+            None
+        );
+        assert_eq!(
+            encode_mouse(
+                MouseEventKind::Drag(MouseButton::Left),
+                none,
+                (1, 1),
+                M::ButtonMotion,
+                E::Sgr
+            ),
+            Some(b"\x1b[<32;2;2M".to_vec())
+        );
+        // Too far right for the X10 encoding.
+        assert_eq!(
+            encode_mouse(left, none, (300, 0), M::Press, E::Default),
+            None
+        );
     }
 }

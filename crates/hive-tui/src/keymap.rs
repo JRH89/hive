@@ -1,6 +1,7 @@
 //! Hive's own key bindings: the leader key and the commands that follow it.
 //!
-//! Everything else goes to the agent, so only the leader is intercepted
+//! Everything else goes to the agent, so only the leader and a few global
+//! chords (Alt+1..9 and Alt+arrows by default, like herdr) are intercepted
 //! while typing. Commands are also reachable from the palette, which is
 //! where commands without a default key live.
 
@@ -20,7 +21,10 @@ pub enum Command {
     RenameWorkspace,
     NextSession,
     PrevSession,
+    NextWorkspace,
+    PrevWorkspace,
     Sidebar,
+    ToggleSidebar,
     Rename,
     Kill,
     TakeControl,
@@ -30,7 +34,7 @@ pub enum Command {
 }
 
 impl Command {
-    pub const ALL: [Command; 16] = [
+    pub const ALL: [Command; 19] = [
         Command::Palette,
         Command::SearchSessions,
         Command::NewSession,
@@ -40,7 +44,10 @@ impl Command {
         Command::RenameWorkspace,
         Command::NextSession,
         Command::PrevSession,
+        Command::NextWorkspace,
+        Command::PrevWorkspace,
         Command::Sidebar,
+        Command::ToggleSidebar,
         Command::Rename,
         Command::Kill,
         Command::TakeControl,
@@ -61,7 +68,10 @@ impl Command {
             Command::RenameWorkspace => "rename_workspace",
             Command::NextSession => "next_session",
             Command::PrevSession => "prev_session",
+            Command::NextWorkspace => "next_workspace",
+            Command::PrevWorkspace => "prev_workspace",
             Command::Sidebar => "sidebar",
+            Command::ToggleSidebar => "toggle_sidebar",
             Command::Rename => "rename_session",
             Command::Kill => "kill_session",
             Command::TakeControl => "take_control",
@@ -83,7 +93,10 @@ impl Command {
             Command::RenameWorkspace => "Rename workspace",
             Command::NextSession => "Next session",
             Command::PrevSession => "Previous session",
+            Command::NextWorkspace => "Next workspace",
+            Command::PrevWorkspace => "Previous workspace",
             Command::Sidebar => "Focus the sidebar",
+            Command::ToggleSidebar => "Show or hide the sidebar",
             Command::Rename => "Rename session",
             Command::Kill => "Terminate session",
             Command::TakeControl => "Take input control",
@@ -93,24 +106,36 @@ impl Command {
         }
     }
 
+    /// Prefix-free chords, active even while typing to an agent.
+    fn default_global_keys(self) -> &'static [&'static str] {
+        match self {
+            Command::NextSession => &["alt+right"],
+            Command::PrevSession => &["alt+left"],
+            Command::NextWorkspace => &["alt+down"],
+            Command::PrevWorkspace => &["alt+up"],
+            _ => &[],
+        }
+    }
+
+    /// Keys after the leader. Close to herdr's and tmux's defaults.
     fn default_keys(self) -> &'static [&'static str] {
         match self {
-            Command::Palette => &["p"],
+            Command::Palette => &[":", "P"],
             Command::SearchSessions => &["/"],
-            Command::NewSession => &["n"],
+            Command::NewSession => &["c"],
             Command::Workspaces => &["w"],
-            Command::NextSession => &["j", "down"],
-            Command::PrevSession => &["k", "up"],
+            Command::NextSession => &["n", "j", "down"],
+            Command::PrevSession => &["p", "k", "up"],
+            Command::NextWorkspace | Command::PrevWorkspace => &[],
             Command::Sidebar => &["s", "tab"],
+            Command::ToggleSidebar => &["b"],
             Command::Rename => &["r"],
             Command::Kill => &["x"],
             Command::TakeControl => &["a"],
             Command::Detach => &["d", "q"],
             Command::Help => &["?"],
-            Command::NewWorktreeSession
-            | Command::AddWorkspace
-            | Command::RenameWorkspace
-            | Command::Settings => &[],
+            Command::NewWorktreeSession => &["C"],
+            Command::AddWorkspace | Command::RenameWorkspace | Command::Settings => &[],
         }
     }
 }
@@ -267,12 +292,29 @@ pub enum KeymapError {
     },
     #[error("[keys.bind] `{0}` is reserved (1-9 jump to sessions; the leader sends itself)")]
     Reserved(String),
+    #[error(
+        "[keys.global] `{0}` would swallow normal typing; global keys need Ctrl or Alt (or an F-key)"
+    )]
+    TypingGlobal(String),
+    #[error("[keys] jump_modifier `{0}` must be \"alt\", \"ctrl+alt\" or \"\" (off)")]
+    BadJumpModifier(String),
+}
+
+/// What a global chord does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Global {
+    Run(Command),
+    /// Switch to the nth session (0-based), like the leader's 1-9.
+    Jump(usize),
 }
 
 #[derive(Debug, Clone)]
 pub struct Keymap {
     pub leader: KeySpec,
     bindings: Vec<(KeySpec, Command)>,
+    globals: Vec<(KeySpec, Command)>,
+    /// Modifiers that turn 1-9 into global session jumps; empty when off.
+    jump: KeyModifiers,
 }
 
 impl Default for Keymap {
@@ -290,6 +332,46 @@ impl Keymap {
         for name in cfg.bind.keys() {
             if !Command::ALL.iter().any(|c| c.name() == name) {
                 return Err(KeymapError::UnknownCommand(name.clone()));
+            }
+        }
+        for name in cfg.global.keys() {
+            if !Command::ALL.iter().any(|c| c.name() == name) {
+                return Err(KeymapError::UnknownCommand(name.clone()));
+            }
+        }
+        let jump = match cfg.jump_modifier.to_ascii_lowercase().as_str() {
+            "" | "none" => KeyModifiers::NONE,
+            "alt" => KeyModifiers::ALT,
+            "ctrl+alt" | "alt+ctrl" => MODS,
+            _ => return Err(KeymapError::BadJumpModifier(cfg.jump_modifier.clone())),
+        };
+        let mut globals: Vec<(KeySpec, Command)> = Vec::new();
+        for cmd in Command::ALL {
+            let keys: Vec<&str> = match cfg.global.get(cmd.name()) {
+                Some(list) => list.keys(),
+                None => cmd.default_global_keys().to_vec(),
+            };
+            for k in keys {
+                let spec = KeySpec::parse(k).map_err(KeymapError::BadKey)?;
+                if spec.is_typing_key()
+                    || (spec.mods.is_empty() && !matches!(spec.code, KeyCode::F(_)))
+                {
+                    return Err(KeymapError::TypingGlobal(k.to_string()));
+                }
+                let jumps = !jump.is_empty()
+                    && spec.mods == jump
+                    && matches!(spec.code, KeyCode::Char('1'..='9'));
+                if spec == leader || jumps {
+                    return Err(KeymapError::Reserved(k.to_string()));
+                }
+                if let Some((_, other)) = globals.iter().find(|(s, _)| *s == spec) {
+                    return Err(KeymapError::Conflict {
+                        key: k.to_string(),
+                        a: other.name(),
+                        b: cmd.name(),
+                    });
+                }
+                globals.push((spec, cmd));
             }
         }
         let mut bindings: Vec<(KeySpec, Command)> = Vec::new();
@@ -314,7 +396,45 @@ impl Keymap {
                 bindings.push((spec, cmd));
             }
         }
-        Ok(Keymap { leader, bindings })
+        Ok(Keymap {
+            leader,
+            bindings,
+            globals,
+            jump,
+        })
+    }
+
+    /// The global chord `key` triggers, if any.
+    pub fn global(&self, key: &KeyEvent) -> Option<Global> {
+        if !self.jump.is_empty()
+            && let KeyCode::Char(c @ '1'..='9') = key.code
+            && key.modifiers & MODS == self.jump
+        {
+            return Some(Global::Jump(c as usize - '1' as usize));
+        }
+        self.globals
+            .iter()
+            .find(|(spec, _)| spec.matches(key))
+            .map(|(_, c)| Global::Run(*c))
+    }
+
+    pub fn global_keys_for(&self, cmd: Command) -> Vec<KeySpec> {
+        self.globals
+            .iter()
+            .filter(|(_, c)| *c == cmd)
+            .map(|(s, _)| *s)
+            .collect()
+    }
+
+    /// How global session jumps are written, e.g. `Alt+1-9`.
+    pub fn jump_hint(&self) -> Option<String> {
+        (!self.jump.is_empty()).then(|| {
+            let spec = KeySpec {
+                code: KeyCode::Char('1'),
+                mods: self.jump,
+            };
+            format!("{spec}-9")
+        })
     }
 
     pub fn is_leader(&self, key: &KeyEvent) -> bool {
@@ -384,8 +504,12 @@ mod tests {
     fn defaults_cover_the_documented_keys() {
         let km = Keymap::default();
         let cmd = |c: char| km.command(&ev(KeyCode::Char(c), KeyModifiers::NONE));
-        assert_eq!(cmd('p'), Some(Command::Palette));
+        assert_eq!(cmd(':'), Some(Command::Palette));
         assert_eq!(cmd('/'), Some(Command::SearchSessions));
+        assert_eq!(cmd('c'), Some(Command::NewSession));
+        assert_eq!(cmd('n'), Some(Command::NextSession));
+        assert_eq!(cmd('p'), Some(Command::PrevSession));
+        assert_eq!(cmd('b'), Some(Command::ToggleSidebar));
         assert_eq!(cmd('j'), Some(Command::NextSession));
         assert_eq!(cmd('q'), Some(Command::Detach));
         assert_eq!(
@@ -394,6 +518,66 @@ mod tests {
         );
         assert!(km.is_leader(&ev(KeyCode::Char(' '), KeyModifiers::CONTROL)));
         assert!(km.keys_for(Command::Settings).is_empty());
+    }
+
+    #[test]
+    fn global_chords_default_like_herdr_and_validate() {
+        let km = Keymap::default();
+        assert_eq!(
+            km.global(&ev(KeyCode::Char('3'), KeyModifiers::ALT)),
+            Some(Global::Jump(2))
+        );
+        assert_eq!(
+            km.global(&ev(KeyCode::Right, KeyModifiers::ALT)),
+            Some(Global::Run(Command::NextSession))
+        );
+        assert_eq!(
+            km.global(&ev(KeyCode::Up, KeyModifiers::ALT)),
+            Some(Global::Run(Command::PrevWorkspace))
+        );
+        assert_eq!(km.global(&ev(KeyCode::Char('3'), KeyModifiers::NONE)), None);
+        assert_eq!(km.global(&ev(KeyCode::Right, KeyModifiers::NONE)), None);
+        assert_eq!(km.jump_hint().as_deref(), Some("Alt+1-9"));
+
+        let mut keys = Keys {
+            jump_modifier: String::new(),
+            ..Keys::default()
+        };
+        keys.global
+            .insert("next_session".into(), KeyList::Many(vec![]));
+        keys.global
+            .insert("help".into(), KeyList::One("ctrl+alt+h".into()));
+        let km = Keymap::from_config(&keys).unwrap();
+        assert_eq!(km.global(&ev(KeyCode::Char('3'), KeyModifiers::ALT)), None);
+        assert_eq!(km.global(&ev(KeyCode::Right, KeyModifiers::ALT)), None);
+        assert_eq!(
+            km.global(&ev(KeyCode::Char('h'), MODS)),
+            Some(Global::Run(Command::Help))
+        );
+
+        let mut typing = Keys::default();
+        typing
+            .global
+            .insert("help".into(), KeyList::One("h".into()));
+        assert!(matches!(
+            Keymap::from_config(&typing).unwrap_err(),
+            KeymapError::TypingGlobal(_)
+        ));
+        let mut jump = Keys::default();
+        jump.global
+            .insert("help".into(), KeyList::One("alt+4".into()));
+        assert!(matches!(
+            Keymap::from_config(&jump).unwrap_err(),
+            KeymapError::Reserved(_)
+        ));
+        let bad = Keys {
+            jump_modifier: "shift".into(),
+            ..Keys::default()
+        };
+        assert!(matches!(
+            Keymap::from_config(&bad).unwrap_err(),
+            KeymapError::BadJumpModifier(_)
+        ));
     }
 
     #[test]
@@ -435,7 +619,7 @@ mod tests {
         let mut conflict = Keys::default();
         conflict
             .bind
-            .insert("help".into(), KeyList::One("p".into()));
+            .insert("help".into(), KeyList::One(":".into()));
         assert!(matches!(err(conflict), KeymapError::Conflict { .. }));
         let mut digit = Keys::default();
         digit.bind.insert("help".into(), KeyList::One("3".into()));

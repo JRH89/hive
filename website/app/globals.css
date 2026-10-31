@@ -2875,3 +2875,52 @@ h2 {
     font-size: 8px;
   }
 }
+
+/* Fixed navigation keeps every section reachable on desktop and mobile. */
+html { scroll-padding-top: 112px; }
+body { padding-top: 92px; }
+.header-shell {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 50;
+  background: rgb(17 19 24 / 96%);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--line);
+}
+.header-shell .site-header { border-bottom: 0; }
+.main-navigation { display: flex; align-items: center; gap: 32px; }
+.menu-toggle { display: none; }
+.agent-list .agent-logo { width: 28px; height: 28px; object-fit: contain; filter: brightness(0) invert(0.8); flex-shrink: 0; }
+.skip-link { z-index: 100; }
+@media (max-width: 760px) {
+  html { scroll-padding-top: 96px; }
+  body { padding-top: 80px; }
+  .menu-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 44px;
+    padding: 8px 12px;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    color: var(--text);
+    background: var(--surface);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .site-header .main-navigation {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    padding: 16px 20px 24px;
+    background: #111318;
+    border-bottom: 1px solid var(--line);
+    box-shadow: 0 18px 24px #0004;
+  }
+  .site-header .main-navigation.is-open { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
+  .site-header .main-navigation .nav-link { display: flex; align-items: center; min-height: 48px; padding: 12px; font-size: 14px; }
+  .site-header .main-navigation .nav-cta { margin-top: 8px; justify-content: space-between; min-height: 48px; }
+}

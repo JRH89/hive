@@ -1,3 +1,4 @@
+import { SiteHeader } from "@/components/site-header";
 import { Brand } from "@/components/brand";
 import { CopyCommand } from "@/components/copy-command";
 import { Icon } from "@/components/icon";
@@ -129,33 +130,7 @@ export default function Home() {
       <a href="#main" className="skip-link">
         Skip to content
       </a>
-      <header className="site-header wrapper">
-        <a className="brand-link" href="#" aria-label="Hive home">
-          <Brand />
-        </a>
-        <nav
-          aria-label="Main navigation"
-          className="flex items-center gap-7 md:gap-9"
-        >
-          <a className="nav-link" href="#features">
-            Features
-          </a>
-          <a className="nav-link" href="#how-it-works">
-            How it works
-          </a>
-          <a
-            className="nav-link nav-github"
-            href={repoUrl}
-            aria-label="Hive on GitHub"
-          >
-            <Icon name="github" size={18} />
-            <span>GitHub</span>
-          </a>
-          <a className="nav-cta" href="#get-started">
-            Get started <Arrow />
-          </a>
-        </nav>
-      </header>
+      <SiteHeader />
 
       <main id="main">
         <section className="hero wrapper" aria-labelledby="hero-title">
@@ -199,26 +174,21 @@ export default function Home() {
             BRING YOUR OWN AGENT
           </p>
           <div className="agent-list">
-            <span>
-              <i className="agent-asterisk" aria-hidden="true">
-                ✳
-              </i>{" "}
-              Claude Code
-            </span>
-            <span>
-              <i aria-hidden="true">◉</i> Codex
-            </span>
-            <span>
-              <i aria-hidden="true">✦</i> Gemini CLI
-            </span>
-            <span>
-              <i className="agent-opencode" aria-hidden="true">
-                ▣
-              </i>{" "}
-              OpenCode
-            </span>
+            {[
+              ["claude", "Claude Code"],
+              ["codex", "Codex"],
+              ["gemini", "Gemini CLI"],
+              ["opencode", "OpenCode"],
+            ].map(([agent, label]) => (
+              <span key={agent}>
+                {/* Local SVG brand assets; the adjacent text supplies the name. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img className="agent-logo" src={`/agents/${agent}.svg`} width={28} height={28} alt="" aria-hidden="true" />
+                {label}
+              </span>
+            ))}
             <span className="custom-agent">
-              <i aria-hidden="true">&gt;_</i> Your command
+              <Icon name="terminal" size={28} /> Your command
             </span>
           </div>
           <p className="agent-disclaimer">
@@ -513,7 +483,7 @@ export default function Home() {
         <a className="brand-link" href="#" aria-label="Hive home">
           <Brand />
         </a>
-        <span>Built for the terminal. Built with Rust.</span>
+        <span>A Codefront Labs product. Built with Rust.</span>
         <nav aria-label="Footer navigation">
           <a href="#get-started">Get started</a>
           <a href="#roadmap">Roadmap</a>

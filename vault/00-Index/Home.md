@@ -34,6 +34,7 @@ Knowledge base for building **Hive**, a terminal multiplexer for AI coding agent
 - [[ADR-0014 Configurable keymap of named commands]]
 - [[ADR-0015 Static musl binaries via draft GitHub releases]]
 - [[ADR-0016 Agent detection from process and herdr manifests]]
+- [[ADR-0017 herdr-style keys, global chords and mouse]]
 
 ## Ongoing
 - [[Website Design]]: approved website direction, branding, scope and acceptance

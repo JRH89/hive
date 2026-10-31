@@ -40,7 +40,7 @@ Arguments after `--` go to the agent: `hive new claude -- --model opus`.
    main · claude         │
  ● review              2 │
    wt hive/codex-2 · co… │
- ● #1 api · api · main · running · 2 active        Ctrl+Space leader · then p commands
+ ● #1 api · api · main · running · 2 active        Ctrl+Space leader · then : commands
 ```
 
 | Mark | Meaning |
@@ -55,16 +55,18 @@ Arguments after `--` go to the agent: `hive new claude -- --model opus`.
 
 The second symbol in each row is the ASCII fallback (see [Themes](#themes)).
 
-Everything you type goes to the agent, except the **leader** key (`Ctrl+Space`) followed by a command key:
+Everything you type goes to the agent, except the **leader** key (`Ctrl+Space`) followed by a command key. The defaults follow herdr and tmux:
 
 | Keys | Action |
 |---|---|
-| `p` | Command palette: search every command, session and workspace |
+| `:` or `P` | Command palette: search every command, session and workspace |
 | `/` | Search sessions by name, agent, workspace or branch |
-| `n` | New session (pick an agent; `w` in the picker toggles its own worktree) |
-| `j` / `k` | Next / previous session |
+| `c` | New session (pick an agent; `w` in the picker toggles its own worktree) |
+| `C` | New session in its own git worktree |
+| `n` / `p` (or `j` / `k`) | Next / previous session |
 | `1`–`9` | Jump to a session |
 | `s` | Focus the sidebar (`↑↓`, `enter`, `n`, `x`, `esc`) |
+| `b` | Show or hide the sidebar |
 | `w` | Workspaces |
 | `r` | Rename session |
 | `x` | Terminate session (asks first; offers to remove a clean worktree) |
@@ -72,6 +74,35 @@ Everything you type goes to the agent, except the **leader** key (`Ctrl+Space`) 
 | `d` | Detach |
 | `?` | Help, listing your current bindings |
 | `Ctrl+Space` | Send a literal Ctrl+Space to the agent |
+
+A few chords work **without the leader**, even while typing to an agent:
+
+| Keys | Action |
+|---|---|
+| `Alt+1`–`Alt+9` | Jump to a session |
+| `Alt+←` / `Alt+→` | Previous / next session |
+| `Alt+↑` / `Alt+↓` | Previous / next workspace |
+
+If an agent needs one of these, rebind or unbind it under `[keys.global]` (see [Keys](#keys)).
+
+### Mouse
+
+Click a session in the sidebar to open it, or a workspace name to open its first session. The wheel scrolls the sidebar. In the terminal panel, clicks and the wheel go to agents that use the mouse; full-screen apps without mouse support scroll with the wheel. Hold `Shift` to select text with your terminal as usual. Turn the mouse off with `[terminal] mouse_support = false`.
+
+### Agent status
+
+Hive recognises the agent running in each session, even one you started from a shell, and shows what it is doing:
+
+| Symbol | Meaning |
+|---|---|
+| `◐` / `~` | working |
+| `◆` / `!` | needs input (a permission prompt or question) |
+| `✓` / `+` | done: finished while you were looking elsewhere (clears when you open it) |
+| `●` / `*` | idle, or a session without a recognised agent |
+
+A workspace header shows its most urgent session. The terminal bell rings when a session you aren't viewing needs input or finishes (`[notifications] bell = false` turns it off). Status comes from per-agent screen rules shared with [herdr](https://herdr.dev); agents without rules show no status rather than a guess. `hive agents` lists the agents Hive knows and which are installed.
+
+Agents can report their own status: inside a session, `"$HIVE_BIN_PATH" report-agent --agent NAME --state idle|working|blocked [--message TEXT]`, and `release-agent --agent NAME` when done.
 
 ## Several windows
 
@@ -115,10 +146,16 @@ Agents start with the environment of the `hive` command that launched them, plus
 [keys]
 leader = "ctrl+a"          # needs Ctrl, Alt or an F-key
 
-[keys.bind]
-new_session = "c"
+jump_modifier = "alt"      # Alt+1-9 jump to sessions; "" turns it off
+
+[keys.bind]                # after the leader
+new_session = "n"
 add_workspace = ["W", "f2"]
 kill_session = ""          # unbind
+
+[keys.global]              # without the leader; needs Ctrl or Alt
+next_session = "ctrl+alt+right"
+prev_workspace = []        # free Alt+Up for the agent
 ```
 
 Command names are listed in `examples/config.toml`. Unbound commands remain available in the palette. Digits `1`–`9` and the leader itself are reserved.

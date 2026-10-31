@@ -9,7 +9,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
-use crate::app::{Activity, App, Focus, Link, Mode, SIDEBAR_WIDTH, Target, Tone};
+use crate::app::{Activity, App, Focus, Link, Mode, SIDEBAR_WIDTH, SidebarHit, Target, Tone};
 use crate::keymap::Command;
 use crate::theme::Theme;
 
@@ -30,6 +30,7 @@ pub fn draw(frame: &mut Frame, app: &App, theme: &Theme) {
         draw_sidebar(frame, sidebar, app, theme);
         panel
     } else {
+        app.sidebar_hits.borrow_mut().clear();
         body
     };
     let mut agent_cells = None;
@@ -285,10 +286,20 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let current = app.view.as_ref().map(|v| v.id);
     let current_ws = app.current().map(|s| s.workspace);
     let width = inner.width as usize;
+    let mut hits = app.sidebar_hits.borrow_mut();
+    hits.clear();
     let mut y = top;
     for item in &items[start..] {
         if y + item.height() > bottom {
             break;
+        }
+        match item {
+            Item::Workspace(w) => hits.push((y, SidebarHit::Workspace(*w))),
+            Item::Session { id, .. } => {
+                hits.push((y, SidebarHit::Session(*id)));
+                hits.push((y + 1, SidebarHit::Session(*id)));
+            }
+            Item::NoSessions => {}
         }
         let row = |y| Rect {
             y,
@@ -946,10 +957,31 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     }
     rows.push(("  1-9".into(), "Jump to session".into()));
     rows.push((format!("  {leader}"), format!("Send {leader} to the agent")));
+    let mut globals: Vec<(String, String)> = Command::ALL
+        .iter()
+        .filter_map(|&cmd| {
+            let keys = app.keymap.global_keys_for(cmd);
+            (!keys.is_empty()).then(|| {
+                let keys: Vec<String> = keys.iter().map(ToString::to_string).collect();
+                (format!("  {}", keys.join(" ")), cmd.title().to_string())
+            })
+        })
+        .collect();
+    if let Some(jump) = app.keymap.jump_hint() {
+        globals.insert(0, (format!("  {jump}"), "Jump to session".into()));
+    }
+    if !globals.is_empty() {
+        rows.push(("Without the leader:".into(), "[keys.global]".into()));
+        rows.extend(globals);
+    }
     rows.push((String::new(), String::new()));
     rows.push((
         "Sidebar".into(),
         "↑↓ select · enter open · n new · x kill · esc".into(),
+    ));
+    rows.push((
+        "Mouse".into(),
+        "click a session · wheel scrolls · shift+drag selects".into(),
     ));
     rows.push((
         "New-session picker".into(),

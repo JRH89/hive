@@ -10,7 +10,10 @@ mod theme;
 use std::io::{Write, stdout};
 use std::time::{Duration, Instant};
 
-use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste, EventStream};
+use crossterm::event::{
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    EventStream,
+};
 use crossterm::execute;
 use futures_util::StreamExt;
 use hive_core::client::{Client, ClientError, spawn_daemon};
@@ -44,7 +47,7 @@ struct TerminalGuard;
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
-        let _ = execute!(stdout(), DisableBracketedPaste);
+        let _ = execute!(stdout(), DisableBracketedPaste, DisableMouseCapture);
         ratatui::restore();
     }
 }
@@ -104,6 +107,10 @@ pub async fn run(
     let mut terminal = ratatui::try_init()?;
     let _guard = TerminalGuard;
     execute!(stdout(), EnableBracketedPaste)?;
+    if config.terminal.mouse_support {
+        // Most terminals still select text natively with Shift held.
+        execute!(stdout(), EnableMouseCapture)?;
+    }
 
     let size = terminal.size()?;
     let auto_start = config.daemon.auto_start;

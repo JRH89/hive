@@ -5,6 +5,7 @@
 //! Switching sessions re-attaches (see ADR-0007): the daemon holds every
 //! session's screen, so the client only ever mirrors the visible one.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU16;
 
@@ -13,7 +14,9 @@ const OBSERVING: &str =
 const CONTROL_LOST: &str = "Another client took control. Leader then a to take it back.";
 const CONTROL_FREE: &str = "Control is free. Leader then a to take it.";
 
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use hive_core::config::Config;
 use hive_core::launch;
 use hive_protocol::{
@@ -21,7 +24,7 @@ use hive_protocol::{
     SessionState, TermSize, WorkspaceId, WorkspaceInfo,
 };
 
-use crate::keymap::{Command, Keymap};
+use crate::keymap::{Command, Global, Keymap};
 use crate::keys;
 
 /// Sidebar width including its 1-column border.
@@ -164,6 +167,16 @@ fn agent_status(s: &SessionInfo) -> Option<AgentStatus> {
     s.presence.as_ref().map(|p| p.status)
 }
 
+/// What a sidebar row shows, for mouse clicks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SidebarHit {
+    Session(SessionId),
+    Workspace(WorkspaceId),
+}
+
+/// Lines a wheel notch scrolls in a full-screen app without mouse support.
+const WHEEL_LINES: usize = 3;
+
 pub struct View {
     pub id: SessionId,
     pub parser: vt100::Parser,
@@ -186,6 +199,10 @@ pub struct App {
     pub agents: Vec<AgentChoice>,
     pub panel: TermSize,
     pub sidebar_visible: bool,
+    /// Hidden by the user (toggle_sidebar), regardless of width.
+    pub sidebar_hidden: bool,
+    /// Whole terminal, `(cols, rows)`.
+    terminal: (u16, u16),
     pub status: Option<(Tone, String)>,
     pub exit: Option<Outcome>,
     pub link: Link,
@@ -203,6 +220,9 @@ pub struct App {
     pub done: BTreeSet<SessionId>,
     /// Ring the terminal bell after this update.
     pub bell: bool,
+    /// Screen rows of sidebar entries as last drawn (render fills this), so
+    /// clicks hit what the user saw.
+    pub sidebar_hits: RefCell<Vec<(u16, SidebarHit)>>,
 }
 
 /// Result of a key in a one-line text prompt.
@@ -293,6 +313,8 @@ impl App {
             agents: Vec::new(),
             panel: TermSize::DEFAULT,
             sidebar_visible: false,
+            sidebar_hidden: false,
+            terminal,
             status: None,
             exit: None,
             link: Link::Connected,
@@ -303,6 +325,7 @@ impl App {
             remove_worktree_after: BTreeMap::new(),
             done: BTreeSet::new(),
             bell: false,
+            sidebar_hits: RefCell::new(Vec::new()),
         };
         app.set_terminal_size(terminal);
         if let Some(e) = key_error {
@@ -317,7 +340,8 @@ impl App {
 
     /// Recomputes layout for a `(cols, rows)` terminal.
     fn set_terminal_size(&mut self, (cols, rows): (u16, u16)) {
-        self.sidebar_visible = cols >= MIN_COLS_FOR_SIDEBAR;
+        self.terminal = (cols, rows);
+        self.sidebar_visible = cols >= MIN_COLS_FOR_SIDEBAR && !self.sidebar_hidden;
         let sidebar = if self.sidebar_visible {
             SIDEBAR_WIDTH
         } else {
@@ -715,6 +739,7 @@ impl App {
                     _ => Vec::new(),
                 }
             }
+            Event::Mouse(m) => self.on_mouse(m),
             Event::Resize(cols, rows) => {
                 self.set_terminal_size((cols, rows));
                 match &self.view {
@@ -724,6 +749,96 @@ impl App {
             }
             _ => Vec::new(),
         }
+    }
+
+    /// Top-left of the terminal panel on screen.
+    fn panel_origin(&self) -> (u16, u16) {
+        let x = if self.sidebar_visible {
+            SIDEBAR_WIDTH
+        } else {
+            0
+        };
+        (x, self.header_rows())
+    }
+
+    fn on_mouse(&mut self, m: MouseEvent) -> Vec<ClientMessage> {
+        if self.link != Link::Connected || self.mode != Mode::Normal {
+            return Vec::new();
+        }
+        let (px, py) = self.panel_origin();
+        if self.sidebar_visible && m.column < px && m.row >= py {
+            let hit = self
+                .sidebar_hits
+                .borrow()
+                .iter()
+                .find(|(y, _)| *y == m.row)
+                .map(|(_, h)| *h);
+            return match (m.kind, hit) {
+                (MouseEventKind::Down(MouseButton::Left), Some(SidebarHit::Session(id))) => {
+                    self.switch_to(id)
+                }
+                (MouseEventKind::Down(MouseButton::Left), Some(SidebarHit::Workspace(w))) => {
+                    match self.groups().into_iter().find(|(g, _)| *g == w) {
+                        Some((_, ids)) if !ids.is_empty() => self.switch_to(ids[0]),
+                        _ => Vec::new(),
+                    }
+                }
+                (MouseEventKind::ScrollDown, _) => {
+                    self.move_cursor(1);
+                    Vec::new()
+                }
+                (MouseEventKind::ScrollUp, _) => {
+                    self.move_cursor(-1);
+                    Vec::new()
+                }
+                _ => Vec::new(),
+            };
+        }
+        let inside = m.column >= px
+            && m.row >= py
+            && m.column - px < self.panel.cols
+            && m.row - py < self.panel.rows;
+        if !inside {
+            return Vec::new();
+        }
+        if matches!(m.kind, MouseEventKind::Down(_)) && self.view.is_some() {
+            self.focus = Focus::Terminal;
+        }
+        if !self.can_type() {
+            return Vec::new();
+        }
+        let Some(screen) = self.view.as_ref().map(|v| v.parser.screen()) else {
+            return Vec::new();
+        };
+        let pos = (m.column - px, m.row - py);
+        let mode = screen.mouse_protocol_mode();
+        if mode != vt100::MouseProtocolMode::None {
+            return keys::encode_mouse(
+                m.kind,
+                m.modifiers,
+                pos,
+                mode,
+                screen.mouse_protocol_encoding(),
+            )
+            .map(|b| vec![ClientMessage::Input(b)])
+            .unwrap_or_default();
+        }
+        // Like xterm's alternate-scroll mode: a full-screen app without mouse
+        // support scrolls with the arrow keys.
+        let arrow = match m.kind {
+            MouseEventKind::ScrollUp => KeyCode::Up,
+            MouseEventKind::ScrollDown => KeyCode::Down,
+            _ => return Vec::new(),
+        };
+        if !screen.alternate_screen() {
+            return Vec::new();
+        }
+        keys::encode(
+            &KeyEvent::new(arrow, KeyModifiers::NONE),
+            screen.application_cursor(),
+        )
+        .map(|b| vec![ClientMessage::Input(b.repeat(WHEEL_LINES))])
+        .unwrap_or_default()
     }
 
     /// Whether keystrokes should go to the attached agent.
@@ -788,6 +903,13 @@ impl App {
             Mode::Normal if self.keymap.is_leader(&key) => {
                 self.mode = Mode::Leader;
                 Vec::new()
+            }
+            Mode::Normal if self.link == Link::Connected && self.keymap.global(&key).is_some() => {
+                match self.keymap.global(&key) {
+                    Some(Global::Jump(n)) => self.switch_nth(n),
+                    Some(Global::Run(cmd)) => self.run(cmd),
+                    None => Vec::new(),
+                }
             }
             Mode::Normal if self.can_type() => {
                 let app_cursor = self
@@ -901,6 +1023,18 @@ impl App {
             }
             Command::NextSession => return self.switch_relative(1),
             Command::PrevSession => return self.switch_relative(-1),
+            Command::NextWorkspace => return self.switch_workspace(1),
+            Command::PrevWorkspace => return self.switch_workspace(-1),
+            Command::ToggleSidebar => {
+                self.sidebar_hidden = !self.sidebar_hidden;
+                if self.sidebar_hidden && self.focus == Focus::Sidebar && self.view.is_some() {
+                    self.focus = Focus::Terminal;
+                }
+                self.set_terminal_size(self.terminal);
+                if self.view.as_ref().is_some_and(|v| v.controller) {
+                    return vec![ClientMessage::Resize(self.panel)];
+                }
+            }
             Command::Sidebar => {
                 self.focus = Focus::Sidebar;
                 self.cursor = current.or(self.cursor);
@@ -1097,6 +1231,28 @@ impl App {
             Some(&id) => self.switch_to(id),
             None => Vec::new(),
         }
+    }
+
+    /// First live session of the next/previous workspace that has one,
+    /// wrapping around.
+    fn switch_workspace(&mut self, delta: isize) -> Vec<ClientMessage> {
+        let groups: Vec<SessionId> = self
+            .groups()
+            .into_iter()
+            .filter_map(|(_, ids)| ids.into_iter().find(|&id| !self.is_lost(id)))
+            .collect();
+        if groups.is_empty() {
+            return Vec::new();
+        }
+        let current_ws = self.current().map(|s| s.workspace);
+        let idx = self
+            .groups()
+            .into_iter()
+            .filter(|(_, ids)| ids.iter().any(|&id| !self.is_lost(id)))
+            .position(|(w, _)| Some(w) == current_ws)
+            .map_or(0, |i| i as isize + delta);
+        let next = idx.rem_euclid(groups.len() as isize) as usize;
+        self.switch_to(groups[next])
     }
 
     /// Next/previous attachable session, wrapping around.
@@ -1533,6 +1689,96 @@ mod tests {
             }),
             ..info(id, SessionState::Running)
         }
+    }
+
+    fn mouse(kind: MouseEventKind, column: u16, row: u16) -> Event {
+        Event::Mouse(MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        })
+    }
+
+    #[test]
+    fn mouse_clicks_sessions_and_reaches_agents_that_ask_for_it() {
+        let mut app = app();
+        let (px, py) = app.panel_origin();
+        app.sidebar_hits
+            .borrow_mut()
+            .extend([(3, SidebarHit::Session(2)), (4, SidebarHit::Session(2))]);
+        let click = MouseEventKind::Down(MouseButton::Left);
+        assert_eq!(
+            app.on_terminal_event(mouse(click, 2, 4)),
+            attach_msg(&app, 2)
+        );
+
+        // No mouse mode and the primary screen: wheel does nothing.
+        attached(&mut app, 2);
+        assert!(
+            app.on_terminal_event(mouse(MouseEventKind::ScrollUp, px + 1, py))
+                .is_empty()
+        );
+        // A full-screen app without mouse support scrolls with arrows.
+        app.on_server(ServerMessage::Output {
+            session: 2,
+            data: b"\x1b[?1049h".to_vec(),
+        });
+        assert_eq!(
+            app.on_terminal_event(mouse(MouseEventKind::ScrollDown, px + 1, py)),
+            vec![ClientMessage::Input(b"\x1b[B\x1b[B\x1b[B".to_vec())]
+        );
+        // An app that enables SGR mouse gets panel-relative coordinates.
+        app.on_server(ServerMessage::Output {
+            session: 2,
+            data: b"\x1b[?1000h\x1b[?1006h".to_vec(),
+        });
+        assert_eq!(
+            app.on_terminal_event(mouse(click, px + 4, py + 2)),
+            vec![ClientMessage::Input(b"\x1b[<0;5;3M".to_vec())]
+        );
+        // The status bar is outside the panel.
+        assert!(
+            app.on_terminal_event(mouse(click, px + 4, py + app.panel.rows))
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn global_chords_switch_without_the_leader() {
+        let mut app = app();
+        let alt = |code| key(code, KeyModifiers::ALT);
+        assert_eq!(
+            app.on_terminal_event(alt(KeyCode::Char('3'))),
+            attach_msg(&app, 3)
+        );
+        attached(&mut app, 3);
+        assert_eq!(
+            app.on_terminal_event(alt(KeyCode::Right)),
+            attach_msg(&app, 1)
+        );
+        // Plain digits still reach the agent.
+        attached(&mut app, 1);
+        assert_eq!(
+            app.on_terminal_event(ch('3')),
+            vec![ClientMessage::Input(b"3".to_vec())]
+        );
+    }
+
+    #[test]
+    fn toggling_the_sidebar_gives_the_agent_the_full_width() {
+        let mut app = app();
+        assert!(app.sidebar_visible);
+        app.on_terminal_event(leader());
+        let out = app.on_terminal_event(ch('b'));
+        assert!(!app.sidebar_visible);
+        assert_eq!(app.panel.cols, 100);
+        assert_eq!(out, vec![ClientMessage::Resize(app.panel)]);
+        app.on_terminal_event(Event::Resize(120, 30));
+        assert!(!app.sidebar_visible, "stays hidden across resizes");
+        app.on_terminal_event(leader());
+        app.on_terminal_event(ch('b'));
+        assert_eq!(app.panel.cols, 120 - SIDEBAR_WIDTH);
     }
 
     #[test]
@@ -2075,7 +2321,7 @@ mod tests {
     fn new_session_targets_the_active_workspace_and_can_use_a_worktree() {
         let mut app = app_with_workspaces();
         app.on_terminal_event(leader());
-        app.on_terminal_event(ch('n'));
+        app.on_terminal_event(ch('c'));
         assert!(matches!(
             app.mode,
             Mode::NewSession {
@@ -2284,7 +2530,7 @@ mod tests {
     fn palette_finds_and_runs_commands() {
         let mut app = app_with_workspaces();
         app.on_terminal_event(leader());
-        app.on_terminal_event(ch('p'));
+        app.on_terminal_event(ch(':'));
         assert!(matches!(
             app.mode,
             Mode::Palette {
