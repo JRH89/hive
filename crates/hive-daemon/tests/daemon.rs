@@ -1005,6 +1005,54 @@ async fn sessions_follow_cd_into_a_repository() {
     assert!(w.is_repo);
 }
 
+/// Presses enter in `id` and waits until the daemon reports it in `dir`.
+async fn enter_and_follow(c: &mut Client, id: u64, dir: &Path) -> SessionInfo {
+    c.send(&ClientMessage::Input {
+        session: id,
+        data: b"\n".to_vec(),
+    })
+    .await
+    .unwrap();
+    timeout(
+        T,
+        c.recv_until(|m| match m {
+            ServerMessage::SessionUpdated(s) if s.id == id && Path::new(&s.cwd) == dir => Some(s),
+            _ => None,
+        }),
+    )
+    .await
+    .expect("session followed the cd")
+    .unwrap()
+}
+
+#[tokio::test]
+async fn sessions_follow_cd_into_a_plain_folder() {
+    let h = Harness::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    // Canonical: the daemon reads the cwd from the OS (macOS /private/var).
+    let start = tmp.path().canonicalize().unwrap().join("start");
+    let projects = tmp.path().canonicalize().unwrap().join("projects");
+    std::fs::create_dir_all(projects.join("notes")).unwrap();
+    std::fs::create_dir_all(&start).unwrap();
+    let mut c = h.client().await;
+    let script = format!(
+        "read x; cd '{}'; echo one; read x; cd notes; echo two; sleep 60",
+        projects.display()
+    );
+    let info = create_info(&mut c, sh_in(&script, &start)).await;
+    attach(&mut c, info.id, TermSize::DEFAULT).await;
+    // A folder outside every space becomes one.
+    let first = enter_and_follow(&mut c, info.id, &projects).await;
+    assert_ne!(first.workspace, info.workspace);
+    let ws = workspaces(&mut c).await;
+    let w = ws.iter().find(|w| w.id == first.workspace).unwrap();
+    assert_eq!(Path::new(&w.root), projects);
+    assert!(!w.is_repo);
+    // A plain subfolder stays in it.
+    let second = enter_and_follow(&mut c, info.id, &projects.join("notes")).await;
+    assert_eq!(second.workspace, first.workspace);
+}
+
 #[tokio::test]
 async fn worktree_sessions_are_isolated_and_cleanup_is_safe() {
     let h = Harness::start().await;

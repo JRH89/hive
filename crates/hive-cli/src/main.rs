@@ -336,11 +336,15 @@ async fn run(cli: Cli, paths: Paths) -> anyhow::Result<()> {
     if let Some(Command::Update { tag }) = &cli.command {
         return update(tag.as_deref());
     }
-    let config = Config::load(&paths.config_file)?;
     let connect = |auto_start: bool| {
         let paths = paths.clone();
         async move { Client::connect_or_start(&paths, "hive", auto_start).await }
     };
+    if let Some(Command::Daemon { action }) = cli.command {
+        // Needs no config, so a broken one can't keep the daemon running.
+        return daemon(action, &paths, connect).await;
+    }
+    let config = Config::load(&paths.config_file)?;
     let auto = config.daemon.auto_start;
 
     match cli.command {
@@ -474,10 +478,9 @@ async fn run(cli: Cli, paths: Paths) -> anyhow::Result<()> {
             let mut client = connect(false).await.or_else(not_running)?;
             request(&mut client, ClientMessage::ReleaseAgent { session, agent }).await
         }
-        Some(Command::Doctor | Command::Update { .. }) => {
+        Some(Command::Doctor | Command::Update { .. } | Command::Daemon { .. }) => {
             unreachable!("handled before loading the config")
         }
-        Some(Command::Daemon { action }) => daemon(action, &paths, connect).await,
     }
 }
 

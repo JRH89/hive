@@ -131,6 +131,8 @@ fn mistakes_fail_with_a_message_and_nonzero_exit() {
     assert!(env.fails(&[]).contains("invalid config"));
     std::fs::write(env.tmp.path().join("config.toml"), "not toml [").unwrap();
     assert!(!env.fails(&["list"]).is_empty());
+    // Stopping never needs the config (Drop relies on it too).
+    assert!(env.ok(&["daemon", "stop"]).contains("hived stopped"));
 }
 
 #[test]
