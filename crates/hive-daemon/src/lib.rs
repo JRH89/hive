@@ -154,8 +154,7 @@ impl Daemon {
     fn ensure_workspace(&self, path: &Path) -> WorkspaceInfo {
         let key = hive_workspace::workspace_key(path);
         let mut workspaces = self.workspaces.lock().unwrap();
-        let roots = workspaces.values().map(|w| (w.id, Path::new(&w.root)));
-        if let Some(id) = hive_workspace::best_match(roots, &key) {
+        if let Some(id) = containing(&workspaces, &key) {
             return workspaces[&id].clone();
         }
         self.insert_workspace(&mut workspaces, &key, None)
@@ -409,8 +408,6 @@ impl Daemon {
         Ok(())
     }
 
-    /// Republishes sessions whose branch changed (e.g. the agent ran
-    /// `git switch`).
     /// Follows each session's process to where it is now (`cd`) and
     /// re-reads branches; republishes what changed.
     fn refresh_places(&self) {
@@ -418,7 +415,7 @@ impl Daemon {
         for s in live {
             let mut changed = false;
             if let Some(cwd) = s.live_cwd().filter(|c| *c != s.cwd()) {
-                let workspace = self.space_for(&cwd, s.workspace());
+                let workspace = self.space_for(&cwd);
                 if workspace != s.workspace() {
                     tracing::info!(session = s.id, cwd = %cwd.display(), workspace, "session moved");
                 }
@@ -432,26 +429,30 @@ impl Daemon {
     }
 
     /// The workspace a session that moved to `cwd` belongs to: its
-    /// repository's (created if new, so spaces are the repos in use), else
-    /// the deepest workspace containing it, else where it was.
-    fn space_for(&self, cwd: &Path, current: WorkspaceId) -> WorkspaceId {
+    /// repository's, else the deepest workspace containing it, else a new
+    /// one rooted at `cwd`, so spaces are the folders in use. The home
+    /// directory's workspace only takes home itself: `cd ~/Work` gets a
+    /// `Work` space.
+    fn space_for(&self, cwd: &Path) -> WorkspaceId {
         let mut workspaces = self.workspaces.lock().unwrap();
-        match hive_workspace::discover(cwd) {
-            Some(repo) => match workspaces
-                .values()
-                .find(|w| Path::new(&w.root) == repo.main_root)
-            {
-                Some(w) => w.id,
-                None => {
-                    self.insert_workspace(&mut workspaces, &repo.main_root, None)
-                        .id
+        let root = match hive_workspace::discover(cwd) {
+            Some(repo) => {
+                let found = workspaces
+                    .values()
+                    .find(|w| Path::new(&w.root) == repo.main_root);
+                if let Some(w) = found {
+                    return w.id;
                 }
-            },
-            None => {
-                let roots = workspaces.values().map(|w| (w.id, Path::new(&w.root)));
-                hive_workspace::best_match(roots, cwd).unwrap_or(current)
+                repo.main_root
             }
-        }
+            None => {
+                if let Some(id) = containing(&workspaces, cwd) {
+                    return id;
+                }
+                cwd.to_path_buf()
+            }
+        };
+        self.insert_workspace(&mut workspaces, &root, None).id
     }
 
     /// Republishes sessions whose agent presence or status changed.
@@ -579,6 +580,23 @@ async fn agent_loop(daemon: Arc<Daemon>) {
             tracing::error!("agent detection panicked");
         }
     }
+}
+
+/// The workspace with the deepest root containing `path`. The home
+/// directory's workspace only takes home itself, so a folder in home gets
+/// its own space instead of joining one for everything.
+fn containing(
+    workspaces: &BTreeMap<WorkspaceId, WorkspaceInfo>,
+    path: &Path,
+) -> Option<WorkspaceId> {
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from);
+    let roots = workspaces
+        .values()
+        .map(|w| (w.id, Path::new(&w.root)))
+        .filter(|(_, root)| home.as_deref() != Some(*root) || *root == path);
+    hive_workspace::best_match(roots, path)
 }
 
 /// Trimmed and capped; `None` when empty.

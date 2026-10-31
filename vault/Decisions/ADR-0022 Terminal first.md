@@ -28,3 +28,6 @@ Terminals start in the focused session's cwd if it's in the selected space, else
 
 ## Amendment (2026-10-31): worktree terminals
 - Agents don't isolate themselves; isolation is a worktree. Leader `C` = `Command::NewWorktreeTerminal`: a terminal tab in a new worktree (`NewWorktree { branch: None }` → `hive/shell-<id>`), same space (the worktree's repo main root). The agent-in-worktree picker (`NewWorktreeSession`) keeps working from the palette, unbound.
+
+## Amendment (2026-10-31): a space for every folder
+- Outside git, a moved (or new) session joins the deepest workspace containing its cwd, else a new workspace rooted at the cwd. The home directory's workspace matches only home itself (`containing()` in `hive-daemon`), so `cd ~/Work` makes a `Work` space instead of staying in `~`'s. User report: two terminals in `~/Work` (a folder of repos) both stayed in the home space.

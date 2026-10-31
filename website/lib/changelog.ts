@@ -10,6 +10,16 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    version: "0.4.5",
+    date: "2026-10-31T13:30:00-07:00",
+    title: "A space for every folder",
+    changes: [
+      "cd into any folder, not just a git repository, and the terminal moves to a space for it (e.g. ~/Work). Your home directory's space only holds terminals in home itself.",
+      "A terminal started inside a folder gets that folder's space instead of joining the home space.",
+      "hive daemon stop works even when config.toml has a mistake.",
+    ],
+  },
+  {
     version: "0.4.4",
     date: "2026-10-31T12:28:25-07:00",
     title: "Worktree terminals",
