@@ -1,6 +1,8 @@
 # HIVE
 ## One terminal. Many agents.
 
+Codex contributors: also read [CODEX.md](CODEX.md) for repository orientation, concurrent-agent boundaries, verification, and required Obsidian updates. The specification below remains authoritative.
+
 ### Project specification, architecture, branding, and implementation plan
 
 **Project:** Hive  
