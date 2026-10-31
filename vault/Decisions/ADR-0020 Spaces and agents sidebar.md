@@ -22,3 +22,6 @@ date: 2026-10-30
 `hive update` runs the release installer into the running binary's directory, so upgrading is one command.
 
 **Consequences:** The sidebar shows one space's agents at a time, so leader `n`/`p` still walk every session in order. Supersedes the grouped list from Phase 2.
+
+## Amendment (2026-10-31): AGENTS lists every agent
+- User: "the agent panel should list all running agents… it shouldn't be space scoped". AGENTS is now `App::agents()`: every agent (`is_agent`) of every space in sidebar order, row 2 = `status · space · branch`. Alt+1-9 jump through it (switching space). `space_sessions()` remains for Alt+←/→ with a single tab.

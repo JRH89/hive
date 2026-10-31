@@ -52,7 +52,7 @@ Arguments after `--` go to the agent: `hive new claude -- --model opus`.
  ● #1 api · api · main · running · 2 active        Ctrl+Space leader · then : commands
 ```
 
-The sidebar lists your **spaces** (one per repository, with its branch and agent count) and, below them, the **agents** of the selected space. Click a space to switch to it, an agent to open it, **+ new** to open a new space (a terminal in your home folder; `cd` to where you want to work), and **menu** for the command palette.
+The sidebar lists your **spaces** (one per repository, with its branch and agent count) and, below them, **every agent** in every space, grouped by space, each with the space it runs in, so you see which one needs you wherever you are. Click a space to switch to it, an agent to open it, **+ new** to open a new space (a terminal in your home folder; `cd` to where you want to work), and **menu** for the command palette.
 
 | Mark | Meaning |
 |---|---|
@@ -100,7 +100,7 @@ A few chords work **without the leader**, even while typing to an agent:
 |---|---|
 | `Alt+↑` / `Alt+↓` | Previous / next space |
 | `Alt+←` / `Alt+→` | Previous / next tab; with one tab, the previous / next agent in the space |
-| `Alt+1`–`Alt+9` | Jump to an agent of the space |
+| `Alt+1`–`Alt+9` | Jump to an agent (numbered in the AGENTS list; switches space if needed) |
 
 If an agent needs one of these, rebind or unbind it under `[keys.global]` (see [Keys](#keys)).
 

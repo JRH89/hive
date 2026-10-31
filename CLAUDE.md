@@ -72,7 +72,7 @@ Phases are in AGENTS.md §16. Status is in `vault/00-Index/Status.md`. Don't sta
 - Agent status comes only from `hive-agents` manifests (herdr-compatible rules) or the agent's own `hive report-agent`. Agents without rules show `Unknown`, never a guess (ADR-0016). Detection runs in the daemon, not the TUI.
 - The UI must work without Nerd Fonts, in 256/16-colour terminals and with `NO_COLOR`. Take colours and glyphs from `Theme`/`Glyphs`, never hard-code them. In ASCII mode `render::asciify` folds Hive's own cells but leaves the agent's output untouched. Amber is for accents only.
 - New user actions get a `Command` variant (ADR-0014), not a hard-coded key.
-- The sidebar shows spaces, then the selected space's agents (`App::shown_space`, ADR-0020). Clickable areas are rectangles render records in `sidebar_hits` each frame; add new clickable UI there.
+- The sidebar shows spaces, then every agent of every space (`App::agents`; ADR-0020 amended). `App::shown_space` is the selected space. Clickable areas are rectangles render records in `sidebar_hits` each frame; add new clickable UI there.
 - Optional integrations go under `[integrations.*]`, default off, and their commands are hidden via `app::hidden_commands` while disabled (ADR-0019). Build them from sessions and panes, not new daemon machinery.
 - UI text uses plain terms (session, workspace, agent). Bee metaphors are for branding only.
 - Integration tests use real PTYs with `/bin/sh -c` scripts. Wait for an output marker before sending signals or input, to avoid startup races.

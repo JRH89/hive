@@ -757,8 +757,16 @@ impl App {
             .or_else(|| self.groups().first().map(|(w, _)| *w))
     }
 
-    /// The agents listed under the shown space, numbered 1-9 for jumps.
-    /// Plain terminals live in tabs only, like herdr.
+    /// The sidebar's AGENTS: every agent in every space, grouped by space,
+    /// numbered 1-9 for Alt+digit. Plain terminals live in tabs only.
+    pub fn agents(&self) -> Vec<SessionId> {
+        self.order()
+            .into_iter()
+            .filter(|id| self.sessions.get(id).is_some_and(is_agent))
+            .collect()
+    }
+
+    /// The agents of the shown space, for Alt+←/→ with a single tab.
     pub fn space_sessions(&self) -> Vec<SessionId> {
         let space = self.shown_space();
         self.groups()
@@ -2022,7 +2030,7 @@ impl App {
     }
 
     fn switch_nth(&mut self, n: usize) -> Vec<ClientMessage> {
-        match self.space_sessions().get(n) {
+        match self.agents().get(n) {
             Some(&id) => self.switch_to(id),
             None => Vec::new(),
         }
@@ -3294,7 +3302,13 @@ mod tests {
             KeyCode::Char('1'),
             KeyModifiers::ALT,
         )));
-        assert_eq!(app.focused(), Some(3), "Alt+1 is this space's first agent");
+        assert_eq!(app.focused(), Some(1), "Alt+1 is the first agent of all");
+        assert_eq!(app.shown_space(), Some(1), "and shows its space");
+        app.on_terminal_event(Event::Key(KeyEvent::new(
+            KeyCode::Char('3'),
+            KeyModifiers::ALT,
+        )));
+        assert_eq!(app.focused(), Some(3), "Alt+3 reaches another space");
         let alt_ = |code| key(code, KeyModifiers::ALT);
         app.on_terminal_event(alt_(KeyCode::Up));
         assert_eq!(app.space_sessions(), vec![1, 2]);

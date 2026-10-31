@@ -11,7 +11,7 @@ Run Claude Code, Codex, Gemini CLI, OpenCode or any shell side by side, see at a
 ## Features
 - **Terminal first.** `hive` opens a terminal. Type `claude`, `codex`, ... to start an agent in it, or `cd` anywhere first. The tab row's `+` (or `Ctrl+Space t`) adds a tab; the sidebar's `+ new` (or `Ctrl+Space S`) starts a new space
 - **Spaces follow you.** Every repository or folder you work in becomes a space in the sidebar; `cd` somewhere else and the tab moves there. Each space keeps its own tabs
-- **Live agent status.** Working `◐`, needs input `◆`, done `●`, read from the agent's screen (herdr-compatible rules) or reported by the agent itself
+- **Live agent status.** Working `◐`, needs input `◆`, done `●`, read from the agent's screen (herdr-compatible rules) or reported by the agent itself. The AGENTS list shows every agent in every space, so you see which one needs you wherever you are
 - **Splits and tabs.** `Ctrl+Space v` / `-` split, `t` opens a tab, `Alt+←/→` switches tabs, `Alt+↑/↓` switches spaces
 - **Worktrees on demand.** `Ctrl+Space C` opens a terminal in its own git worktree and branch, so two agents never edit the same files. Hive warns when two agents share a directory
 - **Nothing dies with the window.** Agents live in a background daemon (`hived`). Detach, close the laptop lid or the terminal, crash the UI: reattach and get the exact screen back
@@ -24,6 +24,25 @@ Run Claude Code, Codex, Gemini CLI, OpenCode or any shell side by side, see at a
 <tr><td><img src="assets/screenshots/worktree.png" alt="A Codex terminal in its own worktree asking for approval"></td><td><img src="assets/screenshots/palette.png" alt="The command palette"></td></tr>
 <tr><td align="center">Codex in its own worktree (<code>wt</code>), waiting for approval</td><td align="center">The command palette (<code>Ctrl+Space :</code>)</td></tr>
 </table>
+
+## Integrations
+Optional, off by default and invisible until enabled. Each opens as an ordinary session beside your agents.
+
+| Integration | Key | What it does |
+|---|---|---|
+| **Obsidian** | `Ctrl+Space N` | Opens the repository's Obsidian vault beside your agents. With `journal = true`, appends "claude finished in #3 api (main)" to today's daily note: a log of what your agents did |
+| **Review** | `Ctrl+Space G` | lazygit, tig or `git diff` in a split, in the agent's directory or worktree |
+| **GitHub** | `Ctrl+Space H` | `gh pr checks --watch` for the session's branch |
+| **Tasks** | `Ctrl+Space T` | Pick a just/npm/make/cargo task and run it beside the agent |
+| **Desktop notifications** | | A notification when an agent you aren't viewing finishes or needs input |
+
+```toml
+[integrations.obsidian]
+enabled = true
+journal = true
+```
+
+All options are in the [user guide](docs/user-guide.md#notes-obsidian-optional) and [`examples/config.toml`](examples/config.toml).
 
 ## Install
 Linux (x86_64 and aarch64), macOS (Apple silicon and Intel) and Windows 10+ (x86_64); CI tests all three. On Windows, agent status comes only from agents that report it (`hive report-agent`).
@@ -40,7 +59,7 @@ curl -fsSL https://github.com/jrh89/hive/releases/latest/download/install.sh | s
 irm https://github.com/jrh89/hive/releases/latest/download/install.ps1 | iex
 ```
 
-The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.4.6` to pin a version. Later, `hive update` upgrades in place (then `hive daemon stop` to restart the daemon on the new version; this ends running sessions).
+The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.4.7` to pin a version. Later, `hive update` upgrades in place (then `hive daemon stop` to restart the daemon on the new version; this ends running sessions).
 
 **From source** (Rust ≥ 1.89):
 
@@ -117,7 +136,7 @@ The leader is **Ctrl+Space**. Everything else goes to the terminal.
 |---|---|
 | `Alt+←` / `Alt+→` | Previous / next tab in this space (no leader needed) |
 | `Alt+↑` / `Alt+↓` | Previous / next space (no leader needed) |
-| `Alt+1`–`9` | Jump to an agent in this space |
+| `Alt+1`–`9` | Jump to an agent (numbered in the AGENTS list) |
 | `Ctrl+Space :` | Command palette: every command, session and space |
 | `Ctrl+Space c` / `t` | New terminal / new tab in this space |
 | `Ctrl+Space S` | New space (same as `+ new` in the sidebar) |
