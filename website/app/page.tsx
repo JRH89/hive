@@ -87,12 +87,24 @@ const integrations = [
     text: "A notification when an agent you aren't looking at finishes or needs your input. Walk away; Hive calls you back.",
     config: "[integrations.desktop_notify]",
   },
+  {
+    name: "Git status",
+    key: "sidebar",
+    text: "Changed files and commits ahead or behind under every repository space, e.g. main ~3 ↑2. Know which project has uncommitted agent work at a glance.",
+    config: "[integrations.git_status]",
+  },
+  {
+    name: "Usage and cost",
+    key: "Ctrl+Space U",
+    text: "Token usage and estimated cost of your agents in a pane, live, via ccusage or any tool you choose. Agents keep their own logs; Hive puts the numbers beside the work.",
+    config: "[integrations.usage]",
+  },
 ];
 
 const faqs = [
   [
     "Is Hive ready to use?",
-    "Yes, on Linux, macOS and Windows. Hive is young but complete: terminals and agents in split panes and tabs, live agent status, detach and reattach, automatic reconnection, spaces that follow your cd, Git worktrees, a command palette, themes and configurable keys. It is tested with real terminals in CI on all three platforms. Version 0.4.7 ships prebuilt binaries and a one-line installer; hive update upgrades in place.",
+    "Yes, on Linux, macOS and Windows. Hive is young but complete: terminals and agents in split panes and tabs, live agent status, detach and reattach, automatic reconnection, spaces that follow your cd, Git worktrees, a command palette, themes and configurable keys. It is tested with real terminals in CI on all three platforms. Version 0.4.8 ships prebuilt binaries and a one-line installer; hive update upgrades in place.",
   ],
   [
     "Which agents can I run?",
@@ -108,7 +120,7 @@ const faqs = [
   ],
   [
     "What are integrations?",
-    "Optional extras that connect Hive to tools you already use: Obsidian notes and a daily journal of agent activity, change review with lazygit, GitHub pull request checks, project tasks, and desktop notifications. Each is off by default and invisible until you enable it with two lines in config.toml, and each opens as an ordinary session beside your agents.",
+    "Optional extras that connect Hive to tools you already use: Obsidian notes and a daily journal of agent activity, change review with lazygit, GitHub pull request checks, project tasks, desktop notifications, git status in the sidebar and token usage. Each is off by default and invisible until you enable it with two lines in config.toml, and each opens as an ordinary session beside your agents.",
   ],
   [
     "Is Hive open source?",
@@ -136,7 +148,7 @@ const structuredData = [
     applicationCategory: "DeveloperApplication",
     applicationSubCategory: "Terminal multiplexer",
     operatingSystem: "Linux, macOS, Windows",
-    softwareVersion: "0.4.7",
+    softwareVersion: "0.4.8",
     downloadUrl: `${repoUrl}/releases/latest`,
     installUrl: siteUrl + "#get-started",
     license: "https://opensource.org/licenses/MIT",
@@ -422,7 +434,7 @@ journal = true        # log agent activity to today's note`}</code>
               <h2 id="start-title">Your terminal. Your platform.</h2>
             </div>
             <span className="development-badge">
-              <span className="tiny-square" /> v0.4.7 RELEASED
+              <span className="tiny-square" /> v0.4.8 RELEASED
             </span>
           </div>
           <ReleaseInstall />
@@ -554,7 +566,7 @@ journal = true        # log agent activity to today's note`}</code>
             <article>
               <span className="roadmap-marker current" />
               <div>
-                <span className="roadmap-status available">RELEASED · v0.4.7</span>
+                <span className="roadmap-status available">RELEASED · v0.4.8</span>
                 <h3>Everywhere, terminal first</h3>
                 <p>
                   macOS and Windows binaries. New opens a terminal, spaces
@@ -616,6 +628,7 @@ journal = true        # log agent activity to today's note`}</code>
         <nav aria-label="Footer navigation">
           <a href="#get-started">Get started</a>
           <a href="#roadmap">Roadmap</a>
+          <a href="/why/">Why Hive</a>
           <a href="/changelog/">Changelog</a>
           <a href="/changelog/rss.xml">RSS</a>
           <a href="#questions">FAQ</a>

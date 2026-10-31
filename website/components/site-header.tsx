@@ -40,6 +40,7 @@ export function SiteHeader() {
         }}>
           <a className="nav-link" href="/#features">Features</a>
           <a className="nav-link" href="/#integrations">Integrations</a>
+          <a className="nav-link" href="/why/">Why Hive</a>
           <a className="nav-link" href="/#how-it-works">How it works</a>
           <a className="nav-link" href="/changelog/">Changelog</a>
           <a className="nav-link nav-github" href="https://github.com/jrh89/hive" aria-label="Hive on GitHub"><Icon name="github" size={18} /><span>GitHub</span></a>

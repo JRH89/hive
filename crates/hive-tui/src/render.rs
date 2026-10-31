@@ -10,7 +10,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use crate::app::{
-    Activity, App, Focus, Link, Mode, SIDEBAR_WIDTH, Scope, SidebarHit, Target, Tone,
+    Activity, App, Focus, Link, MenuTarget, Mode, SIDEBAR_WIDTH, Scope, SidebarHit, Target, Tone,
 };
 use crate::keymap::Command;
 use crate::layout::{Dir, PaneArea};
@@ -177,7 +177,42 @@ fn draw_overlay(frame: &mut Frame, body: Rect, app: &App, theme: &Theme) {
             worktree,
         } => draw_picker(frame, body, app, selected, workspace, worktree, theme),
         Mode::Workspaces { selected } => draw_workspaces(frame, body, app, selected, theme),
+        Mode::Menu {
+            target, selected, ..
+        } => draw_menu(frame, app, target, selected, theme),
         _ => {}
+    }
+}
+
+/// A right-click menu where the click was.
+fn draw_menu(frame: &mut Frame, app: &App, target: MenuTarget, selected: usize, theme: &Theme) {
+    let Some(rect) = app.menu_rect() else {
+        return;
+    };
+    let block = Block::new()
+        .borders(Borders::ALL)
+        .border_set(theme.glyphs.border)
+        .border_style(Style::new().fg(theme.accent_dim));
+    let inner = block.inner(rect);
+    frame.render_widget(Clear, rect);
+    frame.render_widget(block, rect);
+    for (i, action) in app.menu_items(target).into_iter().enumerate() {
+        let style = if i == selected {
+            theme.highlight()
+        } else {
+            Style::new().fg(theme.text)
+        };
+        let row = Rect {
+            y: inner.y + i as u16,
+            height: 1,
+            ..inner
+        };
+        if row.y < inner.y + inner.height {
+            frame.render_widget(
+                Paragraph::new(Span::styled(format!(" {} ", action.label()), style)).style(style),
+                row,
+            );
+        }
     }
 }
 
@@ -190,7 +225,10 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let mut hits = app.sidebar_hits.borrow_mut();
     // This space's tabs only, numbered from 1.
     for (n, i) in app.space_tabs(app.view_space()).into_iter().enumerate() {
-        let label = format!("  {}  ", n + 1);
+        let label = match &app.tabs[i].name {
+            Some(name) => format!("  {} {}  ", n + 1, truncate(theme, name, 16)),
+            None => format!("  {}  ", n + 1),
+        };
         let width = label.chars().count() as u16;
         hits.push((Rect::new(x, area.y, width, 1), SidebarHit::Tab(i)));
         let style = if app.active_tab().is_some() && i == app.tab {
@@ -282,6 +320,22 @@ fn dir_name(cwd: &str) -> &str {
         .next()
         .filter(|s| !s.is_empty())
         .unwrap_or("/")
+}
+
+/// Compact git counts for a space row, e.g. `~3 ↑2`; empty when clean and
+/// in sync.
+fn git_counts(c: &hive_workspace::GitCounts) -> String {
+    let mut parts = Vec::new();
+    if c.changed > 0 {
+        parts.push(format!("~{}", c.changed));
+    }
+    if c.ahead > 0 {
+        parts.push(format!("↑{}", c.ahead));
+    }
+    if c.behind > 0 {
+        parts.push(format!("↓{}", c.behind));
+    }
+    parts.join(" ")
 }
 
 /// The branch a space is on: that of a session in its main checkout, else
@@ -376,14 +430,17 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             row(y),
         );
         let branch = space_branch(app, *w).unwrap_or_default();
-        frame.render_widget(
-            Paragraph::new(Span::styled(
-                format!("   {}", truncate(theme, &branch, width.saturating_sub(3))),
-                base.fg(theme.muted),
-            ))
-            .style(base),
-            row(y + 1),
-        );
+        // `[integrations.git_status]`: "~3 ↑2 ↓1", only what's non-zero.
+        let git = app.git.get(w).map(git_counts).unwrap_or_default();
+        let room = width.saturating_sub(3 + if git.is_empty() { 0 } else { git.len() + 1 });
+        let mut line = vec![Span::styled(
+            format!("   {}", truncate(theme, &branch, room)),
+            base.fg(theme.muted),
+        )];
+        if !git.is_empty() {
+            line.push(Span::styled(format!(" {git}"), base.fg(theme.accent_dim)));
+        }
+        frame.render_widget(Paragraph::new(Line::from(line)).style(base), row(y + 1));
         hits.push((
             Rect {
                 height: 2,
@@ -691,6 +748,27 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             Span::styled(theme.glyphs.caret, key),
             Span::styled("  ↑↓ choose · enter run · esc close", muted),
         ],
+        Mode::Menu { .. } => hints(&[("↑↓", "choose"), ("enter", "run"), ("esc", "close")]),
+        Mode::RenameTab { input, .. } => vec![
+            Span::styled(" Rename tab: ", bar.fg(theme.accent)),
+            Span::styled(input.clone(), bar.add_modifier(Modifier::BOLD)),
+            Span::styled(theme.glyphs.caret, key),
+            Span::styled("  enter save · esc cancel · empty clears", muted),
+        ],
+        Mode::ConfirmCloseSpace(w) => {
+            let alive = app
+                .sessions
+                .values()
+                .filter(|s| s.workspace == *w && s.state.is_alive())
+                .count();
+            vec![Span::styled(
+                format!(
+                    " Close {} and terminate its {alive} session(s)? y to confirm, any other key cancels ",
+                    app.workspace_name(*w)
+                ),
+                bar.fg(theme.warning).add_modifier(Modifier::BOLD),
+            )]
+        }
         Mode::ConfirmKill(id) => {
             let session = app.sessions.get(id);
             let name = session.map(|s| s.label.as_str()).unwrap_or("session");
@@ -1444,6 +1522,20 @@ mod tests {
         assert_eq!(app.agents(), vec![1, 3, 2]);
         let lines = rendered(&app, 80, 24);
         assert!(lines[15].contains("codex"), "{:?}", lines[15]);
+
+        // git status counts, when the integration supplies them.
+        assert!(app.git_roots().is_empty(), "off by default");
+        app.on_git_status(vec![(
+            1,
+            Some(hive_workspace::GitCounts {
+                changed: 3,
+                ahead: 2,
+                behind: 0,
+            }),
+        )]);
+        let lines = rendered(&app, 80, 24);
+        assert!(lines[3].contains("main ~3 ↑2"), "{:?}", lines[3]);
+        assert!(!lines[3].contains('↓'));
     }
 
     #[test]

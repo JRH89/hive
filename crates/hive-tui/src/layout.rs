@@ -164,6 +164,8 @@ pub struct Tab {
     pub focus: SessionId,
     /// The focused pane fills the tab.
     pub zoomed: bool,
+    /// Shown after the tab's number; set from its right-click menu.
+    pub name: Option<String>,
 }
 
 impl Tab {
@@ -172,6 +174,7 @@ impl Tab {
             root: Node::Pane(id),
             focus: id,
             zoomed: false,
+            name: None,
         }
     }
 

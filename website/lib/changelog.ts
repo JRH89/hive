@@ -10,8 +10,19 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    version: "0.4.8",
+    date: "2026-10-31T17:00:00-07:00",
+    title: "Right-click menus, git status, usage",
+    changes: [
+      "Right-click a space (open, new terminal here, rename, close), a tab (rename, split right or below, close) or an agent (open, rename, split, terminate). Tabs can have names.",
+      "Optional [integrations.git_status]: changed files and commits ahead/behind under each repository space, e.g. main ~3 ↑2.",
+      "Optional [integrations.usage]: Ctrl+Space U opens token usage and cost in a pane (ccusage blocks --live by default).",
+      "Website: a Why Hive page comparing Hive with tmux, Zellij and herdr.",
+    ],
+  },
+  {
     version: "0.4.7",
-    date: "2026-10-31T16:00:00-07:00",
+    date: "2026-10-31T14:42:59-07:00",
     title: "Every agent in one list",
     changes: [
       "The sidebar's AGENTS list shows every agent in every space, grouped by space, with the space it runs in. Alt+1–9 jump to any of them, switching space as needed.",

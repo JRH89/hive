@@ -62,6 +62,19 @@ open_in = "split"
 enabled = false
 command = ["notify-send", "--app-name=Hive"]
 
+[integrations.git_status]
+# Changed files and commits ahead/behind under each repository space in the
+# sidebar (e.g. "main  ~3 ↑2"), refreshed every few seconds.
+enabled = false
+
+[integrations.usage]
+# Leader U: token usage and cost of your agents in a pane. Agents keep their
+# own logs; this opens a tool that reads them (default: ccusage blocks --live,
+# `npm i -g ccusage`).
+enabled = false
+command = []
+open_in = "split"
+
 [worktrees]
 # Where `hive new -w` creates git worktrees.
 # Default: $XDG_DATA_HOME/hive/worktrees

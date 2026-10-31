@@ -3022,14 +3022,16 @@ body { padding-top: 92px; }
   background: var(--background);
 }
 /* Obsidian leads: notes plus a journal of agent activity. */
-.integration:first-child {
+.integration:first-child,
+.integration:last-child {
   grid-column: span 2;
 }
 @media (max-width: 900px) {
   .integrations-grid {
     grid-template-columns: 1fr;
   }
-  .integration:first-child {
+  .integration:first-child,
+  .integration:last-child {
     grid-column: auto;
   }
 }
@@ -3070,4 +3072,106 @@ body { padding-top: 92px; }
   font-size: 0.85rem;
   line-height: 1.6;
   color: var(--text);
+}
+
+/* Why Hive */
+.why .why-title {
+  font-size: clamp(2.2rem, 5.5vw, 3.8rem);
+  margin: 0;
+  color: var(--text);
+  background: none;
+  -webkit-text-fill-color: currentColor;
+}
+.why-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  margin-top: 48px;
+  background: var(--line);
+  border: 1px solid var(--line);
+}
+.why-reason {
+  padding: 28px;
+  background: var(--background);
+}
+.why-number {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--amber);
+}
+.why-reason h2 {
+  margin: 12px 0 10px;
+  font-size: 1.2rem;
+  color: var(--text);
+}
+.why-reason p,
+.why-prose p,
+.why-note {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.65;
+}
+.why-subtitle {
+  margin: 64px 0 20px;
+  font-size: 1.6rem;
+  color: var(--text);
+}
+.compare-scroll {
+  overflow-x: auto;
+}
+.compare {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+.compare th,
+.compare td {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+.compare thead th {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-weight: 500;
+}
+.compare thead th:nth-child(2) {
+  color: var(--amber);
+}
+.compare tbody th {
+  font-weight: 400;
+  color: var(--text);
+}
+.compare-yes {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--green);
+  white-space: nowrap;
+}
+.compare-no {
+  color: var(--muted);
+  white-space: nowrap;
+}
+.why-note {
+  margin-top: 12px;
+  font-size: 0.85rem;
+}
+.why-prose {
+  display: grid;
+  gap: 16px;
+  max-width: 760px;
+}
+.why-cta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 24px;
+  margin-top: 56px;
+}
+@media (max-width: 900px) {
+  .why-grid {
+    grid-template-columns: 1fr;
+  }
 }

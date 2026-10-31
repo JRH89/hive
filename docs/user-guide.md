@@ -143,6 +143,13 @@ enabled = true
 enabled = true
 command = ["notify-send", "--app-name=Hive"]
 
+[integrations.git_status]     # "main ~3 ↑2" under each repository space: changed files, ahead/behind
+enabled = true
+
+[integrations.usage]          # Ctrl+Space U: token usage and cost (default `ccusage blocks --live`)
+enabled = true
+command = []                  # e.g. ["ccusage", "daily"]
+
 [integrations.obsidian]
 journal = true                # append "claude finished in #3 api (main)" to today's note
 journal_dir = "Daily"         # folder of daily notes in the vault
@@ -151,6 +158,9 @@ journal_dir = "Daily"         # folder of daily notes in the vault
 Each opens as an ordinary session, so it shows in the sidebar and can be closed like any other. Asking again goes back to the one already open.
 
 ### Mouse
+
+Right-click a space for **open, new terminal here, rename, close space** (close asks, then terminates its sessions); a tab for **rename, split right/below, close tab** (a tab's name shows after its number); an agent for **open, rename, split right/below, terminate**.
+
 
 Everything in the sidebar and the tab bar is clickable: spaces, agents, **+ new**, **menu** and tabs. Click a pane to focus it. The wheel scrolls the sidebar. In the terminal panel, clicks and the wheel go to agents that use the mouse; full-screen apps without mouse support scroll with the wheel. Hold `Shift` to select text with your terminal as usual. Turn the mouse off with `[terminal] mouse_support = false`.
 

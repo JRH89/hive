@@ -11,6 +11,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 1,
     },
     {
+      url: "https://hive.codefrontlabs.com/why/",
+      lastModified: new Date(),
+      changeFrequency: "monthly",
+      priority: 0.7,
+    },
+    {
       url: "https://hive.codefrontlabs.com/changelog/",
       lastModified: new Date(),
       changeFrequency: "weekly",
