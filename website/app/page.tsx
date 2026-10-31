@@ -58,7 +58,7 @@ const features = [
 const faqs = [
   [
     "Is Hive ready to use?",
-    "Hive is pre-release but feature-complete for its first version on Linux: many sessions, detach and reattach, automatic reconnection, workspaces, Git worktrees, a command palette, themes, and configurable keys. It is tested with real terminals in CI. Prebuilt binaries are not published yet, so build it from source for now.",
+    "Yes, on Linux. Hive is new but feature-complete for its first version: many sessions, detach and reattach, automatic reconnection, workspaces, Git worktrees, a command palette, themes, and configurable keys. It is tested with real terminals in CI. Version 0.1.0 is released with static Linux binaries and a one-line installer.",
   ],
   [
     "Which agents can I run?",
@@ -95,6 +95,8 @@ const structuredData = [
     applicationSubCategory: "Terminal multiplexer",
     operatingSystem: "Linux",
     softwareVersion: "0.1.0",
+    downloadUrl: `${repoUrl}/releases/latest`,
+    installUrl: siteUrl + "#get-started",
     license: "https://opensource.org/licenses/MIT",
     codeRepository: repoUrl,
     programmingLanguage: "Rust",
@@ -337,13 +339,13 @@ export default function Home() {
               <h2 id="start-title">Your terminal. Your platform.</h2>
             </div>
             <span className="development-badge">
-              <span className="tiny-square" /> PRE-RELEASE
+              <span className="tiny-square" /> v0.1.0 RELEASED
             </span>
           </div>
           <ReleaseInstall />
           <details className="source-build-details">
             <summary>
-              Build from source today{" "}
+              Or build from source{" "}
               <span>
                 Linux · Rust 1.89+ <span aria-hidden="true">+</span>
               </span>
@@ -455,13 +457,13 @@ export default function Home() {
               </div>
             </article>
             <article>
-              <span className="roadmap-marker" />
+              <span className="roadmap-marker current" />
               <div>
-                <span className="roadmap-status">UP NEXT · PLANNED</span>
+                <span className="roadmap-status available">RELEASED · v0.1.0</span>
                 <h3>The first release</h3>
                 <p>
                   Static Linux binaries for x86_64 and ARM64 with a one-line,
-                  checksum-verified installer, then testing on macOS.
+                  checksum-verified installer. macOS testing comes next.
                 </p>
               </div>
             </article>

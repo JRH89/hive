@@ -7,18 +7,20 @@ import { CopyCommand } from "./copy-command";
 const releasesUrl = "https://github.com/jrh89/hive/releases";
 const assetBase = `${releasesUrl}/latest/download`;
 
-// Proposed release-asset contract, not published endpoints. Enable a platform
-// only after its installer and binaries are uploaded and tested on that OS.
+const version = "v0.1.0";
+
+// Enable a platform only after its installer and binaries are uploaded and
+// tested on that OS. Asset names carry no version (see ADR-0015).
 const platforms = [
   {
     id: "linux",
     name: "Linux",
     shell: "bash / sh",
     command: `curl -fsSL ${assetBase}/install.sh | sh`,
-    published: false,
+    published: true,
     description:
-      "Linux is Hive’s first target. A prebuilt binary and a one-command installer are planned.",
-    download: "Linux binary",
+      "Static binaries for x86_64 and ARM64. The installer verifies a SHA-256 checksum and puts hive and hived in ~/.local/bin.",
+    download: `Download ${version}`,
   },
   {
     id: "macos",
@@ -27,7 +29,7 @@ const platforms = [
     command: `curl -fsSL ${assetBase}/install.sh | sh`,
     published: false,
     description:
-      "A native macOS release is planned after Linux is stable. The installer will select the right build for your Mac.",
+      "Hive compiles for macOS but hasn’t been tested there yet. A native release will follow; until then, build from source.",
     download: "macOS binary",
   },
   {
@@ -37,7 +39,7 @@ const platforms = [
     command: `irm '${assetBase}/install.ps1' | iex`,
     published: false,
     description:
-      "Native Windows support and a PowerShell installer are planned after Linux is stable.",
+      "Windows needs a dedicated port (named pipes and ConPTY instead of Unix sockets and PTYs). It is not supported yet.",
     download: "Windows binary",
   },
 ] as const;
@@ -99,7 +101,7 @@ export function ReleaseInstall() {
           ))}
         </div>
         <span className="release-soon">
-          <span className="tiny-square" /> RELEASES COMING SOON
+          <span className="tiny-square" /> {version} · LINUX
         </span>
       </div>
       <div
@@ -136,19 +138,27 @@ export function ReleaseInstall() {
           )}
         </div>
         <div className="release-actions">
-          <button type="button" className="release-download" disabled>
-            <Icon name="arrow" size={15} />
-            <span>{platform.download}</span>
-            <span className="release-download-soon">Coming soon</span>
-          </button>
+          {platform.published ? (
+            <a className="release-download" href={`${releasesUrl}/latest`}>
+              <Icon name="arrow" size={15} />
+              <span>{platform.download}</span>
+            </a>
+          ) : (
+            <button type="button" className="release-download" disabled>
+              <Icon name="arrow" size={15} />
+              <span>{platform.download}</span>
+              <span className="release-download-soon">Coming soon</span>
+            </button>
+          )}
           <a href={releasesUrl} target="_blank" rel="noreferrer">
             Releases on GitHub <span aria-hidden="true">↗</span>
             <span className="sr-only"> (opens in a new tab)</span>
           </a>
         </div>
         <p className="release-note-text" role="status" aria-live="polite">
-          {platform.name} installers are not published yet. Commands and asset
-          names may change before release.
+          {platform.published
+            ? "Set HIVE_INSTALL_DIR to install elsewhere. Then run hive doctor to check your setup."
+            : `${platform.name} builds are not published yet. The command above is planned and may change.`}
         </p>
       </div>
     </div>

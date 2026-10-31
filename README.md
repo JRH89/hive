@@ -10,7 +10,7 @@
 
 A lightweight, Rust-powered terminal multiplexer for AI coding agents.
 
-> **Status: pre-release.** All six roadmap phases are implemented on Linux: several agents side by side, grouped by repository, optionally each in its own git worktree; detach, reattach and automatic reconnection; a command palette, themes and configurable keys. No binaries are published yet. See [Roadmap](#roadmap).
+> **Status: pre-release.** All six roadmap phases are implemented on Linux: several agents side by side, grouped by repository, optionally each in its own git worktree; detach, reattach and automatic reconnection; a command palette, themes and configurable keys. Version 0.1.0 ships static Linux binaries. See [Roadmap](#roadmap).
 
 ## What works today
 - Launch Claude Code, Codex, Gemini CLI, OpenCode, a shell, or any configured command in a real PTY
@@ -68,7 +68,7 @@ Without Unicode or colour (`TERM=linux`, `NO_COLOR=1`) the same UI falls back to
 ## Install
 Linux (x86_64 and aarch64) is supported. macOS and Windows are not yet.
 
-**Prebuilt binaries** are not published yet. Once a release exists:
+**Prebuilt binaries** ([latest release](https://github.com/jrh89/hive/releases/latest)):
 
 ```bash
 curl -fsSL https://github.com/jrh89/hive/releases/latest/download/install.sh | sh

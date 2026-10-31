@@ -2776,6 +2776,15 @@ h2 {
   text-decoration: underline;
   text-underline-offset: 4px;
 }
+.release-actions a.release-download {
+  gap: 10px;
+  color: var(--amber);
+  border-color: #6b5420;
+  cursor: pointer;
+}
+.release-actions a.release-download:hover {
+  background: #2a2416;
+}
 .release-note-text {
   min-height: 17px;
   font: 9px/1.8 var(--mono);

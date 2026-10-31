@@ -6,7 +6,9 @@ updated: 2026-10-30
 
 **Phase 6 complete; published 2026-10-30.** All six roadmap phases are merged to master. Public repo: https://github.com/JRH89/hive (MIT). CI is green on GitHub (fmt, clippy, tests, MSRV, static x86_64/aarch64 builds and smoke tests). Website: Vercel project `hive` (scope `jrh89s-projects`, root `website/`, deploys on push to master), domain `hive.codefrontlabs.com`. See [[Phase 6 - Testing and Distribution]].
 
-**Open:** no binaries released yet (push a `v0.1.0` tag for a draft release, then publish it). macOS runtime testing. `mouse_support` and `restore_workspace` config keys are inert.
+**Released v0.1.0** (2026-10-30): https://github.com/JRH89/hive/releases/tag/v0.1.0. Static x86_64/aarch64 musl archives, checksums and `install.sh`. The website install section now shows Linux as available.
+
+**Open:** macOS runtime testing. `mouse_support` and `restore_workspace` config keys are inert.
 
 ## Gate before every change
 ```bash
