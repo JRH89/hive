@@ -215,6 +215,9 @@ pub fn check_branch_name(main_root: &Path, branch: &str) -> Result<(), GitError>
 /// if it exists and creating it from the current HEAD otherwise.
 pub fn add_worktree(main_root: &Path, path: &Path, branch: &str) -> Result<(), GitError> {
     check_branch_name(main_root, branch)?;
+    // Forget worktrees whose directory is gone, so their branch can be
+    // checked out again. Only drops entries with no directory: safe.
+    let _ = git(main_root, &["worktree", "prune"]);
     let path_arg = path.to_string_lossy();
     let exists = git(
         main_root,
@@ -428,6 +431,17 @@ mod tests {
             &root,
             &["rev-parse", "--verify", "--quiet", "refs/heads/work"],
         );
+    }
+
+    #[test]
+    fn a_branch_whose_worktree_directory_was_deleted_can_be_reused() {
+        let (d, root) = repo();
+        let wt = d.path().join("gone");
+        add_worktree(&root, &wt, "reuse").unwrap();
+        fs::remove_dir_all(&wt).unwrap();
+        let again = d.path().join("again");
+        add_worktree(&root, &again, "reuse").unwrap();
+        assert_eq!(discover(&again).unwrap().branch().as_deref(), Some("reuse"));
     }
 
     #[test]

@@ -1,86 +1,46 @@
 <p align="center"><img src="assets/branding/hive-mark.svg" width="96" alt="Hive mark"></p>
 
-```text
-   ____
-  /    \
- /  >_  \    HIVE
- \      /    One terminal. Many agents.
-  \____/
-```
+<h1 align="center">Hive</h1>
+<p align="center"><b>One terminal. Many agents.</b><br>A lightweight, Rust-powered terminal multiplexer for AI coding agents.</p>
+<p align="center"><a href="https://hive.codefrontlabs.com">Website</a> · <a href="https://hive.codefrontlabs.com/changelog">Changelog</a> · <a href="docs/user-guide.md">User guide</a> · <a href="https://github.com/jrh89/hive/releases/latest">Download</a></p>
 
-A lightweight, Rust-powered terminal multiplexer for AI coding agents.
+<p align="center"><img src="assets/screenshots/main.png" alt="Hive with a shop space: Claude working in one pane, git log in a split beside it, Codex waiting for input in another tab"></p>
 
-> **Status: pre-release.** All seven roadmap phases are implemented on Linux: several agents in split panes and tabs with live status (working, needs input, done), grouped by repository, optionally each in its own git worktree; detach, reattach and automatic reconnection; a command palette, themes and configurable keys. Version 0.4.0 ships binaries for Linux, macOS and Windows. See [Roadmap](#roadmap).
+Run Claude Code, Codex, Gemini CLI, OpenCode or any shell side by side, see at a glance which one is working, which one needs you and which one is done, and close the window without stopping any of them. Binaries for Linux, macOS and Windows.
 
-## What works today
-- Launch Claude Code, Codex, Gemini CLI, OpenCode, a shell, or any configured command in a real PTY
-- Full terminal emulation: colours, cursor, alternate screen, wide characters, bracketed paste
-- Agents run inside a background daemon (`hived`). Detach, close the terminal, or let the UI crash, and they keep running
-- Reattach and get the exact current screen back
-- Run several agents at once and switch between them from a sidebar
-- Rename and terminate sessions from the UI
-- Resizing follows your terminal
-- If `hived` restarts, the UI reconnects on its own and shows which sessions ended (`◌`); press enter on one to relaunch it
-- Several terminals can view the same session; only one types at a time, and taking over is explicit (`Ctrl+Space a`)
-- Sessions are grouped into workspaces by repository, with the current git branch shown live
-- Optionally run an agent in its own git worktree (`hive new codex -w`), so agents don't overwrite each other. Hive warns when two agents share a directory
-- Worktree cleanup never discards uncommitted changes without `--force` and confirmation, and never deletes branches
+## Features
+- **Terminal first.** Click `+ new` (or `Ctrl+Space c`) to get a terminal. Type `claude`, `codex`, ... to start an agent in it, or `cd` anywhere first
+- **Spaces follow you.** Every repository you work in becomes a space in the sidebar; `cd` into another repo and the tab moves there. Each space keeps its own tabs
+- **Live agent status.** Working `◐`, needs input `◆`, done `●`, read from the agent's screen (herdr-compatible rules) or reported by the agent itself
+- **Splits and tabs.** `Ctrl+Space v` / `-` split, `t` opens a tab, `Alt+←/→` switches tabs, `Alt+↑/↓` switches spaces
+- **Worktrees on demand.** `Ctrl+Space C` opens a terminal in its own git worktree and branch, so two agents never edit the same files. Hive warns when two agents share a directory
+- **Nothing dies with the window.** Agents live in a background daemon (`hived`). Detach, close the laptop lid or the terminal, crash the UI: reattach and get the exact screen back
+- **Several windows, one session.** Others watch; only one types, and taking over is explicit (`Ctrl+Space a`)
+- **Command palette.** `Ctrl+Space :` lists every action, session and space, fuzzy-searchable. Every key is configurable
+- **Works anywhere.** Truecolor, 256 or 16 colours, `NO_COLOR`, plain ASCII without Nerd Fonts; mouse support throughout
+- **Safe with your work.** Worktrees with uncommitted changes are never removed without `--force` and confirmation; branches are never deleted
 
-## A look
-Captured from a real session with `tmux capture-pane` (paths and prompt trimmed), four shells in two repositories:
-
-```text
- ◇ HIVE  SHELL — frontend  ~/src/webapp (main)                           One terminal. Many agents.
- WORKSPACES              │[you@host webapp]$
-                         │
- ▾ webapp                │
-▌● frontend            1 │
-   main · shell          │
- ● tests       ╭ Commands ──────────────────────────────────────────────────────────╮
-   wt hive/shel│   New session                                                    n │
- ▾ api         │   New session in its own worktree                                  │
- ● billing     │   Switch workspace                                               w │
-   main · shell│   Add workspace                                                    │
- ● migrations  │   Rename workspace                                                 │
-   wt db/migrat│   Next session                                                   j │
-               │   Previous session                                               k │
-               ╰────────────────────────────────────────────────────────────────────╯
- Command: ▏  ↑↓ choose · enter run · esc close
-```
-
-Without Unicode or colour (`TERM=linux`, `NO_COLOR=1`) the same UI falls back to plain ASCII:
-
-```text
- <> HIVE  SHELL - migrations  ~/src/api (db/migrate)
- WORKSPACES              |[you@host db-migrate]$
- - webapp                |
- * frontend            1 |
-   main . shell          |
- * tests               2 |
-   wt hive/shell-2 . sh~ |
- - api                   |
- * billing             3 |
->* migrations          4 |
-   wt db/migrate . shell |
- * #4 migrations . api . db/migrate . running . 4 active        Ctrl+Space leader . then : commands
-```
+<table>
+<tr><td><img src="assets/screenshots/worktree.png" alt="A Codex terminal in its own worktree asking for approval"></td><td><img src="assets/screenshots/palette.png" alt="The command palette"></td></tr>
+<tr><td align="center">Codex in its own worktree (<code>wt</code>), waiting for approval</td><td align="center">The command palette (<code>Ctrl+Space :</code>)</td></tr>
+</table>
 
 ## Install
-Linux (x86_64 and aarch64), macOS (Apple silicon and Intel) and Windows 10+ (x86_64) are supported; CI tests all three. On Windows, agent status comes only from agents that report it (`hive report-agent`).
+Linux (x86_64 and aarch64), macOS (Apple silicon and Intel) and Windows 10+ (x86_64); CI tests all three. On Windows, agent status comes only from agents that report it (`hive report-agent`).
 
-**Prebuilt binaries** ([latest release](https://github.com/jrh89/hive/releases/latest)):
+**Linux and macOS:**
 
 ```bash
 curl -fsSL https://github.com/jrh89/hive/releases/latest/download/install.sh | sh
 ```
 
-On Windows (PowerShell):
+**Windows** (PowerShell):
 
 ```powershell
 irm https://github.com/jrh89/hive/releases/latest/download/install.ps1 | iex
 ```
 
-The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.3.1` to pin a version.
+The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.4.3` to pin a version. Later, `hive update` upgrades in place (then `hive daemon stop` to restart the daemon on the new version; this ends running sessions).
 
 **From source** (Rust ≥ 1.89):
 
@@ -90,14 +50,35 @@ cargo build --release
 install -m 0755 target/release/hive target/release/hived ~/.local/bin/
 ```
 
-Keep `hive` and `hived` in the same directory. Then run `hive doctor` to check the setup.
+Keep `hive` and `hived` in the same directory. Run `hive doctor` to check the setup.
 
-## Quick start
+## How to
+**Start.** Run `hive` in any directory. You get a terminal in a space named after the repository.
+
+**Run an agent.** Type `claude` (or `codex`, `gemini`, ...) in that terminal. The sidebar's AGENTS list picks it up with its status. Or press `Ctrl+Space A` to pick one from a list.
+
+**Work in another repo.** Click `+ new` or press `Ctrl+Space t` for a new tab, then `cd ~/src/other-repo`. Within two seconds the tab moves to a new space for that repository. `Alt+↑/↓` moves between spaces, `Alt+←/→` between that space's tabs.
+
+**Keep agents out of each other's way.** Press `Ctrl+Space C`: the new terminal opens in its own worktree on a fresh branch `hive/shell-<id>`. Start an agent there. From the command line: `hive new codex -w` (or `-b my-branch`). List and clean up with `hive worktree list` / `hive worktree rm <path>`.
+
+**Watch two things at once.** `Ctrl+Space v` splits right, `-` splits below, `o` cycles focus, `z` zooms, `X` closes the pane (the session keeps running).
+
+**Walk away.** `Ctrl+Space d` detaches. Everything keeps running in `hived`. Run `hive` again to come back. Sessions survive the terminal, SSH drops and sleep, but not a reboot (they come back marked `◌` ended; press enter to relaunch).
+
+**Get status from your own tools.** Anything running in a Hive terminal can report its state:
+
 ```bash
-hive new claude        # launch Claude Code and attach
-# Ctrl+Space d         # detach; Claude keeps running
-hive list              # see sessions
-hive                   # reattach to the most recent session
+hive report-agent --agent mybot --state working --message "indexing"
+hive report-agent --agent mybot --state blocked --message "need an API key"
+```
+
+**Script it.**
+
+```bash
+hive new claude -d -C ~/src/shop   # start Claude in the background
+hive list                          # see sessions
+hive attach 3                      # attach to one
+hive kill 3                        # terminate it
 ```
 
 ## Supported agents
@@ -110,44 +91,49 @@ hive                   # reattach to the most recent session
 | Your shell | `shell` | `$SHELL` |
 | Anything else | your choice | see [custom agents](docs/user-guide.md#custom-agents) |
 
-Agents run unmodified in a real terminal. Hive doesn't parse their output or answer their prompts.
+Agents run unmodified in a real terminal. Hive doesn't parse their output for anything but status, and never answers their prompts.
 
 ## Commands
 | Command | |
 |---|---|
-| `hive` | Open the UI (attaches to the newest live session) |
+| `hive` | Open the UI (attaches to the newest live session, or opens a terminal) |
 | `hive new [agent] [-l label] [-C dir] [-d] [-- args]` | Launch an agent |
 | `hive new codex -w` / `-b <branch>` | Launch in a new git worktree (default branch `hive/<agent>-<id>`) |
 | `hive list` | List sessions |
 | `hive attach <id>` | Attach to a session |
 | `hive kill <id>` | Terminate a session |
 | `hive status` | Daemon and session summary |
-| `hive workspace list\|add <dir>\|rename\|rm` | Manage workspaces |
+| `hive report-agent --agent <name> --state <state>` | Report status from inside a session |
+| `hive workspace list\|add <dir>\|rename\|rm` | Manage spaces |
 | `hive worktree list\|rm <path> [--force]` | List or remove worktrees (refuses dirty ones without `--force`) |
+| `hive update` | Upgrade to the latest release |
 | `hive doctor` | Check config, daemon, terminal support and installed agents |
 | `hive daemon start\|stop\|status` | Manage `hived` (`stop` terminates all sessions) |
 
 ## Keys
-The leader is **Ctrl+Space**. Everything else goes to the agent.
+The leader is **Ctrl+Space**. Everything else goes to the terminal.
 
 | Keys | Action |
 |---|---|
-| `Ctrl+Space p` | Command palette: every command, session and workspace, fuzzy-searchable |
-| `Ctrl+Space /` | Search sessions by name, agent, workspace or branch |
-| `Ctrl+Space j` / `k` | Next / previous session |
-| `Ctrl+Space 1`–`9` | Jump to session |
-| `Ctrl+Space s` | Focus the sidebar (`↑↓` select, `enter` open, `esc` back) |
-| `Ctrl+Space c` | New terminal (type `claude`, `codex`, ... to start an agent) |
-| `Ctrl+Space A` | New agent from a list (`w` toggles its own worktree) |
-| `Ctrl+Space w` | Workspaces (open, add, rename, remove) |
-| `Ctrl+Space r` | Rename session |
-| `Ctrl+Space x` | Terminate session (asks to confirm) |
+| `Alt+←` / `Alt+→` | Previous / next tab in this space (no leader needed) |
+| `Alt+↑` / `Alt+↓` | Previous / next space (no leader needed) |
+| `Alt+1`–`9` | Jump to an agent in this space |
+| `Ctrl+Space :` | Command palette: every command, session and space |
+| `Ctrl+Space c` / `t` | New terminal / new tab |
+| `Ctrl+Space C` | New terminal in its own worktree (own branch) |
+| `Ctrl+Space A` | New agent from a list |
+| `Ctrl+Space v` / `-` | Split right / below |
+| `Ctrl+Space o` / `z` / `X` | Focus next pane / zoom / close pane |
+| `Ctrl+Space n` / `p` | Next / previous session |
+| `Ctrl+Space /` | Search sessions by name, agent, space or branch |
+| `Ctrl+Space s` / `b` | Focus / hide the sidebar |
+| `Ctrl+Space w` | Spaces (open, add, rename, remove) |
+| `Ctrl+Space r` / `x` | Rename / terminate session |
 | `Ctrl+Space d` | Detach |
-| `Ctrl+Space a` | Take input control (when another window controls the session) |
-| `Ctrl+Space Ctrl+Space` | Send a literal Ctrl+Space |
+| `Ctrl+Space a` | Take input control from another window |
 | `Ctrl+Space ?` | Help (generated from your actual bindings) |
 
-Every key except the digits is configurable, and so is the leader (see below).
+Every key is configurable, and so is the leader (see below). The mouse works too: click spaces, agents, tabs, `+ new` and `menu`.
 
 ## Configuration
 `~/.config/hive/config.toml`. Every key is optional; [`examples/config.toml`](examples/config.toml) documents all of them. Mistakes are reported before the UI opens.

@@ -25,3 +25,6 @@ Terminals start in the focused session's cwd if it's in the selected space, else
 ## Amendment (2026-10-31): spaces follow `cd`
 - Sessions' `cwd`, workspace and repo are mutable (session `Meta`). Every 2 s (`Daemon::refresh_places`, with branch refresh) the daemon reads the process's cwd (`/proc/<pid>/cwd`; macOS `lsof -Fn`; Windows: not tracked). In a repo → that repo's workspace (exact main root; created if new); else the deepest workspace containing it; else unchanged.
 - TUI: every running session has a tab (`adopt_sessions`, except ones whose tab was closed here); "+ new" opens a terminal tab; the view follows the focused session's move; SPACES hides spaces with nothing open (`App::spaces`).
+
+## Amendment (2026-10-31): worktree terminals
+- Agents don't isolate themselves; isolation is a worktree. Leader `C` = `Command::NewWorktreeTerminal`: a terminal tab in a new worktree (`NewWorktree { branch: None }` → `hive/shell-<id>`), same space (the worktree's repo main root). The agent-in-worktree picker (`NewWorktreeSession`) keeps working from the palette, unbound.

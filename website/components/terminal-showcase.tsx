@@ -108,7 +108,7 @@ export function TerminalShowcase() {
               <span className="showcase-version">local</span>
             </div>
             <p className="showcase-sidebar-label">
-              SESSIONS <span>03</span>
+              AGENTS <span>03</span>
             </p>
             <div className="showcase-session-list">
               {sessions.map((item, index) => (

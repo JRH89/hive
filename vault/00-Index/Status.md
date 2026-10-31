@@ -12,6 +12,8 @@ updated: 2026-10-31
 
 **Phase 9 (macOS) done**: CI runs clippy, tests and smoke on macos-14; release builds aarch64/x86_64-apple-darwin ([[Phase 9 - macOS]]). **Phase 10 (Windows) done** ([[Phase 10 - Windows]]); **Released v0.4.0** (2026-10-31): Linux, macOS and Windows binaries, `install.ps1`.
 
+**Released v0.4.4** (2026-10-31): spaces follow cd, worktree terminals (leader `C`), README screenshots, website changelog + RSS (`/changelog/rss.xml`).
+
 **Open:** `restore_workspace` config key is inert.
 
 ## Gate before every change
@@ -26,7 +28,7 @@ cargo test --workspace
 - Shift+Enter is not distinguishable (no kitty keyboard protocol).
 - Processes don't survive a daemon crash (by design, spec §4). Only metadata does, as `Lost` sessions ([[ADR-0009 Persist session metadata, mark lost sessions]]).
 - Killing an interactive shell session waits the full kill timeout (bash ignores SIGTERM).
-- New sessions launched from the TUI start in the active workspace's root (or `hive`'s cwd). No free-form directory prompt.
+- New terminals start in the focused pane's directory; `cd` moves them to the right space (not on Windows).
 - Worktrees can't be listed from the TUI, and custom branch names are CLI-only (`hive new -b`).
 - Sidebar/picker keys aren't configurable; theme is fixed at startup.
 - ~~No activity indicator for background sessions~~: done in Phase 7 via daemon-side detection ([[ADR-0016 Agent detection from process and herdr manifests]]).
