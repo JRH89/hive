@@ -16,8 +16,8 @@ const features = [
     number: "01",
     symbol: "terminal" as const,
     title: "Your agents. As they are.",
-    text: "Claude Code, Codex, Gemini CLI, OpenCode. Launch the CLI you already use in a real interactive terminal, with its own prompts and permissions intact.",
-    foot: "REAL PTYS · REAL INTERACTION",
+    text: "Claude Code, Codex, Gemini CLI, OpenCode, truss and twenty more. Hive recognises the agent, even one started from a shell, and shows whether it is working, needs you, or is done. Its prompts and permissions stay intact.",
+    foot: "REAL PTYS · LIVE AGENT STATUS",
   },
   {
     number: "02",
@@ -30,8 +30,8 @@ const features = [
     number: "03",
     symbol: "keyboard" as const,
     title: "Stay on the keyboard.",
-    text: "Normal input goes straight to your agent. A dedicated leader key handles Hive commands, so managing the terminal stays out of the way of using it.",
-    foot: "CTRL+SPACE · YOUR WAY BACK",
+    text: "Normal input goes straight to your agent. A leader key handles Hive commands, with tmux-style splits and tabs to keep several agents in view, and the mouse when you want it.",
+    foot: "CTRL+SPACE · SPLITS · TABS",
   },
   {
     number: "04",
@@ -59,11 +59,11 @@ const features = [
 const faqs = [
   [
     "Is Hive ready to use?",
-    "Yes, on Linux. Hive is new but feature-complete for its first version: many sessions, detach and reattach, automatic reconnection, workspaces, Git worktrees, a command palette, themes, and configurable keys. It is tested with real terminals in CI. Version 0.1.0 is released with static Linux binaries and a one-line installer.",
+    "Yes, on Linux. Hive is new but feature-complete for its first version: many sessions in split panes and tabs, live agent status, detach and reattach, automatic reconnection, workspaces, Git worktrees, a command palette, themes, and configurable keys. It is tested with real terminals in CI. Version 0.2.0 is released with static Linux binaries and a one-line installer.",
   ],
   [
     "Which agents can I run?",
-    "Hive has launch definitions for Claude Code, Codex, Gemini CLI, and OpenCode. You can configure other commands in TOML. Install and authenticate each agent separately; Hive runs its CLI and preserves its permission system.",
+    "Hive knows over twenty agents, including Claude Code, Codex, Gemini CLI, OpenCode, Copilot, Cursor Agent and truss, and offers the ones you have installed. You can configure other commands in TOML. Install and authenticate each agent separately; Hive runs its CLI and preserves its permission system.",
   ],
   [
     "What happens when I close Hive?",
@@ -95,7 +95,7 @@ const structuredData = [
     applicationCategory: "DeveloperApplication",
     applicationSubCategory: "Terminal multiplexer",
     operatingSystem: "Linux",
-    softwareVersion: "0.1.0",
+    softwareVersion: "0.2.0",
     downloadUrl: `${repoUrl}/releases/latest`,
     installUrl: siteUrl + "#get-started",
     license: "https://opensource.org/licenses/MIT",
@@ -309,7 +309,7 @@ export default function Home() {
               <h2 id="start-title">Your terminal. Your platform.</h2>
             </div>
             <span className="development-badge">
-              <span className="tiny-square" /> v0.1.0 RELEASED
+              <span className="tiny-square" /> v0.2.0 RELEASED
             </span>
           </div>
           <ReleaseInstall />
@@ -398,8 +398,8 @@ export default function Home() {
             <p className="eyebrow">A FOUNDATION, THEN A WORKSPACE</p>
             <h2 id="roadmap-title">Built in the right order.</h2>
             <p className="body-copy">
-              Reliability first, then room for your agents. All six phases of
-              the first roadmap are done.
+              Reliability first, then room for your agents, then the polish to
+              run many of them at once.
             </p>
           </div>
           <div className="roadmap-list">
@@ -429,10 +429,11 @@ export default function Home() {
             <article>
               <span className="roadmap-marker current" />
               <div>
-                <span className="roadmap-status available">RELEASED · v0.1.0</span>
-                <h3>The first release</h3>
+                <span className="roadmap-status available">RELEASED · v0.2.0</span>
+                <h3>Many agents at a glance</h3>
                 <p>
-                  Static Linux binaries for x86_64 and ARM64 with a one-line,
+                  Agent detection and status, split panes and tabs, herdr-style
+                  keys and mouse support. Static Linux binaries with a
                   checksum-verified installer. macOS testing comes next.
                 </p>
               </div>

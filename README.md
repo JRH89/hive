@@ -10,7 +10,7 @@
 
 A lightweight, Rust-powered terminal multiplexer for AI coding agents.
 
-> **Status: pre-release.** All six roadmap phases are implemented on Linux: several agents side by side, grouped by repository, optionally each in its own git worktree; detach, reattach and automatic reconnection; a command palette, themes and configurable keys. Version 0.1.0 ships static Linux binaries. See [Roadmap](#roadmap).
+> **Status: pre-release.** All seven roadmap phases are implemented on Linux: several agents in split panes and tabs with live status (working, needs input, done), grouped by repository, optionally each in its own git worktree; detach, reattach and automatic reconnection; a command palette, themes and configurable keys. Version 0.2.0 ships static Linux binaries. See [Roadmap](#roadmap).
 
 ## What works today
 - Launch Claude Code, Codex, Gemini CLI, OpenCode, a shell, or any configured command in a real PTY
@@ -74,7 +74,7 @@ Linux (x86_64 and aarch64) is supported. macOS and Windows are not yet.
 curl -fsSL https://github.com/jrh89/hive/releases/latest/download/install.sh | sh
 ```
 
-The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.1.0` to pin a version.
+The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.2.0` to pin a version.
 
 **From source** (Rust ≥ 1.89):
 
@@ -201,6 +201,7 @@ Integration tests run real PTYs with `/bin/sh` scripts against private daemons. 
 4. ✅ Workspaces and git worktrees
 5. ✅ Polish: command palette, themes, configurable keys
 6. ✅ Testing and distribution: CI, static Linux binaries, docs
+7. ✅ herdr parity: agent detection and status, split panes and tabs, global keys, mouse
 
 ## License
 [MIT](LICENSE)

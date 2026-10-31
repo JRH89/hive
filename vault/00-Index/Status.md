@@ -8,7 +8,7 @@ updated: 2026-10-30
 
 **Released v0.1.0** (2026-10-30): https://github.com/JRH89/hive/releases/tag/v0.1.0. Static x86_64/aarch64 musl archives, checksums and `install.sh`. The website install section now shows Linux as available.
 
-**Phase 7 in progress** on branch `phase-7-herdr-parity` (uncommitted): agent discovery, detection, status, controls, mouse, split panes and tabs are done (protocol v6). An optional Obsidian notes integration (off by default, [[ADR-0019 Optional integrations, off and invisible by default]]) is done too. See [[Phase 7 - herdr parity]].
+**Phase 7 done, released as v0.2.0** (merged to master): agent discovery, detection, status, controls, mouse, split panes and tabs are done (protocol v6). An optional Obsidian notes integration (off by default, [[ADR-0019 Optional integrations, off and invisible by default]]) is done too. See [[Phase 7 - herdr parity]].
 
 **Open:** macOS runtime testing. `restore_workspace` config key is inert.
 

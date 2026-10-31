@@ -12,7 +12,7 @@ Hive runs several interactive AI coding agents (Claude Code, Codex, Gemini CLI, 
 | **Worktree** | Optional separate git checkout for one agent, so two agents in the same repository don't edit the same files |
 | **Controller** | The one window whose keystrokes reach a session. Other windows watching it are observers |
 
-Hive never answers an agent's permission prompts and never reads its output to guess what it's doing.
+Hive never answers an agent's permission prompts. It shows an agent's status only from per-agent screen rules or the agent's own report, never a guess.
 
 ## Everyday use
 

@@ -7,7 +7,7 @@ import { CopyCommand } from "./copy-command";
 const releasesUrl = "https://github.com/jrh89/hive/releases";
 const assetBase = `${releasesUrl}/latest/download`;
 
-const version = "v0.1.0";
+const version = "v0.2.0";
 
 // Enable a platform only after its installer and binaries are uploaded and
 // tested on that OS. Asset names carry no version (see ADR-0015).
@@ -157,7 +157,7 @@ export function ReleaseInstall() {
         </div>
         <p className="release-note-text" role="status" aria-live="polite">
           {platform.published
-            ? "Set HIVE_INSTALL_DIR to install elsewhere. Then run hive doctor to check your setup."
+            ? "The command is all you need: it downloads, verifies and installs both binaries. The download link is only for installing by hand. Set HIVE_INSTALL_DIR to install elsewhere, then run hive doctor to check your setup."
             : `${platform.name} builds are not published yet. The command above is planned and may change.`}
         </p>
       </div>
