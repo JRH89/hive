@@ -11,10 +11,15 @@ source: crates/hive-daemon/src/session.rs
 - A spawn failure (e.g. a binary missing from PATH) is returned to the client as `Error` and is **not** registered. The CLI and TUI pre-check PATH via `launch::find_executable` for a friendlier message.
 - `Failed` is used when `child.wait()` itself errors.
 - An exited session **stays listed** (the final screen is still viewable) until it is killed or removed.
+- `Lost`: only in a daemon started after a crash. The process is gone; the record (from `sessions.json`) can be renamed, dismissed, or relaunched from the TUI sidebar. Never attachable. See [[ADR-0009 Persist session metadata, mark lost sessions]].
+
+## Persistence
+- Live sessions (not exited ones) plus lost records are written to `$HIVE_STATE_DIR/sessions.json` after each burst of lifecycle events. No env.
+- Graceful shutdown writes only the lost records, so sessions stopped on purpose aren't "lost". Ids never repeat across restarts.
 
 ## Attachment (tracked separately from process state)
 - `attached: BTreeSet<ClientId>` and `controller: Option<ClientId>`.
-- Attaching makes you controller ("last attach wins"). The old controller becomes an observer and gets `ControlLost`. In the TUI, Leader then `a` re-attaches to take control back.
+- Attaching makes you controller only if control is free; otherwise you observe. A forced attach (TUI Leader `a`) takes over, and the old controller gets `ControlLost`. When the controller detaches, observers get `ControlReleased`. See [[ADR-0010 Attach observes unless control is free or forced]].
 - Only the controller's `Input`/`Resize` are honoured. This is the explicit input ownership required by spec §11.
 
 ## Lifecycle events

@@ -9,7 +9,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 
-use crate::app::{App, Focus, Mode, SIDEBAR_WIDTH, Tone};
+use crate::app::{App, Focus, Link, Mode, SIDEBAR_WIDTH, Tone};
 use crate::theme::Theme;
 
 pub fn draw(frame: &mut Frame, app: &App, theme: &Theme) {
@@ -45,6 +45,10 @@ pub fn draw(frame: &mut Frame, app: &App, theme: &Theme) {
         None => draw_empty(frame, panel, app, theme),
     }
     draw_status(frame, status, app, theme);
+    if let Link::Reconnecting { attempt, reason } = &app.link {
+        draw_reconnecting(frame, body, *attempt, reason, theme);
+        return;
+    }
     match app.mode {
         Mode::Help => draw_help(frame, body, theme),
         Mode::NewSession { selected } => draw_picker(frame, body, app, selected, theme),
@@ -99,6 +103,7 @@ fn state_dot(state: &SessionState, theme: &Theme) -> (&'static str, Color) {
         SessionState::Running => ("●", theme.success),
         SessionState::Exited { .. } => ("○", theme.muted),
         SessionState::Failed { .. } => ("✕", theme.error),
+        SessionState::Lost => ("◌", theme.muted),
     }
 }
 
@@ -183,10 +188,10 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             Span::styled(format!("{dot} "), base.fg(dot_color)),
             Span::styled(truncate(&s.label, label_width), label_style),
         ]);
-        let detail = if s.label == s.agent {
-            dir_name(&s.cwd).to_string()
-        } else {
-            format!("{} · {}", s.agent, dir_name(&s.cwd))
+        let detail = match (&s.state, s.label == s.agent) {
+            (SessionState::Lost, _) => format!("ended · {}", dir_name(&s.cwd)),
+            (_, true) => dir_name(&s.cwd).to_string(),
+            (_, false) => format!("{} · {}", s.agent, dir_name(&s.cwd)),
         };
         let line2 = Line::from(Span::styled(
             format!("   {}", truncate(&detail, width.saturating_sub(4))),
@@ -223,6 +228,17 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         }
         spans
     };
+
+    if let Link::Reconnecting { attempt, .. } = &app.link {
+        let line = Line::from(vec![
+            Span::styled(" Reconnecting to hived", bar.fg(theme.warning)),
+            Span::styled(format!(" · attempt {attempt}"), muted),
+            Span::styled("  q", key),
+            Span::styled(" quit", muted),
+        ]);
+        frame.render_widget(Paragraph::new(line).style(bar), area);
+        return;
+    }
 
     let left: Vec<Span> = match &app.mode {
         Mode::Leader => {
@@ -319,6 +335,7 @@ fn session_summary<'a>(s: &SessionInfo, app: &App, theme: &Theme, bar: Style) ->
             format!("killed ({})", signal.as_deref().unwrap_or("signal"))
         }
         SessionState::Failed { reason } => format!("failed: {reason}"),
+        SessionState::Lost => "ended when hived stopped".to_string(),
     };
     let mut spans = vec![
         Span::styled(format!(" {dot} "), bar.fg(color)),
@@ -333,12 +350,20 @@ fn session_summary<'a>(s: &SessionInfo, app: &App, theme: &Theme, bar: Style) ->
 
 fn counts(app: &App) -> String {
     let active = app.sessions.values().filter(|s| s.state.is_alive()).count();
-    let exited = app.sessions.len() - active;
+    let lost = app
+        .sessions
+        .values()
+        .filter(|s| s.state == SessionState::Lost)
+        .count();
+    let exited = app.sessions.len() - active - lost;
+    let mut out = format!("{active} active");
     if exited > 0 {
-        format!("{active} active · {exited} exited")
-    } else {
-        format!("{active} active")
+        out += &format!(" · {exited} exited");
     }
+    if lost > 0 {
+        out += &format!(" · {lost} ended");
+    }
+    out
 }
 
 fn short_path(p: &str) -> String {
@@ -473,6 +498,30 @@ fn draw_picker(frame: &mut Frame, area: Rect, app: &App, selected: usize, theme:
             .style(base)
         })
         .collect();
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+fn draw_reconnecting(frame: &mut Frame, area: Rect, attempt: u32, reason: &str, theme: &Theme) {
+    let inner = popup(frame, area, 56, 7, "Connection lost", theme);
+    let lines = vec![
+        Line::from(Span::styled(
+            truncate(reason, inner.width.saturating_sub(2) as usize),
+            Style::new().fg(theme.muted),
+        )),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled("Reconnecting to hived… ", Style::new().fg(theme.text)),
+            Span::styled(format!("attempt {attempt}"), Style::new().fg(theme.muted)),
+        ]),
+        Line::from(Span::styled(
+            "Agents keep running unless hived itself died.",
+            Style::new().fg(theme.muted),
+        )),
+        Line::from(vec![
+            Span::styled("q", Style::new().fg(theme.accent)),
+            Span::styled(" to quit", Style::new().fg(theme.muted)),
+        ]),
+    ];
     frame.render_widget(Paragraph::new(lines), inner);
 }
 

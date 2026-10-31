@@ -7,6 +7,7 @@ Knowledge base for building **Hive**, a terminal multiplexer for AI coding agent
 - [[Roadmap]]: phases and their acceptance criteria
 - [[Phase 1 - Foundation]]: what shipped and how it was verified
 - [[Phase 2 - Multiplexing]]: sidebar, switching, picker, rename
+- [[Phase 3 - Robust Persistence]]: auto-reconnect, lost sessions, explicit control
 
 ## Architecture
 - [[Overview]]: processes, crates, data flow
@@ -22,7 +23,11 @@ Knowledge base for building **Hive**, a terminal multiplexer for AI coding agent
 - [[ADR-0006 Leader key Ctrl+Space]]
 - [[ADR-0007 Switching re-attaches]]
 - [[ADR-0008 Session events published under the session lock]]
+- [[ADR-0009 Persist session metadata, mark lost sessions]]
+- [[ADR-0010 Attach observes unless control is free or forced]]
 
 ## Ongoing
+- [[Website Design]]: approved website direction, branding, scope and acceptance
+- [[Website Implementation Plan]]: isolated Next.js website work
 - [[Risks and Open Questions]]
 - `Log/`: dated work log, one note per session

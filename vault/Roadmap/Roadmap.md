@@ -17,10 +17,12 @@ Full detail is in `AGENTS.md` §16. **Don't start a phase until the previous one
 - [x] Basic branding pass on the sidebar
 - [x] Integration tests: switching keeps sessions running; a flood doesn't starve a quiet session
 
-## Phase 3 — Robust Persistence
-- [ ] TUI auto-reconnects when the daemon connection drops
-- [ ] Persist session metadata (labels, cwd) for display after a daemon restart, without implying process recovery
-- [ ] Multi-client behaviour polish (observer UX)
+## Phase 3 — Robust Persistence ✅
+[[Phase 3 - Robust Persistence]]
+- [x] TUI auto-reconnects when the daemon connection drops (and auto-starts a new daemon)
+- [x] Persist session metadata (labels, cwd) for display after a daemon restart, without implying process recovery ([[ADR-0009 Persist session metadata, mark lost sessions]])
+- [x] Multi-client behaviour polish: observe unless forced, `ControlReleased` ([[ADR-0010 Attach observes unless control is free or forced]])
+- [x] Stale socket cleanup and ids that never repeat across restarts
 
 ## Phase 4 — Workspaces and Git
 ## Phase 5 — Product Experience and Branding

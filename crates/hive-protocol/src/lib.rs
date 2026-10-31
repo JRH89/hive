@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Bumped on any incompatible change to the message types below.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Upper bound on a single frame. Protects both sides from unbounded
 /// allocations caused by a corrupt or hostile length prefix.
@@ -48,6 +48,9 @@ pub enum SessionState {
     Failed {
         reason: String,
     },
+    /// Was running when a previous daemon stopped unexpectedly. Only the
+    /// metadata survives; the process is gone and cannot be attached.
+    Lost,
 }
 
 impl SessionState {
@@ -93,11 +96,14 @@ pub enum ClientMessage {
     },
     ListSessions,
     CreateSession(CreateSession),
-    /// Attach to a session, taking input control. Replaces any existing
-    /// attachment on this connection.
+    /// Attach to a session, replacing any existing attachment on this
+    /// connection. Input control is taken if it is free, or always when
+    /// `force` is set (the previous controller then gets `ControlLost`).
+    /// Otherwise the client observes.
     Attach {
         session: SessionId,
         size: TermSize,
+        force: bool,
     },
     Detach,
     /// Raw bytes for the attached session's PTY. Ignored unless this client
@@ -163,6 +169,11 @@ pub enum ServerMessage {
     SessionUpdated(SessionInfo),
     SessionRemoved(SessionId),
     ShuttingDown,
+    /// The controller of the session this client observes detached; control
+    /// can be taken with a forced `Attach`.
+    ControlReleased {
+        session: SessionId,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]

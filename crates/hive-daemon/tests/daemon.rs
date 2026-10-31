@@ -35,15 +35,7 @@ impl Harness {
             tmp.path().join("state"),
             tmp.path().join("config.toml"),
         );
-        let mut config = Config::default();
-        config.daemon.kill_timeout_secs = 1;
-        let daemon = tokio::spawn(hive_daemon::run(paths.clone(), config));
-        for _ in 0..200 {
-            if paths.socket.exists() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
+        let daemon = spawn_daemon(&paths).await;
         Harness {
             paths,
             _tmp: tmp,
@@ -51,9 +43,75 @@ impl Harness {
         }
     }
 
+    /// Simulates a daemon crash: the run future is dropped without its
+    /// graceful shutdown path, leaving a stale socket behind.
+    async fn crash(&mut self) {
+        self.daemon.abort();
+        let _ = (&mut self.daemon).await;
+        assert!(
+            self.paths.socket.exists(),
+            "crash should leave a stale socket"
+        );
+    }
+
+    async fn shutdown(&mut self) {
+        let mut c = self.client().await;
+        c.send(&ClientMessage::Shutdown).await.unwrap();
+        timeout(T, &mut self.daemon)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+    }
+
+    async fn restart(&mut self) {
+        self.daemon = spawn_daemon(&self.paths).await;
+    }
+
     async fn client(&self) -> Client {
         Client::connect(&self.paths, "test").await.unwrap()
     }
+}
+
+/// Starts a daemon on `paths` and waits until it accepts connections.
+async fn spawn_daemon(paths: &Paths) -> tokio::task::JoinHandle<anyhow::Result<()>> {
+    let mut config = Config::default();
+    config.daemon.kill_timeout_secs = 1;
+    let daemon = tokio::spawn(hive_daemon::run(paths.clone(), config));
+    for _ in 0..500 {
+        if daemon.is_finished() {
+            match daemon.await {
+                // All test daemons share one process. A PTY child forked by a
+                // concurrent test briefly inherits a crashed daemon's lock fd
+                // (until its exec closes it), so retry. A real crash takes the
+                // whole process down and cannot hit this.
+                Ok(Err(e)) if e.is::<hive_daemon::AlreadyRunning>() => {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                    return Box::pin(spawn_daemon(paths)).await;
+                }
+                other => panic!("daemon exited during startup: {other:?}"),
+            }
+        }
+        if Client::connect(paths, "probe").await.is_ok() {
+            return daemon;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("daemon did not start");
+}
+
+async fn list(client: &mut Client) -> Vec<hive_protocol::SessionInfo> {
+    client.send(&ClientMessage::ListSessions).await.unwrap();
+    timeout(
+        T,
+        client.recv_until(|m| match m {
+            ServerMessage::SessionList(l) => Some(l),
+            _ => None,
+        }),
+    )
+    .await
+    .unwrap()
+    .unwrap()
 }
 
 fn sh(script: &str, size: TermSize) -> CreateSession {
@@ -103,17 +161,36 @@ impl Screen {
     }
 }
 
+/// Attaches taking control unconditionally (the pre-v3 behaviour most tests
+/// want).
 async fn attach(client: &mut Client, id: SessionId, size: TermSize) -> Screen {
+    attach_with(client, id, size, true).await.0
+}
+
+/// Attaches with an explicit `force`; returns the screen and whether this
+/// client got input control.
+async fn attach_with(
+    client: &mut Client,
+    id: SessionId,
+    size: TermSize,
+    force: bool,
+) -> (Screen, bool) {
     client
-        .send(&ClientMessage::Attach { session: id, size })
+        .send(&ClientMessage::Attach {
+            session: id,
+            size,
+            force,
+        })
         .await
         .unwrap();
     timeout(
         T,
         client.recv_until(|m| match m {
             ServerMessage::Attached {
-                session, snapshot, ..
-            } => Some(Screen::new(session.size, &snapshot)),
+                session,
+                snapshot,
+                controller,
+            } => Some((Screen::new(session.size, &snapshot), controller)),
             _ => None,
         }),
     )
@@ -387,6 +464,7 @@ async fn noisy_session_does_not_starve_others() {
         .send(&ClientMessage::Attach {
             session: noisy,
             size,
+            force: true,
         })
         .await
         .unwrap();
@@ -483,6 +561,7 @@ async fn removed_session_is_never_resurrected_by_later_updates() {
     c.send(&ClientMessage::Attach {
         session: other,
         size,
+        force: false,
     })
     .await
     .unwrap();
@@ -500,4 +579,176 @@ async fn removed_session_is_never_resurrected_by_later_updates() {
     .unwrap();
     assert!(removed, "SessionRemoved never arrived");
     assert!(stale.is_empty(), "updates after removal: {stale:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn attaching_to_a_controlled_session_observes_until_forced() {
+    let h = Harness::start().await;
+    let size = TermSize::DEFAULT;
+    let mut c1 = h.client().await;
+    let id = create(&mut c1, sh("cat", size)).await;
+    let (_, c1_controls) = attach_with(&mut c1, id, size, false).await;
+    assert!(c1_controls, "a free session is taken on attach");
+
+    // A second client switching to it observes instead of stealing.
+    let mut c2 = h.client().await;
+    let (mut s2, c2_controls) = attach_with(
+        &mut c2,
+        id,
+        TermSize {
+            rows: 40,
+            cols: 100,
+        },
+        false,
+    )
+    .await;
+    assert!(!c2_controls);
+    let (r, c) = s2.0.screen().size();
+    assert_eq!(
+        (r.get(), c.get()),
+        (24, 80),
+        "observers must not resize the PTY"
+    );
+    c2.send(&ClientMessage::Input(b"ignored\r".to_vec()))
+        .await
+        .unwrap();
+    c1.send(&ClientMessage::Input(b"typed\r".to_vec()))
+        .await
+        .unwrap();
+    wait_for_text(&mut c2, &mut s2, "typed").await;
+    assert!(!s2.contents().contains("ignored"));
+
+    // Forcing takes control explicitly and tells the old controller.
+    let (_, forced) = attach_with(&mut c2, id, size, true).await;
+    assert!(forced);
+    timeout(
+        T,
+        c1.recv_until(|m| matches!(m, ServerMessage::ControlLost { .. }).then_some(())),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn observers_are_told_when_control_is_released() {
+    let h = Harness::start().await;
+    let size = TermSize::DEFAULT;
+    let mut c1 = h.client().await;
+    let id = create(&mut c1, sh("sleep 60", size)).await;
+    attach_with(&mut c1, id, size, false).await;
+    let mut c2 = h.client().await;
+    let (_, observing) = attach_with(&mut c2, id, size, false).await;
+    assert!(!observing);
+
+    // The controller's frontend disappears (crash or quit).
+    drop(c1);
+    timeout(
+        T,
+        c2.recv_until(|m| {
+            matches!(m, ServerMessage::ControlReleased { session } if session == id).then_some(())
+        }),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let (_, now_controls) = attach_with(&mut c2, id, size, false).await;
+    assert!(now_controls, "free control is taken on the next attach");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn crash_marks_running_sessions_lost_and_ids_keep_increasing() {
+    let mut h = Harness::start().await;
+    let mut c = h.client().await;
+    let running = create(&mut c, sh("sleep 60", TermSize::DEFAULT)).await;
+    c.send(&ClientMessage::RenameSession {
+        session: running,
+        label: "api".into(),
+    })
+    .await
+    .unwrap();
+    let exited = create(&mut c, sh("exit 0", TermSize::DEFAULT)).await;
+    // Wait until the store reflects the rename and the exit.
+    timeout(T, async {
+        loop {
+            let text = std::fs::read_to_string(h.paths.state_dir.join("sessions.json"))
+                .unwrap_or_default();
+            // Written after `exited` was created (next id is past it) and after
+            // it exited (no longer listed).
+            let next = format!("\"next_session_id\": {}", exited + 1);
+            if text.contains("\"api\"")
+                && text.contains(&next)
+                && !text.contains(&format!("\"id\": {exited}"))
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("store never caught up");
+    drop(c);
+
+    h.crash().await;
+    h.restart().await;
+
+    let mut c = h.client().await;
+    let sessions = list(&mut c).await;
+    assert_eq!(
+        sessions.len(),
+        1,
+        "only the running session is remembered: {sessions:?}"
+    );
+    assert_eq!(sessions[0].id, running);
+    assert_eq!(sessions[0].label, "api");
+    assert_eq!(sessions[0].state, SessionState::Lost);
+
+    // Lost sessions cannot be attached...
+    c.send(&ClientMessage::Attach {
+        session: running,
+        size: TermSize::DEFAULT,
+        force: false,
+    })
+    .await
+    .unwrap();
+    let err = timeout(T, c.recv_until(|_| None::<()>))
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert!(err.to_string().contains("previous daemon"), "{err}");
+
+    // ...new ids never collide with old ones...
+    let fresh = create(&mut c, sh("sleep 60", TermSize::DEFAULT)).await;
+    assert!(fresh > exited, "id {fresh} reused (previous max {exited})");
+
+    // ...and removing a lost session just forgets it.
+    c.send(&ClientMessage::KillSession(running)).await.unwrap();
+    timeout(
+        T,
+        c.recv_until(|m| {
+            matches!(m, ServerMessage::SessionRemoved(r) if r == running).then_some(())
+        }),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(list(&mut c).await.len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn graceful_shutdown_forgets_sessions_but_ids_keep_increasing() {
+    let mut h = Harness::start().await;
+    let mut c = h.client().await;
+    let first = create(&mut c, sh("sleep 60", TermSize::DEFAULT)).await;
+    drop(c);
+    h.shutdown().await;
+    h.restart().await;
+
+    let mut c = h.client().await;
+    assert!(
+        list(&mut c).await.is_empty(),
+        "deliberately stopped sessions are not 'lost'"
+    );
+    let next = create(&mut c, sh("sleep 60", TermSize::DEFAULT)).await;
+    assert!(next > first);
 }

@@ -44,8 +44,11 @@ PTY I/O and `child.wait()` are blocking, so each session has 3 OS threads (read,
 | What | Where | Override |
 |---|---|---|
 | socket, lock | `$XDG_RUNTIME_DIR/hive/` (0700), socket 0600 | `HIVE_RUNTIME_DIR` |
-| logs `hived.log`, `hive.log` | `$XDG_STATE_HOME/hive/` | `HIVE_STATE_DIR` |
+| logs `hived.log`, `hive.log`; `sessions.json` (0600, metadata only) | `$XDG_STATE_HOME/hive/` | `HIVE_STATE_DIR` |
 | config | `~/.config/hive/config.toml` | `HIVE_CONFIG` |
 | daemon binary | sibling of `hive`, then `$PATH` | `HIVE_DAEMON_BIN` |
 
-Log level is set with `HIVE_LOG` (an EnvFilter string).
+Log level is set with `HIVE_LOG` (an EnvFilter string). The runtime dir path must fit a Unix socket path (about 107 bytes), so a deep `HIVE_RUNTIME_DIR` fails with "path must be shorter than SUN_LEN".
+
+## Reconnect
+The TUI's main loop runs in phases: `connected` until the link drops, then `reconnect` (backoff 100 ms → 2 s, auto-starting `hived` at most every 2 s). On success it re-lists and re-attaches the preferred session with `force: false`. If the daemon pid changed, it warns that sessions ended (they appear `Lost`).

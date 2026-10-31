@@ -76,6 +76,8 @@ pub(crate) struct Attachment {
     pub info: SessionInfo,
     pub snapshot: Vec<u8>,
     pub output: broadcast::Receiver<Chunk>,
+    /// Whether the attaching client holds input control.
+    pub controller: bool,
     pub previous_controller: Option<ClientId>,
 }
 
@@ -277,25 +279,37 @@ impl Session {
         let _ = self.output.send(Chunk::Resized(size));
     }
 
-    /// Attaches `client` as the input controller, resizing the PTY to the
-    /// client's viewport. The previous controller (if any) is returned so the
-    /// caller can notify it.
-    pub fn attach(&self, client: ClientId, size: TermSize) -> Attachment {
-        let (snapshot, output) = {
+    /// Attaches `client`. It takes input control (and the PTY is resized to
+    /// its viewport) when control is free or `force` is set; otherwise it
+    /// observes at the current size. A displaced controller is returned so
+    /// the caller can notify it.
+    pub fn attach(&self, client: ClientId, size: TermSize, force: bool) -> Attachment {
+        let (snapshot, output, controller, previous_controller) = {
             let mut term = lock(&self.term);
-            self.resize_locked(&mut term, size);
+            let (controller, previous) = {
+                let mut meta = lock(&self.meta);
+                meta.attached.insert(client);
+                let free = meta.controller.is_none_or(|c| c == client);
+                if force || free {
+                    (
+                        true,
+                        meta.controller.replace(client).filter(|&c| c != client),
+                    )
+                } else {
+                    (false, None)
+                }
+            };
+            if controller {
+                self.resize_locked(&mut term, size);
+            }
             let snapshot = term.parser.screen().state_formatted().into_bytes();
-            (snapshot, self.output.subscribe())
-        };
-        let previous_controller = {
-            let mut meta = lock(&self.meta);
-            meta.attached.insert(client);
-            meta.controller.replace(client).filter(|&c| c != client)
+            (snapshot, self.output.subscribe(), controller, previous)
         };
         Attachment {
             info: self.info(),
             snapshot,
             output,
+            controller,
             previous_controller,
         }
     }
@@ -308,11 +322,16 @@ impl Session {
         (size, snapshot, self.output.subscribe())
     }
 
-    pub fn detach(&self, client: ClientId) {
+    /// Detaches `client`. If it held control, returns the observers that
+    /// should be told control is now free.
+    pub fn detach(&self, client: ClientId) -> Vec<ClientId> {
         let mut meta = lock(&self.meta);
         meta.attached.remove(&client);
         if meta.controller == Some(client) {
             meta.controller = None;
+            meta.attached.iter().copied().collect()
+        } else {
+            Vec::new()
         }
     }
 

@@ -6,7 +6,8 @@ use std::time::Duration;
 
 use hive_core::brand;
 use hive_protocol::{
-    ClientMessage, PROTOCOL_VERSION, ServerMessage, SessionId, read_frame, write_frame,
+    ClientMessage, PROTOCOL_VERSION, ProtocolError, ServerMessage, SessionId, read_frame,
+    write_frame,
 };
 use tokio::net::UnixStream;
 use tokio::sync::broadcast::error::{RecvError, TryRecvError};
@@ -92,6 +93,16 @@ pub(crate) async fn handle_client(daemon: Arc<Daemon>, stream: UnixStream) {
         match read_frame::<_, ClientMessage>(&mut rd).await {
             Ok(Some(msg)) => conn.handle(msg).await,
             Ok(None) => break,
+            // A client killed mid-read (closed terminal, crashed UI) is routine.
+            Err(ProtocolError::Io(e))
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::UnexpectedEof
+                ) =>
+            {
+                tracing::debug!(client = id, "client went away: {e}");
+                break;
+            }
             Err(e) => {
                 tracing::warn!(client = id, "dropping client: {e}");
                 break;
@@ -130,7 +141,11 @@ impl Connection {
                 Ok(info) => self.send(ServerMessage::SessionCreated(info)).await,
                 Err(e) => self.error(format!("{e:#}")).await,
             },
-            ClientMessage::Attach { session, size } => self.attach(session, size).await,
+            ClientMessage::Attach {
+                session,
+                size,
+                force,
+            } => self.attach(session, size, force).await,
             ClientMessage::Detach => {
                 if let Some(id) = self.detach() {
                     self.send(ServerMessage::Detached { session: id }).await;
@@ -172,13 +187,28 @@ impl Connection {
         }
     }
 
-    async fn attach(&mut self, id: SessionId, size: hive_protocol::TermSize) {
+    async fn attach(&mut self, id: SessionId, size: hive_protocol::TermSize, force: bool) {
         let Some(session) = self.daemon.get(id) else {
-            self.error(format!("no session with id {id}")).await;
+            let message = if self.daemon.is_lost(id) {
+                format!("session {id} ended when the previous daemon stopped; relaunch it instead")
+            } else {
+                format!("no session with id {id}")
+            };
+            self.error(message).await;
             return;
         };
-        self.detach();
-        let a = session.attach(self.id, size);
+        // Re-attaching to the same session (e.g. to take control) must not
+        // release control in between, or observers would see a spurious
+        // ControlReleased.
+        match self.attached.take() {
+            Some(old) if old.session.id == id => old.forwarder.abort(),
+            Some(old) => {
+                self.attached = Some(old);
+                self.detach();
+            }
+            None => {}
+        }
+        let a = session.attach(self.id, size, force);
         if let Some(prev) = a.previous_controller {
             self.daemon
                 .notify(prev, ServerMessage::ControlLost { session: id });
@@ -186,7 +216,7 @@ impl Connection {
         self.send(ServerMessage::Attached {
             session: a.info.clone(),
             snapshot: a.snapshot,
-            controller: true,
+            controller: a.controller,
         })
         .await;
         session.publish();
@@ -197,7 +227,14 @@ impl Connection {
     fn detach(&mut self) -> Option<SessionId> {
         let a = self.attached.take()?;
         a.forwarder.abort();
-        a.session.detach(self.id);
+        for observer in a.session.detach(self.id) {
+            self.daemon.notify(
+                observer,
+                ServerMessage::ControlReleased {
+                    session: a.session.id,
+                },
+            );
+        }
         a.session.publish();
         Some(a.session.id)
     }

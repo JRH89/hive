@@ -31,7 +31,7 @@ cargo test -p hive-tui app::tests::<name>              # one unit test
 
 Run fmt, clippy and test after every meaningful change and fix failures before moving on.
 
-**Running against an isolated daemon** (doesn't touch the user's real one): set `HIVE_RUNTIME_DIR` and `HIVE_STATE_DIR` to scratch dirs. `hive` then auto-starts a private `hived` there. To drive the TUI headlessly, run it inside `tmux new-session -d -x W -y H ...` and inspect it with `tmux capture-pane -p` and `tmux send-keys`. Stop it with `hive daemon stop` afterwards. Logs: `$HIVE_STATE_DIR/hived.log`, verbosity via `HIVE_LOG=debug`.
+**Running against an isolated daemon** (doesn't touch the user's real one): set `HIVE_RUNTIME_DIR` and `HIVE_STATE_DIR` to scratch dirs (keep the runtime dir path short: the socket path must fit in ~107 bytes). `hive` then auto-starts a private `hived` there. To drive the TUI headlessly, run it inside `tmux new-session -d -x W -y H ...` and inspect it with `tmux capture-pane -p` and `tmux send-keys`. Stop it with `hive daemon stop` afterwards. Logs: `$HIVE_STATE_DIR/hived.log`, verbosity via `HIVE_LOG=debug`.
 
 ## Architecture (big picture)
 
@@ -48,7 +48,8 @@ Invariants that span files:
 - Slow clients get `Resync` (a fresh snapshot) and never block the PTY. `broadcast::try_recv` repositions after `Lagged`, so resync immediately.
 - Per-session broadcasts go only through `Session::publish()`/`remove()`, never `daemon.events.send(SessionUpdated(..))` directly. They are ordered under the meta lock so nothing can resurrect a removed session (ADR-0008).
 - The TUI mirrors only the attached session. Switching re-attaches (ADR-0007), so don't add background mirroring without revisiting that ADR.
-- Only the controller client's `Input`/`Resize` are honoured. Attaching takes control, and the previous controller gets `ControlLost`.
+- Only the controller client's `Input`/`Resize` are honoured. `Attach` takes control only if it's free or `force` is set (TUI Leader `a`); otherwise the client observes (ADR-0010). Take-over sends `ControlLost`; a controller leaving sends observers `ControlReleased`.
+- `sessions.json` (state dir) holds metadata only, never env. Sessions alive at a crash return as `SessionState::Lost`; graceful shutdown forgets them. Ids never repeat (ADR-0009).
 - The reader thread must never block on the writer (`try_send` for query replies).
 - `hive-protocol::read_frame` is not cancel-safe. Keep it in its own task, never in `select!`.
 

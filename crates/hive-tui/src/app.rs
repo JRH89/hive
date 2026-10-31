@@ -8,11 +8,16 @@
 use std::collections::BTreeMap;
 use std::num::NonZeroU16;
 
+const OBSERVING: &str =
+    "Observing: another client controls this session. Leader then a to take control.";
+const CONTROL_LOST: &str = "Another client took control. Leader then a to take it back.";
+const CONTROL_FREE: &str = "Control is free. Leader then a to take it.";
+
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use hive_core::config::Config;
 use hive_core::launch;
 use hive_protocol::{
-    ClientMessage, CreateSession, ServerMessage, SessionId, SessionInfo, TermSize,
+    ClientMessage, CreateSession, ServerMessage, SessionId, SessionInfo, SessionState, TermSize,
 };
 
 use crate::keys;
@@ -64,6 +69,17 @@ pub enum Mode {
     },
 }
 
+/// State of the connection to the daemon.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Link {
+    Connected,
+    /// The connection dropped; the frontend keeps the last screen and retries.
+    Reconnecting {
+        attempt: u32,
+        reason: String,
+    },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tone {
     Info,
@@ -98,7 +114,13 @@ pub struct App {
     pub sidebar_visible: bool,
     pub status: Option<(Tone, String)>,
     pub exit: Option<Outcome>,
+    pub link: Link,
+    /// Pid of the daemon we are (or were last) connected to, to tell a
+    /// reconnect to the same daemon from one to a restarted daemon.
+    pub daemon_pid: Option<u32>,
     start: Option<Start>,
+    /// Session to re-attach once the session list arrives after reconnecting.
+    prefer: Option<SessionId>,
     /// A session we created and should attach to once it is confirmed.
     awaiting_create: bool,
 }
@@ -141,7 +163,10 @@ impl App {
             sidebar_visible: false,
             status: None,
             exit: None,
+            link: Link::Connected,
+            daemon_pid: None,
             start: Some(start),
+            prefer: None,
             awaiting_create: false,
         };
         app.set_terminal_size(terminal);
@@ -176,6 +201,12 @@ impl App {
         self.sessions.keys().copied().collect()
     }
 
+    /// True if the status is a notice about who controls input, which is
+    /// stale once this client becomes controller.
+    fn status_is_control_notice(&self) -> bool {
+        matches!(&self.status, Some((_, m)) if [OBSERVING, CONTROL_LOST, CONTROL_FREE].contains(&m.as_str()))
+    }
+
     fn set_status(&mut self, tone: Tone, msg: impl Into<String>) {
         self.status = Some((tone, msg.into()));
     }
@@ -196,16 +227,36 @@ impl App {
         out
     }
 
+    /// Attaches without stealing: input control is taken only if free.
     fn attach(&self, id: SessionId) -> ClientMessage {
         ClientMessage::Attach {
             session: id,
             size: self.panel,
+            force: false,
         }
     }
 
-    /// Most recently created session, preferring live ones.
+    fn take_control(&self, id: SessionId) -> ClientMessage {
+        ClientMessage::Attach {
+            session: id,
+            size: self.panel,
+            force: true,
+        }
+    }
+
+    fn is_lost(&self, id: SessionId) -> bool {
+        self.sessions
+            .get(&id)
+            .is_some_and(|s| s.state == SessionState::Lost)
+    }
+
+    /// Most recently created attachable session, preferring live ones.
     fn pick_session(&self, exclude: Option<SessionId>) -> Option<SessionId> {
-        let candidates = || self.sessions.values().filter(|s| Some(s.id) != exclude);
+        let candidates = || {
+            self.sessions
+                .values()
+                .filter(|s| Some(s.id) != exclude && s.state != SessionState::Lost)
+        };
         candidates()
             .filter(|s| s.state.is_alive())
             .map(|s| s.id)
@@ -238,10 +289,16 @@ impl App {
                 self.sessions = list.into_iter().map(|s| (s.id, s)).collect();
                 if matches!(self.start, Some(Start::Auto)) {
                     self.start = None;
-                    if self.view.is_none()
-                        && let Some(id) = self.pick_session(None)
-                    {
-                        out.push(self.attach(id));
+                    let preferred = self
+                        .prefer
+                        .take()
+                        .filter(|id| self.sessions.contains_key(id) && !self.is_lost(*id));
+                    match preferred.or_else(|| self.pick_session(None)) {
+                        Some(id) => out.push(self.attach(id)),
+                        None => {
+                            self.view = None;
+                            self.focus = Focus::Sidebar;
+                        }
                     }
                 }
             }
@@ -266,7 +323,11 @@ impl App {
                 });
                 self.cursor = Some(session.id);
                 self.sessions.insert(session.id, session);
-                if !matches!(self.status, Some((Tone::Error, _))) {
+                if !controller {
+                    self.set_status(Tone::Warning, OBSERVING);
+                } else if self.status_is_control_notice()
+                    || !matches!(self.status, Some((Tone::Error | Tone::Warning, _)))
+                {
                     self.status = None;
                 }
             }
@@ -302,10 +363,16 @@ impl App {
             ServerMessage::ControlLost { session } => {
                 if let Some(v) = self.view.as_mut().filter(|v| v.id == session) {
                     v.controller = false;
-                    self.set_status(
-                        Tone::Warning,
-                        "Another client took control. Leader then a to take it back.",
-                    );
+                    self.set_status(Tone::Warning, CONTROL_LOST);
+                }
+            }
+            ServerMessage::ControlReleased { session } => {
+                if self
+                    .view
+                    .as_ref()
+                    .is_some_and(|v| v.id == session && !v.controller)
+                {
+                    self.set_status(Tone::Info, CONTROL_FREE);
                 }
             }
             ServerMessage::SessionUpdated(info) => {
@@ -356,7 +423,8 @@ impl App {
 
     /// Whether keystrokes should go to the attached agent.
     pub fn can_type(&self) -> bool {
-        self.mode == Mode::Normal
+        self.link == Link::Connected
+            && self.mode == Mode::Normal
             && self.focus == Focus::Terminal
             && self.view.as_ref().is_some_and(|v| v.controller)
             && self.current().is_some_and(|s| s.state.is_alive())
@@ -369,6 +437,14 @@ impl App {
     }
 
     fn on_key(&mut self, key: KeyEvent) -> Vec<ClientMessage> {
+        if matches!(self.link, Link::Reconnecting { .. }) {
+            // Nothing can be sent; only quitting makes sense.
+            let ctrl_c = key.code == KeyCode::Char('c') && key.modifiers == KeyModifiers::CONTROL;
+            if key.code == KeyCode::Char('q') || ctrl_c {
+                self.exit = Some(Outcome::Detached { session: None });
+            }
+            return Vec::new();
+        }
         match self.mode {
             Mode::Help => {
                 self.mode = Mode::Normal;
@@ -416,6 +492,7 @@ impl App {
             KeyCode::Up | KeyCode::Char('k') => self.move_cursor(-1),
             KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
                 return match self.cursor {
+                    Some(id) if self.is_lost(id) && key.code == KeyCode::Enter => self.relaunch(id),
                     Some(id) => self.switch_to(id),
                     None => Vec::new(),
                 };
@@ -477,7 +554,7 @@ impl App {
             }
             KeyCode::Char('a') => {
                 if let Some(id) = current {
-                    return vec![self.attach(id)];
+                    return vec![self.take_control(id)];
                 }
             }
             KeyCode::Char('?') => self.mode = Mode::Help,
@@ -499,10 +576,21 @@ impl App {
         self.cursor = Some(order[next as usize]);
     }
 
-    /// Shows `id` in the terminal panel and focuses it.
+    /// Shows `id` in the terminal panel and focuses it. A lost session can't
+    /// be shown; the sidebar explains how to relaunch it instead.
     fn switch_to(&mut self, id: SessionId) -> Vec<ClientMessage> {
-        self.focus = Focus::Terminal;
         self.cursor = Some(id);
+        if self.is_lost(id) {
+            self.focus = Focus::Sidebar;
+            self.set_status(
+                Tone::Warning,
+                format!(
+                    "Session {id} ended when hived stopped. Enter relaunches it, x removes it."
+                ),
+            );
+            return Vec::new();
+        }
+        self.focus = Focus::Terminal;
         match &self.view {
             Some(v) if v.id == id && v.controller => Vec::new(),
             _ => vec![self.attach(id)],
@@ -516,9 +604,13 @@ impl App {
         }
     }
 
-    /// Next/previous session, wrapping around.
+    /// Next/previous attachable session, wrapping around.
     fn switch_relative(&mut self, delta: isize) -> Vec<ClientMessage> {
-        let order = self.order();
+        let order: Vec<SessionId> = self
+            .order()
+            .into_iter()
+            .filter(|&id| !self.is_lost(id) || Some(id) == self.view.as_ref().map(|v| v.id))
+            .collect();
         if order.is_empty() {
             return Vec::new();
         }
@@ -529,6 +621,66 @@ impl App {
             .unwrap_or(0);
         let next = idx.rem_euclid(order.len() as isize) as usize;
         self.switch_to(order[next])
+    }
+
+    /// Starts a new session from a lost session's agent, label, command and
+    /// directory, then forgets the lost record. The environment comes from
+    /// this client because environments are never persisted.
+    fn relaunch(&mut self, id: SessionId) -> Vec<ClientMessage> {
+        let Some(info) = self.sessions.get(&id) else {
+            return Vec::new();
+        };
+        let mut env: Vec<(String, String)> = std::env::vars().collect();
+        if let Some(def) = self.config.agent(&info.agent) {
+            env.retain(|(k, _)| !def.env.contains_key(k));
+            env.extend(def.env);
+        }
+        let req = CreateSession {
+            agent: info.agent.clone(),
+            label: info.label.clone(),
+            command: info.command.clone(),
+            cwd: info.cwd.clone(),
+            env,
+            size: self.panel,
+        };
+        self.awaiting_create = true;
+        self.set_status(Tone::Info, format!("Relaunching {}…", info.label));
+        vec![
+            ClientMessage::CreateSession(req),
+            ClientMessage::KillSession(id),
+        ]
+    }
+
+    /// The daemon connection dropped. The last screen stays visible.
+    pub fn on_disconnected(&mut self, reason: String) {
+        self.link = Link::Reconnecting { attempt: 0, reason };
+        self.mode = Mode::Normal;
+        self.awaiting_create = false;
+        self.prefer = self.view.as_ref().map(|v| v.id).or(self.prefer);
+    }
+
+    pub fn on_reconnect_attempt(&mut self) {
+        if let Link::Reconnecting { attempt, .. } = &mut self.link {
+            *attempt += 1;
+        }
+    }
+
+    /// Connected again. Re-requests the session list and re-attaches the
+    /// previous session if it still exists (ids are never reused, so a
+    /// matching id is the same session).
+    pub fn on_reconnected(&mut self, daemon_pid: u32) -> Vec<ClientMessage> {
+        self.link = Link::Connected;
+        if self.daemon_pid.is_some_and(|p| p != daemon_pid) {
+            self.set_status(
+                Tone::Warning,
+                "hived restarted. Sessions that were running are marked ended (◌).",
+            );
+        } else {
+            self.status = None;
+        }
+        self.daemon_pid = Some(daemon_pid);
+        self.start = Some(Start::Auto);
+        vec![ClientMessage::ListSessions]
     }
 
     fn start_rename(&mut self, id: SessionId) {
@@ -694,7 +846,18 @@ mod tests {
         vec![ClientMessage::Attach {
             session: id,
             size: app.panel,
+            force: false,
         }]
+    }
+
+    fn lost(id: SessionId, label: &str) -> SessionInfo {
+        SessionInfo {
+            label: label.into(),
+            cwd: "/src/api".into(),
+            command: vec!["claude".into(), "--verbose".into()],
+            agent: "claude".into(),
+            ..info(id, SessionState::Lost)
+        }
     }
 
     #[test]
@@ -967,7 +1130,14 @@ mod tests {
         app.on_server(ServerMessage::ControlLost { session: 1 });
         assert!(app.on_terminal_event(ch('a')).is_empty());
         app.on_terminal_event(leader());
-        assert_eq!(app.on_terminal_event(ch('a')), attach_msg(&app, 1));
+        assert_eq!(
+            app.on_terminal_event(ch('a')),
+            vec![ClientMessage::Attach {
+                session: 1,
+                size: app.panel,
+                force: true
+            }]
+        );
     }
 
     #[test]
@@ -983,5 +1153,154 @@ mod tests {
         assert!(!app.can_type());
         assert!(app.sidebar_keys_active());
         assert_eq!(app.on_terminal_event(ch('2')), attach_msg(&app, 2));
+    }
+
+    #[test]
+    fn attaching_as_observer_explains_how_to_take_control() {
+        let mut app = app();
+        app.on_server(ServerMessage::Attached {
+            session: info(2, SessionState::Running),
+            snapshot: Vec::new(),
+            controller: false,
+        });
+        assert!(!app.can_type());
+        assert!(matches!(&app.status, Some((Tone::Warning, m)) if m.contains("Observing")));
+        app.on_server(ServerMessage::ControlReleased { session: 2 });
+        assert!(matches!(&app.status, Some((Tone::Info, m)) if m.contains("free")));
+        app.on_server(ServerMessage::Attached {
+            session: info(2, SessionState::Running),
+            snapshot: Vec::new(),
+            controller: true,
+        });
+        assert_eq!(app.status, None, "control notices clear once controller");
+        app.on_server(ServerMessage::Attached {
+            session: info(2, SessionState::Running),
+            snapshot: Vec::new(),
+            controller: false,
+        });
+        app.on_server(ServerMessage::Attached {
+            session: info(2, SessionState::Running),
+            snapshot: Vec::new(),
+            controller: true,
+        });
+        assert_eq!(
+            app.status, None,
+            "the observing warning clears on take-over"
+        );
+    }
+
+    #[test]
+    fn disconnect_freezes_input_and_reconnect_reattaches_the_same_session() {
+        let mut app = app();
+        app.daemon_pid = Some(100);
+        app.on_server(ServerMessage::Attached {
+            session: info(2, SessionState::Running),
+            snapshot: b"before".to_vec(),
+            controller: true,
+        });
+        app.on_disconnected("the daemon closed the connection".into());
+        assert!(!app.can_type());
+        assert!(
+            app.on_terminal_event(ch('a')).is_empty(),
+            "nothing is sent while down"
+        );
+        app.on_reconnect_attempt();
+        assert_eq!(
+            app.link,
+            Link::Reconnecting {
+                attempt: 1,
+                reason: "the daemon closed the connection".into()
+            }
+        );
+        // The last screen stays visible while reconnecting.
+        assert!(
+            app.view
+                .as_ref()
+                .unwrap()
+                .parser
+                .screen()
+                .contents()
+                .contains("before")
+        );
+
+        assert_eq!(app.on_reconnected(100), vec![ClientMessage::ListSessions]);
+        assert_eq!(app.link, Link::Connected);
+        assert!(app.status.is_none(), "same daemon: nothing to warn about");
+        let out = app.on_server(ServerMessage::SessionList(
+            (1..=3).map(|i| info(i, SessionState::Running)).collect(),
+        ));
+        assert_eq!(out, attach_msg(&app, 2));
+    }
+
+    #[test]
+    fn reconnecting_to_a_restarted_daemon_warns_and_skips_lost_sessions() {
+        let mut app = app();
+        app.daemon_pid = Some(100);
+        app.on_disconnected("connection lost".into());
+        app.on_reconnected(200);
+        assert!(matches!(&app.status, Some((Tone::Warning, m)) if m.contains("restarted")));
+        // Session 1 (previously attached) is now lost; 4 is new and live.
+        let out = app.on_server(ServerMessage::SessionList(vec![
+            lost(1, "api"),
+            info(4, SessionState::Running),
+        ]));
+        assert_eq!(out, attach_msg(&app, 4));
+    }
+
+    #[test]
+    fn only_lost_sessions_leaves_the_sidebar_focused() {
+        let mut app = App::new(Config::default(), Start::Auto, (100, 26));
+        app.on_connect();
+        assert!(
+            app.on_server(ServerMessage::SessionList(vec![lost(1, "api")]))
+                .is_empty()
+        );
+        assert_eq!(app.focus, Focus::Sidebar);
+        assert_eq!(app.cursor, Some(1));
+    }
+
+    #[test]
+    fn quitting_while_reconnecting() {
+        let mut app = app();
+        app.on_disconnected("gone".into());
+        app.on_terminal_event(ch('q'));
+        assert_eq!(app.exit, Some(Outcome::Detached { session: None }));
+    }
+
+    #[test]
+    fn lost_sessions_are_skipped_by_switching_and_relaunched_from_the_sidebar() {
+        let mut app = app();
+        app.on_server(ServerMessage::SessionUpdated(lost(2, "api")));
+        // j from #1 skips lost #2 and lands on #3.
+        app.on_terminal_event(leader());
+        assert_eq!(app.on_terminal_event(ch('j')), attach_msg(&app, 3));
+        // Jumping straight to it explains instead of attaching.
+        app.on_terminal_event(leader());
+        assert!(app.on_terminal_event(ch('2')).is_empty());
+        assert_eq!(app.focus, Focus::Sidebar);
+        assert!(matches!(&app.status, Some((Tone::Warning, m)) if m.contains("relaunch")));
+
+        // Enter on it relaunches with the remembered command, cwd and label,
+        // then forgets the lost record.
+        let out = app.on_terminal_event(key(KeyCode::Enter, KeyModifiers::NONE));
+        let [
+            ClientMessage::CreateSession(req),
+            ClientMessage::KillSession(2),
+        ] = out.as_slice()
+        else {
+            panic!("expected relaunch, got {out:?}")
+        };
+        assert_eq!(req.command, vec!["claude", "--verbose"]);
+        assert_eq!(req.cwd, "/src/api");
+        assert_eq!(req.label, "api");
+        assert!(
+            req.env.iter().any(|(k, _)| k == "PATH"),
+            "env comes from this client"
+        );
+        let out = app.on_server(ServerMessage::SessionCreated(info(
+            9,
+            SessionState::Running,
+        )));
+        assert_eq!(out, attach_msg(&app, 9));
     }
 }

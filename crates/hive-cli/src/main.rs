@@ -120,7 +120,7 @@ async fn run(cli: Cli, paths: Paths) -> anyhow::Result<()> {
     let auto = config.daemon.auto_start;
 
     match cli.command {
-        None => tui(connect(auto).await?, config, Start::Auto).await,
+        None => tui(&paths, connect(auto).await?, config, Start::Auto).await,
         Some(Command::New {
             agent,
             label,
@@ -143,7 +143,7 @@ async fn run(cli: Cli, paths: Paths) -> anyhow::Result<()> {
                 println!("created session {} ({})", info.id, info.agent);
                 Ok(())
             } else {
-                tui(client, config, Start::Create(req)).await
+                tui(&paths, client, config, Start::Create(req)).await
             }
         }
         Some(Command::List) => {
@@ -156,7 +156,7 @@ async fn run(cli: Cli, paths: Paths) -> anyhow::Result<()> {
             if !list(&mut client).await?.iter().any(|s| s.id == session) {
                 bail!("no session with id {session} (see `hive list`)");
             }
-            tui(client, config, Start::Attach(session)).await
+            tui(&paths, client, config, Start::Attach(session)).await
         }
         Some(Command::Kill { session }) => {
             let mut client = connect(false).await.or_else(not_running)?;
@@ -265,10 +265,16 @@ fn print_sessions(sessions: &[SessionInfo]) {
                 format!("killed ({})", signal.as_deref().unwrap_or("?"))
             }
             SessionState::Failed { .. } => "failed".into(),
+            SessionState::Lost => "ended†".into(),
         };
         println!(
             "{:>4}  {:<10} {:<16} {:<14} {}",
             s.id, s.agent, s.label, state, s.cwd
+        );
+    }
+    if sessions.iter().any(|s| s.state == SessionState::Lost) {
+        println!(
+            "\n† was running when hived stopped; relaunch it from the UI (enter in the sidebar)"
         );
     }
 }
@@ -282,8 +288,8 @@ fn crossterm_size() -> Option<TermSize> {
     Some(TermSize { rows, cols })
 }
 
-async fn tui(client: Client, config: Config, start: Start) -> anyhow::Result<()> {
-    match hive_tui::run(client, config, start).await? {
+async fn tui(paths: &Paths, client: Client, config: Config, start: Start) -> anyhow::Result<()> {
+    match hive_tui::run(paths.clone(), client, config, start).await? {
         Outcome::Detached { session: Some(id) } => {
             println!("detached from session {id} — it keeps running. `hive attach {id}` to return.")
         }

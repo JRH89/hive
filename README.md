@@ -5,7 +5,7 @@ One terminal. Many agents.
 
 A lightweight, Rust-powered terminal multiplexer for AI coding agents.
 
-> **Status: early development (Phase 2 of 6).** Several agents side by side with a session sidebar, plus detach and reattach. Workspaces and git worktrees are planned and **not implemented yet**. See [Roadmap](#roadmap).
+> **Status: early development (Phase 3 of 6).** Several agents side by side with a session sidebar, detach and reattach, and automatic reconnection. Workspaces and git worktrees are planned and **not implemented yet**. See [Roadmap](#roadmap).
 
 ## What works today
 - Launch Claude Code, Codex, Gemini CLI, OpenCode, a shell, or any configured command in a real PTY
@@ -15,6 +15,8 @@ A lightweight, Rust-powered terminal multiplexer for AI coding agents.
 - Run several agents at once and switch between them from a sidebar
 - Rename and terminate sessions from the UI
 - Resizing follows your terminal
+- If `hived` restarts, the UI reconnects on its own and shows which sessions ended (`◌`); press enter on one to relaunch it
+- Several terminals can view the same session; only one types at a time, and taking over is explicit (`Ctrl+Space a`)
 
 ## Build
 Requires Rust ≥ 1.89 on Linux.
@@ -55,7 +57,7 @@ The leader is **Ctrl+Space**. Everything else goes to the agent.
 | `Ctrl+Space r` | Rename session |
 | `Ctrl+Space x` | Terminate session (asks to confirm) |
 | `Ctrl+Space d` | Detach |
-| `Ctrl+Space a` | Take input control (when another client attached) |
+| `Ctrl+Space a` | Take input control (when another window controls the session) |
 | `Ctrl+Space Ctrl+Space` | Send a literal Ctrl+Space |
 | `Ctrl+Space ?` | Help |
 
@@ -81,7 +83,7 @@ args = ["--dark-mode"]
 ## Roadmap
 1. ✅ Daemon-first foundation: one session, detach/reattach
 2. ✅ Multiplexing: sidebar, switching, several agents at once
-3. Robust persistence: auto-reconnect, multi-client polish
+3. ✅ Robust persistence: auto-reconnect, multi-client polish
 4. Workspaces and git worktrees
 5. Polish: command palette, themes, configurable keys
 6. Testing and distribution

@@ -6,7 +6,7 @@ source: crates/hive-protocol/src/lib.rs
 
 - Transport: Unix stream socket, per-user dir. The daemon checks `SO_PEERCRED` uid == own uid.
 - Frame: `u32` little-endian length + `postcard` payload. Max 8 MiB (`MAX_FRAME_LEN`). See [[ADR-0003 postcard length-prefixed frames]].
-- `PROTOCOL_VERSION = 2` (v2 added `RenameSession`). Bump it on any incompatible change. New variants go at the **end** of the enums.
+- `PROTOCOL_VERSION = 3` (v2 added `RenameSession`; v3 added `Attach.force`, `ControlReleased` and `SessionState::Lost`). Bump it on any incompatible change. New variants go at the **end** of the enums.
 - **Compat invariant:** `ClientMessage::Hello` and `ServerMessage::Welcome` stay variant 0 with the same shape (a unit test enforces this). That way a mismatched client and daemon can still handshake and report "run `hive daemon stop`".
 
 ## Handshake
@@ -17,15 +17,15 @@ Client → `Hello{protocol_version, client}` (within 5 s) → daemon replies `We
 |---|---|
 | `ListSessions` | → `SessionList` |
 | `CreateSession{agent,label,command,cwd,env,size}` | spawn; → `SessionCreated`, plus a `SessionUpdated` broadcast. `command` is argv, never a shell string. `env` is the client's full environment |
-| `Attach{session,size}` | become **controller**, PTY resized to `size`; → `Attached{session,snapshot,controller}`. The previous controller gets `ControlLost` |
+| `Attach{session,size,force}` | become **controller** if control is free or `force`, else observe; a controller resizes the PTY to `size`; → `Attached{session,snapshot,controller}`. A forced take-over sends the previous controller `ControlLost`. Fails for `Lost` sessions. See [[ADR-0010 Attach observes unless control is free or forced]] |
 | `Detach` | → `Detached` |
 | `Input(bytes)` / `Resize(size)` | silently ignored unless sender is controller |
 | `RenameSession{session,label}` | trimmed, ≤64 chars; empty resets to the agent name; → `SessionUpdated` broadcast |
-| `KillSession(id)` | TERM → (timeout) → KILL the process group, remove; → `SessionRemoved` broadcast |
+| `KillSession(id)` | TERM → (timeout) → KILL the process group, remove; → `SessionRemoved` broadcast. On a `Lost` record it just forgets it |
 | `Shutdown` | terminate all sessions, `ShuttingDown` broadcast, remove socket, exit |
 
 ## Daemon → client (streamed while attached)
-`Output{data}`, `Resized{size}` (ordered with output, so mirrors stay in sync), `Resync{size,snapshot}` (after lag), `Detached` (when the session is removed).
+`Output{data}`, `Resized{size}` (ordered with output, so mirrors stay in sync), `Resync{size,snapshot}` (after lag), `Detached` (when the session is removed), `ControlLost{session}`, `ControlReleased{session}` (to observers when the controller leaves).
 
 ## Broadcasts (every client)
 `SessionUpdated(info)`, `SessionRemoved(id)`, `ShuttingDown`. If a client lags on the event channel it gets a full `SessionList` instead.

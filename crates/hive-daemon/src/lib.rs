@@ -4,10 +4,12 @@
 mod responder;
 mod server;
 mod session;
+mod store;
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File, TryLockError};
 use std::os::unix::fs::PermissionsExt;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -18,9 +20,12 @@ use hive_core::paths::Paths;
 use hive_protocol::{CreateSession, ServerMessage, SessionId, SessionInfo};
 use tokio::net::UnixListener;
 use tokio::signal::unix::{SignalKind, signal};
+use tokio::sync::broadcast::error::{RecvError, TryRecvError};
 use tokio::sync::{broadcast, mpsc, watch};
+use tokio::task::JoinHandle;
 
 use session::{ClientId, Session};
+use store::{Store, StoredSession};
 
 #[derive(Debug, thiserror::Error)]
 #[error("another hived is already running")]
@@ -29,24 +34,52 @@ pub struct AlreadyRunning;
 pub(crate) struct Daemon {
     config: Config,
     sessions: Mutex<BTreeMap<SessionId, Arc<Session>>>,
+    /// Metadata of sessions that were running when a previous daemon died.
+    /// Kept until the user relaunches or removes them.
+    lost: Mutex<BTreeMap<SessionId, SessionInfo>>,
     next_session: AtomicU64,
     clients: Mutex<HashMap<ClientId, mpsc::Sender<ServerMessage>>>,
     next_client: AtomicU64,
     /// Session lifecycle broadcasts delivered to every connected client.
     events: broadcast::Sender<ServerMessage>,
     shutdown: watch::Sender<bool>,
+    store_path: PathBuf,
+    /// Last bytes written to `store_path`, to skip redundant writes.
+    saved: Mutex<Vec<u8>>,
 }
 
 impl Daemon {
-    fn new(config: Config) -> Daemon {
+    fn new(config: Config, store_path: PathBuf) -> Daemon {
+        let store = Store::load(&store_path);
+        let next = store
+            .sessions
+            .iter()
+            .map(|s| s.id + 1)
+            .chain([store.next_session_id, 1])
+            .max()
+            .unwrap_or(1);
+        let lost: BTreeMap<_, _> = store
+            .sessions
+            .into_iter()
+            .map(|s| (s.id, s.into_lost_info()))
+            .collect();
+        if !lost.is_empty() {
+            tracing::warn!(
+                count = lost.len(),
+                "previous daemon stopped unexpectedly; its sessions are marked lost"
+            );
+        }
         Daemon {
             config,
             sessions: Mutex::new(BTreeMap::new()),
-            next_session: AtomicU64::new(1),
+            lost: Mutex::new(lost),
+            next_session: AtomicU64::new(next),
             clients: Mutex::new(HashMap::new()),
             next_client: AtomicU64::new(1),
             events: broadcast::channel(1024).0,
             shutdown: watch::channel(false).0,
+            store_path,
+            saved: Mutex::new(Vec::new()),
         }
     }
 
@@ -54,9 +87,16 @@ impl Daemon {
         self.sessions.lock().unwrap().get(&id).cloned()
     }
 
+    fn is_lost(&self, id: SessionId) -> bool {
+        self.lost.lock().unwrap().contains_key(&id)
+    }
+
     fn list(&self) -> Vec<SessionInfo> {
-        let sessions: Vec<_> = self.sessions.lock().unwrap().values().cloned().collect();
-        sessions.iter().map(|s| s.info()).collect()
+        let live: Vec<_> = self.sessions.lock().unwrap().values().cloned().collect();
+        let mut all: Vec<SessionInfo> = live.iter().map(|s| s.info()).collect();
+        all.extend(self.lost.lock().unwrap().values().cloned());
+        all.sort_by_key(|s| s.id);
+        all
     }
 
     fn create(&self, req: CreateSession) -> anyhow::Result<SessionInfo> {
@@ -69,15 +109,23 @@ impl Daemon {
         )?;
         let info = session.info();
         tracing::info!(session = id, command = ?info.command, cwd = %info.cwd, "session created");
+        self.sessions.lock().unwrap().insert(id, session.clone());
         session.publish();
-        self.sessions.lock().unwrap().insert(id, session);
         Ok(info)
     }
 
     async fn kill(&self, id: SessionId) -> anyhow::Result<()> {
-        let session = self
-            .get(id)
-            .with_context(|| format!("no session with id {id}"))?;
+        let Some(session) = self.get(id) else {
+            // Lost records have no process; removing them is just forgetting.
+            // The broadcast is sent under the lock that guards the record so it
+            // cannot interleave with a concurrent rename's update.
+            let mut lost = self.lost.lock().unwrap();
+            if lost.remove(&id).is_some() {
+                let _ = self.events.send(ServerMessage::SessionRemoved(id));
+                return Ok(());
+            }
+            anyhow::bail!("no session with id {id}");
+        };
         session.terminate(self.kill_timeout()).await;
         self.sessions.lock().unwrap().remove(&id);
         session.remove();
@@ -86,11 +134,24 @@ impl Daemon {
     }
 
     fn rename(&self, id: SessionId, label: &str) -> anyhow::Result<()> {
-        let session = self
-            .get(id)
+        if let Some(session) = self.get(id) {
+            session.rename(label);
+            session.publish();
+            return Ok(());
+        }
+        let mut lost = self.lost.lock().unwrap();
+        let info = lost
+            .get_mut(&id)
             .with_context(|| format!("no session with id {id}"))?;
-        session.rename(label);
-        session.publish();
+        let label = label.trim();
+        info.label = if label.is_empty() {
+            info.agent.clone()
+        } else {
+            label.chars().take(64).collect()
+        };
+        let _ = self
+            .events
+            .send(ServerMessage::SessionUpdated(info.clone()));
         Ok(())
     }
 
@@ -115,6 +176,65 @@ impl Daemon {
             let _ = t.await;
         }
     }
+
+    /// Writes the session store if its contents changed. `include_live` is
+    /// false on graceful shutdown: sessions we terminated on purpose are not
+    /// "lost".
+    fn persist(&self, include_live: bool) {
+        let mut sessions: Vec<StoredSession> = if include_live {
+            self.list()
+                .iter()
+                .filter(|s| s.state.is_alive() || self.is_lost(s.id))
+                .map(StoredSession::from_info)
+                .collect()
+        } else {
+            self.lost
+                .lock()
+                .unwrap()
+                .values()
+                .map(StoredSession::from_info)
+                .collect()
+        };
+        sessions.sort_by_key(|s| s.id);
+        let bytes = Store {
+            next_session_id: self.next_session.load(Ordering::Relaxed),
+            sessions,
+            ..Store::default()
+        }
+        .to_bytes();
+        let mut saved = self.saved.lock().unwrap();
+        if *saved == bytes {
+            return;
+        }
+        match Store::write_bytes(&self.store_path, &bytes) {
+            Ok(()) => *saved = bytes,
+            Err(e) => tracing::warn!("cannot write {}: {e}", self.store_path.display()),
+        }
+    }
+}
+
+/// Persists the store after every burst of lifecycle events.
+async fn persist_loop(daemon: Arc<Daemon>) {
+    let mut rx = daemon.events.subscribe();
+    daemon.persist(true);
+    loop {
+        if let Err(RecvError::Closed) = rx.recv().await {
+            break;
+        }
+        // Coalesce whatever else is queued into one write.
+        while let Ok(_) | Err(TryRecvError::Lagged(_)) = rx.try_recv() {}
+        daemon.persist(true);
+    }
+}
+
+/// Aborts the wrapped task when dropped, so background work dies with `run`
+/// even if `run` itself is cancelled.
+struct AbortOnDrop(JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 /// Runs the daemon until it is asked to shut down or receives SIGTERM/SIGINT.
@@ -123,6 +243,9 @@ pub async fn run(paths: Paths, config: Config) -> anyhow::Result<()> {
     paths
         .ensure_runtime_dir()
         .context("preparing runtime directory")?;
+    paths
+        .ensure_state_dir()
+        .context("preparing state directory")?;
 
     // The lock serializes concurrent starts; the loser exits without touching
     // the socket. It is released by the OS if we crash.
@@ -143,7 +266,8 @@ pub async fn run(paths: Paths, config: Config) -> anyhow::Result<()> {
     fs::set_permissions(&paths.socket, fs::Permissions::from_mode(0o600))?;
     tracing::info!(socket = %paths.socket.display(), pid = std::process::id(), "hived listening");
 
-    let daemon = Arc::new(Daemon::new(config));
+    let daemon = Arc::new(Daemon::new(config, paths.state_dir.join("sessions.json")));
+    let persister = AbortOnDrop(tokio::spawn(persist_loop(daemon.clone())));
     let mut shutdown = daemon.shutdown.subscribe();
     let mut sigterm = signal(SignalKind::terminate())?;
     let mut sigint = signal(SignalKind::interrupt())?;
@@ -176,6 +300,8 @@ pub async fn run(paths: Paths, config: Config) -> anyhow::Result<()> {
     tracing::info!("shutting down");
     let _ = daemon.events.send(ServerMessage::ShuttingDown);
     daemon.terminate_all().await;
+    drop(persister);
+    daemon.persist(false);
     let _ = fs::remove_file(&paths.socket);
     // Give client writer tasks a moment to flush ShuttingDown.
     tokio::time::sleep(Duration::from_millis(50)).await;
