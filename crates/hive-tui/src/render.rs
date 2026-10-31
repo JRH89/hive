@@ -871,9 +871,9 @@ fn draw_empty(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         lines.push(Line::from(Span::styled("No active sessions.", muted)));
         lines.push(Line::raw(""));
         lines.push(Line::from(vec![
-            Span::styled("Press ", muted),
-            Span::styled("n", key),
-            Span::styled(" to launch an agent, ", muted),
+            Span::styled("Click ", muted),
+            Span::styled("+ new", key),
+            Span::styled(" for a terminal, ", muted),
             Span::styled("q", key),
             Span::styled(" to quit.", muted),
         ]));

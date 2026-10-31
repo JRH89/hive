@@ -9,7 +9,7 @@
 Run Claude Code, Codex, Gemini CLI, OpenCode or any shell side by side, see at a glance which one is working, which one needs you and which one is done, and close the window without stopping any of them. Binaries for Linux, macOS and Windows.
 
 ## Features
-- **Terminal first.** Click `+ new` (or `Ctrl+Space c`) to get a terminal. Type `claude`, `codex`, ... to start an agent in it, or `cd` anywhere first
+- **Terminal first.** `hive` opens a terminal. Type `claude`, `codex`, ... to start an agent in it, or `cd` anywhere first. The tab row's `+` (or `Ctrl+Space t`) adds a tab; the sidebar's `+ new` (or `Ctrl+Space S`) starts a new space
 - **Spaces follow you.** Every repository or folder you work in becomes a space in the sidebar; `cd` somewhere else and the tab moves there. Each space keeps its own tabs
 - **Live agent status.** Working `◐`, needs input `◆`, done `●`, read from the agent's screen (herdr-compatible rules) or reported by the agent itself
 - **Splits and tabs.** `Ctrl+Space v` / `-` split, `t` opens a tab, `Alt+←/→` switches tabs, `Alt+↑/↓` switches spaces
@@ -40,7 +40,7 @@ curl -fsSL https://github.com/jrh89/hive/releases/latest/download/install.sh | s
 irm https://github.com/jrh89/hive/releases/latest/download/install.ps1 | iex
 ```
 
-The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.4.5` to pin a version. Later, `hive update` upgrades in place (then `hive daemon stop` to restart the daemon on the new version; this ends running sessions).
+The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.4.6` to pin a version. Later, `hive update` upgrades in place (then `hive daemon stop` to restart the daemon on the new version; this ends running sessions).
 
 **From source** (Rust ≥ 1.89):
 
@@ -57,7 +57,7 @@ Keep `hive` and `hived` in the same directory. Run `hive doctor` to check the se
 
 **Run an agent.** Type `claude` (or `codex`, `gemini`, ...) in that terminal. The sidebar's AGENTS list picks it up with its status. Or press `Ctrl+Space A` to pick one from a list.
 
-**Work in another repo.** Click `+ new` or press `Ctrl+Space t` for a new tab, then `cd ~/src/other-repo`. Within two seconds the tab moves to a space for that repository (or plain folder, like `~/Work`). `Alt+↑/↓` moves between spaces, `Alt+←/→` between that space's tabs.
+**Work in another repo.** Click `+ new` in the sidebar (or `Ctrl+Space S`): a new space opens with a terminal in your home folder. `cd ~/src/other-repo` and within two seconds it becomes that repository's space (or plain folder's, like `~/Work`). The tab row's `+` adds a tab to the current space instead. `Alt+↑/↓` moves between spaces, `Alt+←/→` between that space's tabs.
 
 **Keep agents out of each other's way.** Press `Ctrl+Space C`: the new terminal opens in its own worktree on a fresh branch `hive/shell-<id>`. Start an agent there. From the command line: `hive new codex -w` (or `-b my-branch`). List and clean up with `hive worktree list` / `hive worktree rm <path>`.
 
@@ -119,7 +119,8 @@ The leader is **Ctrl+Space**. Everything else goes to the terminal.
 | `Alt+↑` / `Alt+↓` | Previous / next space (no leader needed) |
 | `Alt+1`–`9` | Jump to an agent in this space |
 | `Ctrl+Space :` | Command palette: every command, session and space |
-| `Ctrl+Space c` / `t` | New terminal / new tab |
+| `Ctrl+Space c` / `t` | New terminal / new tab in this space |
+| `Ctrl+Space S` | New space (same as `+ new` in the sidebar) |
 | `Ctrl+Space C` | New terminal in its own worktree (own branch) |
 | `Ctrl+Space A` | New agent from a list |
 | `Ctrl+Space v` / `-` | Split right / below |

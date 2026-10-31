@@ -47,6 +47,7 @@ fn cmd(args: &[&str]) -> CreateSession {
         size: TermSize::DEFAULT,
         workspace: None,
         worktree: None,
+        new_space: false,
     }
 }
 

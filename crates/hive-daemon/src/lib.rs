@@ -7,7 +7,7 @@ mod server;
 mod session;
 mod store;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::{self, File, TryLockError};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -48,6 +48,10 @@ pub(crate) struct Daemon {
     /// Broadcasts about a workspace are sent while holding this lock, so they
     /// reach clients in the order the changes were made.
     workspaces: Mutex<BTreeMap<WorkspaceId, WorkspaceInfo>>,
+    /// Spaces made by "+ new" (`CreateSession::new_space`): never picked
+    /// for a directory, and dropped once empty. Only locked while holding
+    /// `workspaces`.
+    scratch: Mutex<HashSet<WorkspaceId>>,
     next_workspace: AtomicU64,
     clients: Mutex<HashMap<ClientId, mpsc::Sender<ServerMessage>>>,
     next_client: AtomicU64,
@@ -106,6 +110,7 @@ impl Daemon {
             lost: Mutex::new(lost),
             next_session: AtomicU64::new(next),
             workspaces: Mutex::new(workspaces),
+            scratch: Mutex::new(HashSet::new()),
             next_workspace: AtomicU64::new(next_workspace),
             clients: Mutex::new(HashMap::new()),
             next_client: AtomicU64::new(1),
@@ -154,10 +159,35 @@ impl Daemon {
     fn ensure_workspace(&self, path: &Path) -> WorkspaceInfo {
         let key = hive_workspace::workspace_key(path);
         let mut workspaces = self.workspaces.lock().unwrap();
-        if let Some(id) = containing(&workspaces, &key) {
+        if let Some(id) = containing(&workspaces, &self.scratch.lock().unwrap(), &key) {
             return workspaces[&id].clone();
         }
         self.insert_workspace(&mut workspaces, &key, None)
+    }
+
+    /// A new space of its own for a session started by "+ new".
+    fn scratch_workspace(&self, cwd: &Path) -> WorkspaceInfo {
+        let mut workspaces = self.workspaces.lock().unwrap();
+        let info = self.insert_workspace(&mut workspaces, cwd, Some("new space".into()));
+        self.scratch.lock().unwrap().insert(info.id);
+        info
+    }
+
+    /// Forgets "+ new" spaces whose sessions all moved away or ended.
+    fn drop_empty_scratch(&self) {
+        let mut workspaces = self.workspaces.lock().unwrap();
+        let mut scratch = self.scratch.lock().unwrap();
+        let used: HashSet<WorkspaceId> = self.list().iter().map(|s| s.workspace).collect();
+        scratch.retain(|id| {
+            if used.contains(id) {
+                return true;
+            }
+            if workspaces.remove(id).is_some() {
+                tracing::info!(workspace = id, "empty new space removed");
+                let _ = self.events.send(ServerMessage::WorkspaceRemoved(*id));
+            }
+            false
+        });
     }
 
     fn insert_workspace(
@@ -241,6 +271,7 @@ impl Daemon {
 
     async fn create(&self, mut req: CreateSession) -> anyhow::Result<SessionInfo> {
         let workspace = match req.workspace {
+            _ if req.new_space => self.scratch_workspace(Path::new(&req.cwd)),
             Some(id) => self.workspace(id)?,
             None => self.ensure_workspace(Path::new(&req.cwd)),
         };
@@ -426,6 +457,7 @@ impl Daemon {
                 s.publish();
             }
         }
+        self.drop_empty_scratch();
     }
 
     /// The workspace a session that moved to `cwd` belongs to: its
@@ -435,23 +467,25 @@ impl Daemon {
     /// `Work` space.
     fn space_for(&self, cwd: &Path) -> WorkspaceId {
         let mut workspaces = self.workspaces.lock().unwrap();
+        let scratch = self.scratch.lock().unwrap();
         let root = match hive_workspace::discover(cwd) {
             Some(repo) => {
                 let found = workspaces
                     .values()
-                    .find(|w| Path::new(&w.root) == repo.main_root);
+                    .find(|w| !scratch.contains(&w.id) && Path::new(&w.root) == repo.main_root);
                 if let Some(w) = found {
                     return w.id;
                 }
                 repo.main_root
             }
             None => {
-                if let Some(id) = containing(&workspaces, cwd) {
+                if let Some(id) = containing(&workspaces, &scratch, cwd) {
                     return id;
                 }
                 cwd.to_path_buf()
             }
         };
+        drop(scratch);
         self.insert_workspace(&mut workspaces, &root, None).id
     }
 
@@ -587,6 +621,7 @@ async fn agent_loop(daemon: Arc<Daemon>) {
 /// its own space instead of joining one for everything.
 fn containing(
     workspaces: &BTreeMap<WorkspaceId, WorkspaceInfo>,
+    scratch: &HashSet<WorkspaceId>,
     path: &Path,
 ) -> Option<WorkspaceId> {
     let home = std::env::var_os("HOME")
@@ -594,6 +629,7 @@ fn containing(
         .map(PathBuf::from);
     let roots = workspaces
         .values()
+        .filter(|w| !scratch.contains(&w.id))
         .map(|w| (w.id, Path::new(&w.root)))
         .filter(|(_, root)| home.as_deref() != Some(*root) || *root == path);
     hive_workspace::best_match(roots, path)

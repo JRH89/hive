@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Bumped on any incompatible change to the message types below.
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 
 /// Upper bound on a single frame. Protects both sides from unbounded
 /// allocations caused by a corrupt or hostile length prefix.
@@ -166,6 +166,9 @@ pub struct CreateSession {
     /// Launch in a new linked worktree of the workspace's repository instead
     /// of `cwd`.
     pub worktree: Option<NewWorktree>,
+    /// Put the session in a new space of its own (ignores `workspace`). The
+    /// space goes away once the session moves out (`cd`) or ends.
+    pub new_space: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]

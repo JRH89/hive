@@ -52,7 +52,7 @@ Arguments after `--` go to the agent: `hive new claude -- --model opus`.
  ● #1 api · api · main · running · 2 active        Ctrl+Space leader · then : commands
 ```
 
-The sidebar lists your **spaces** (one per repository, with its branch and agent count) and, below them, the **agents** of the selected space. Click a space to switch to it, an agent to open it, **+ new** to start an agent in the selected space, and **menu** for the command palette.
+The sidebar lists your **spaces** (one per repository, with its branch and agent count) and, below them, the **agents** of the selected space. Click a space to switch to it, an agent to open it, **+ new** to open a new space (a terminal in your home folder; `cd` to where you want to work), and **menu** for the command palette.
 
 | Mark | Meaning |
 |---|---|
@@ -83,7 +83,8 @@ Everything you type goes to the agent, except the **leader** key (`Ctrl+Space`) 
 | `o` | Focus the next pane (or click it) |
 | `z` | Zoom the focused pane; again to restore |
 | `X` | Close the pane (the session keeps running) |
-| `t` | New tab with a terminal (or click `+` in the tab bar) |
+| `t` | New tab with a terminal in this space (or click `+` in the tab bar) |
+| `S` | New space: a terminal in your home folder, in a space of its own (or click **+ new** in the sidebar) |
 | `]` / `[` | Next / previous tab |
 | `w` | Workspaces |
 | `r` | Rename session |
@@ -107,7 +108,7 @@ If an agent needs one of these, rebind or unbind it under `[keys.global]` (see [
 
 Split the panel to watch several agents at once. Each pane is its own terminal at its own size, with a title row showing the session and its status. Keys go to the focused pane. Switching to a session that is already in a pane focuses that pane (and its tab); otherwise the session replaces the focused pane. The tab row above the panes (`1  2  +`) is clickable: pick a tab, or `+` for a new terminal tab in the current directory. Every new tab and split is a plain terminal, like herdr. Tabs belong to a space: the row shows the selected space's tabs, Alt+←/→ moves between them, and Alt+↑/↓ switches space (back to the tab you left there). The sidebar's AGENTS list shows agents only, including one started by hand in a terminal (listed by its name, e.g. `claude`).
 
-**Spaces follow your terminals.** The sidebar's "+ new" opens a terminal; `cd` somewhere and within a couple of seconds that terminal (and its tab) moves to that place's space, created if needed: inside a git repository, the repository's space; elsewhere, the deepest space containing the folder, else a new one for the folder itself (`cd ~/Work` → a `Work` space). Your home directory's space only holds terminals in home itself. SPACES lists only spaces with something open, so it is the set of places you're working in. Every running terminal has a tab; closing a tab hides it (the terminal keeps running; `hive list` shows it). On Windows terminals stay in the space they started in. To add a space without a terminal, use `new space` in the palette (it asks for a folder; Tab completes). Hidden tabs cost nothing: Hive only mirrors what is on screen. The layout lasts until you quit `hive`; sessions keep running either way.
+**Spaces follow your terminals.** The sidebar's "+ new" opens a new space with a terminal in your home folder; `cd` somewhere and within a couple of seconds that terminal (and its tab) moves to that place's space, created if needed: inside a git repository, the repository's space; elsewhere, the deepest space containing the folder, else a new one for the folder itself (`cd ~/Work` → a `Work` space). Your home directory's space only holds terminals in home itself; the "+ new" space goes away once its terminal moves out. SPACES lists only spaces with something open, so it is the set of places you're working in. Every running terminal has a tab; closing a tab hides it (the terminal keeps running; `hive list` shows it). On Windows terminals stay in the space they started in. To add a folder as a space without a terminal, use `add a folder as a space` in the palette (it asks for a folder; Tab completes). Hidden tabs cost nothing: Hive only mirrors what is on screen. The layout lasts until you quit `hive`; sessions keep running either way.
 
 ### Notes (Obsidian, optional)
 

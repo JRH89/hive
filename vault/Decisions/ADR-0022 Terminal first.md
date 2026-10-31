@@ -31,3 +31,7 @@ Terminals start in the focused session's cwd if it's in the selected space, else
 
 ## Amendment (2026-10-31): a space for every folder
 - Outside git, a moved (or new) session joins the deepest workspace containing its cwd, else a new workspace rooted at the cwd. The home directory's workspace matches only home itself (`containing()` in `hive-daemon`), so `cd ~/Work` makes a `Work` space instead of staying in `~`'s. User report: two terminals in `~/Work` (a folder of repos) both stayed in the home space.
+
+## Amendment (2026-10-31): "+ new" opens a new space
+- Sidebar "+ new" (and leader `S`, `Command::NewSpace`) = `CreateSession { new_space: true }` with cwd = home (protocol v7). The daemon puts it in a fresh workspace named "new space", tracked in `Daemon::scratch`: never chosen for a directory (`containing`, repo lookup), dropped once empty (`drop_empty_scratch`, every place refresh). `cd` moves the session to the real space. The tab row's `+` / leader `t` stays "new tab in this space". Not persisted: after a daemon restart a leftover scratch space is an ordinary one.
+- `hive` against an empty daemon opens a terminal (only-lost sessions still focus the sidebar for relaunch).

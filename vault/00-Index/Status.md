@@ -12,7 +12,7 @@ updated: 2026-10-31
 
 **Phase 9 (macOS) done**: CI runs clippy, tests and smoke on macos-14; release builds aarch64/x86_64-apple-darwin ([[Phase 9 - macOS]]). **Phase 10 (Windows) done** ([[Phase 10 - Windows]]); **Released v0.4.0** (2026-10-31): Linux, macOS and Windows binaries, `install.ps1`.
 
-**Released v0.4.5** (2026-10-31): a space for every folder (not just repos). v0.4.4: spaces follow cd, worktree terminals (leader `C`), README screenshots, website changelog + RSS (`/changelog/rss.xml`).
+**Released v0.4.6** (2026-10-31): "+ new" opens a new space (protocol v7). v0.4.5: a space for every folder (not just repos). v0.4.4: spaces follow cd, worktree terminals (leader `C`), README screenshots, website changelog + RSS (`/changelog/rss.xml`).
 
 **Open:** `restore_workspace` config key is inert.
 

@@ -67,6 +67,7 @@ pub fn request_for(
         size,
         workspace: None,
         worktree: None,
+        new_space: false,
     })
 }
 
