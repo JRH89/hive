@@ -5,13 +5,11 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+use crate::paths::Paths;
+use crate::transport::{self, ReadHalf, WriteHalf};
 use hive_protocol::{
     ClientMessage, PROTOCOL_VERSION, ProtocolError, ServerMessage, read_frame, write_frame,
 };
-use tokio::net::UnixStream;
-use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
-
-use crate::paths::Paths;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
@@ -56,8 +54,8 @@ pub struct Client {
     pub daemon: DaemonInfo,
 }
 
-pub struct ClientReader(OwnedReadHalf);
-pub struct ClientWriter(OwnedWriteHalf);
+pub struct ClientReader(ReadHalf);
+pub struct ClientWriter(WriteHalf);
 
 impl ClientReader {
     /// Not cancel-safe; see [`hive_protocol::read_frame`].
@@ -75,7 +73,7 @@ impl ClientWriter {
 impl Client {
     /// Connects to a running daemon and performs the handshake.
     pub async fn connect(paths: &Paths, client_name: &str) -> Result<Client, ClientError> {
-        let stream = match UnixStream::connect(&paths.socket).await {
+        let stream = match transport::connect(paths).await {
             Ok(s) => s,
             Err(e)
                 if matches!(
@@ -87,7 +85,7 @@ impl Client {
             }
             Err(e) => return Err(ClientError::Connect(e)),
         };
-        let (rd, wr) = stream.into_split();
+        let (rd, wr) = tokio::io::split(stream);
         let mut reader = ClientReader(rd);
         let mut writer = ClientWriter(wr);
         writer
@@ -187,7 +185,7 @@ pub fn daemon_executable() -> PathBuf {
         return PathBuf::from(p);
     }
     if let Ok(exe) = std::env::current_exe() {
-        let sibling = exe.with_file_name("hived");
+        let sibling = exe.with_file_name(format!("hived{}", std::env::consts::EXE_SUFFIX));
         if sibling.is_file() {
             return sibling;
         }
@@ -207,12 +205,20 @@ pub fn spawn_daemon(paths: &Paths) -> Result<(), ClientError> {
         .env("HIVE_CONFIG", &paths.config_file);
     // hived calls setsid() itself, detaching from our terminal and session.
     // The child is reaped by init once we exit; we never wait on it.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP: no console, no Ctrl+C
+        // from ours.
+        cmd.creation_flags(0x0000_0008 | 0x0000_0200);
+    }
     cmd.spawn().map(drop).map_err(ClientError::Spawn)
 }
 
 /// Stops a daemon we can't speak to (another protocol version) with
 /// SIGTERM, which every version handles as a graceful shutdown, and waits
 /// up to `wait` for it to exit. Returns whether it exited.
+#[cfg(unix)]
 pub fn terminate_daemon(pid: u32, wait: std::time::Duration) -> std::io::Result<bool> {
     use rustix::process::{Pid, Signal, kill_process, test_kill_process};
     let pid = i32::try_from(pid)
@@ -230,7 +236,38 @@ pub fn terminate_daemon(pid: u32, wait: std::time::Duration) -> std::io::Result<
     Ok(true)
 }
 
-#[cfg(test)]
+/// Windows has no graceful signal for a detached process: kill its tree.
+/// Its sessions come back as lost, as after a crash.
+#[cfg(windows)]
+pub fn terminate_daemon(pid: u32, wait: std::time::Duration) -> std::io::Result<bool> {
+    let status = Command::new("taskkill")
+        .args(["/T", "/F", "/PID", &pid.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?;
+    if !status.success() {
+        return Err(std::io::Error::other(format!("taskkill failed: {status}")));
+    }
+    let deadline = std::time::Instant::now() + wait;
+    while process_exists(pid) {
+        if std::time::Instant::now() > deadline {
+            return Ok(false);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    Ok(true)
+}
+
+#[cfg(windows)]
+fn process_exists(pid: u32) -> bool {
+    Command::new("tasklist")
+        .args(["/NH", "/FI", &format!("PID eq {pid}")])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
+        .unwrap_or(false)
+}
+
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

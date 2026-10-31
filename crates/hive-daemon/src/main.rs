@@ -10,6 +10,7 @@ use hive_daemon::AlreadyRunning;
 fn main() -> ExitCode {
     // Leave the launching terminal's session so closing it (or the frontend)
     // never delivers SIGHUP to us. Fails harmlessly if already a leader.
+    #[cfg(unix)]
     let _ = rustix::process::setsid();
 
     let paths = Paths::resolve();

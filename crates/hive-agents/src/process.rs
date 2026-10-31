@@ -191,6 +191,7 @@ pub fn identify_group(pgid: i32) -> Option<&'static AgentKind> {
 #[cfg(test)]
 mod tests {
 
+    #[cfg(unix)]
     #[test]
     fn ps_output_is_parsed_into_pid_group_and_argv() {
         let rows =

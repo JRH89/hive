@@ -71,27 +71,56 @@ pub fn request_for(
 }
 
 /// Resolves `command` the way `execvp` would: paths containing `/` are used
-/// as-is, bare names are searched in `path_var`.
+/// as-is, bare names are searched in `path_var`. On Windows, `PATHEXT`
+/// extensions (`.exe`, `.cmd`, ...) are tried too.
 pub fn find_executable(command: &str, path_var: &std::ffi::OsStr) -> Option<PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
-    let is_exec = |p: &Path| {
-        p.metadata()
-            .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-            .unwrap_or(false)
-    };
-    if command.contains('/') {
-        let p = PathBuf::from(command);
-        return is_exec(&p).then_some(p);
+    let is_path = command.contains('/') || (cfg!(windows) && command.contains('\\'));
+    if is_path {
+        return candidates(PathBuf::from(command)).find(|p| is_exec(p));
     }
     std::env::split_paths(path_var)
-        .map(|dir| dir.join(command))
+        .flat_map(|dir| candidates(dir.join(command)))
         .find(|p| is_exec(p))
+}
+
+#[cfg(unix)]
+fn candidates(p: PathBuf) -> impl Iterator<Item = PathBuf> {
+    std::iter::once(p)
+}
+
+#[cfg(windows)]
+fn candidates(p: PathBuf) -> impl Iterator<Item = PathBuf> {
+    let exts = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
+    let with_ext: Vec<PathBuf> = exts
+        .split(';')
+        .filter(|e| !e.is_empty())
+        .map(|e| {
+            let mut s = p.clone().into_os_string();
+            s.push(e);
+            PathBuf::from(s)
+        })
+        .collect();
+    std::iter::once(p).chain(with_ext)
+}
+
+#[cfg(unix)]
+fn is_exec(p: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    p.metadata()
+        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn is_exec(p: &Path) -> bool {
+    p.is_file()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[test]
     fn finds_sh_on_path_and_rejects_missing() {
         let path = std::ffi::OsString::from("/usr/bin:/bin");

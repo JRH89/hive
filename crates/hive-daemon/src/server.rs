@@ -10,7 +10,6 @@ use hive_protocol::{
     ClientMessage, PROTOCOL_VERSION, ProtocolError, ServerMessage, SessionId, TermSize, read_frame,
     write_frame,
 };
-use tokio::net::UnixStream;
 use tokio::sync::broadcast::error::{RecvError, TryRecvError};
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
@@ -38,11 +37,14 @@ struct Connection {
     attached: BTreeMap<SessionId, Attached>,
 }
 
-pub(crate) async fn handle_client(daemon: Arc<Daemon>, stream: UnixStream) {
+pub(crate) async fn handle_client<S>(daemon: Arc<Daemon>, stream: S)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + 'static,
+{
     let id = daemon
         .next_client
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let (mut rd, mut wr) = stream.into_split();
+    let (mut rd, mut wr) = tokio::io::split(stream);
 
     let client_name = match tokio::time::timeout(HANDSHAKE_TIMEOUT, read_frame(&mut rd)).await {
         Ok(Ok(Some(ClientMessage::Hello {

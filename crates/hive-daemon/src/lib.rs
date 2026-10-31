@@ -1,6 +1,7 @@
 //! `hived`: owns every agent process, PTY and authoritative terminal state.
 //! Frontends are clients; they can come and go without affecting sessions.
 
+mod listener;
 mod responder;
 mod server;
 mod session;
@@ -8,7 +9,6 @@ mod store;
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File, TryLockError};
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -20,8 +20,6 @@ use hive_core::paths::Paths;
 use hive_protocol::{
     CreateSession, ServerMessage, SessionId, SessionInfo, WorkspaceId, WorkspaceInfo, WorktreeInfo,
 };
-use tokio::net::UnixListener;
-use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::broadcast::error::{RecvError, TryRecvError};
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::task::JoinHandle;
@@ -581,46 +579,26 @@ pub async fn run(paths: Paths, config: Config) -> anyhow::Result<()> {
         Err(TryLockError::Error(e)) => return Err(e).context("locking"),
     }
 
-    // Holding the lock means any existing socket is stale.
-    match fs::remove_file(&paths.socket) {
-        Ok(()) => tracing::info!("removed stale socket"),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(e).context("removing stale socket"),
-    }
-    let listener = UnixListener::bind(&paths.socket).context("binding socket")?;
-    fs::set_permissions(&paths.socket, fs::Permissions::from_mode(0o600))?;
-    tracing::info!(socket = %paths.socket.display(), pid = std::process::id(), "hived listening");
+    let mut listener = listener::Listener::bind(&paths).context("listening")?;
+    tracing::info!(pid = std::process::id(), "hived listening");
 
     let daemon = Arc::new(Daemon::new(config, paths.state_dir.join("sessions.json")));
     let persister = AbortOnDrop(tokio::spawn(persist_loop(daemon.clone())));
     let _branches = AbortOnDrop(tokio::spawn(branch_loop(daemon.clone())));
     let _agents = AbortOnDrop(tokio::spawn(agent_loop(daemon.clone())));
     let mut shutdown = daemon.shutdown.subscribe();
-    let mut sigterm = signal(SignalKind::terminate())?;
-    let mut sigint = signal(SignalKind::interrupt())?;
-    let uid = rustix::process::getuid().as_raw();
+    let mut stop = listener::Stop::new()?;
 
     loop {
         tokio::select! {
-            accepted = listener.accept() => {
-                let (stream, _) = match accepted {
-                    Ok(a) => a,
-                    Err(e) => {
-                        tracing::warn!("accept failed: {e}");
-                        continue;
-                    }
-                };
-                match stream.peer_cred() {
-                    Ok(cred) if cred.uid() == uid => {
-                        tokio::spawn(server::handle_client(daemon.clone(), stream));
-                    }
-                    Ok(cred) => tracing::warn!(peer_uid = cred.uid(), "rejected connection from another user"),
-                    Err(e) => tracing::warn!("could not read peer credentials: {e}"),
+            accepted = listener.accept() => match accepted {
+                Ok(conn) => {
+                    tokio::spawn(listener::serve(daemon.clone(), conn));
                 }
-            }
+                Err(e) => tracing::warn!("accept failed: {e}"),
+            },
             _ = shutdown.wait_for(|&s| s) => break,
-            _ = sigterm.recv() => break,
-            _ = sigint.recv() => break,
+            _ = stop.recv() => break,
         }
     }
 
@@ -629,7 +607,7 @@ pub async fn run(paths: Paths, config: Config) -> anyhow::Result<()> {
     daemon.terminate_all().await;
     drop(persister);
     daemon.persist(false);
-    let _ = fs::remove_file(&paths.socket);
+    listener.cleanup(&paths);
     // Give client writer tasks a moment to flush ShuttingDown.
     tokio::time::sleep(Duration::from_millis(50)).await;
     drop(lock_file);
