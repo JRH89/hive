@@ -1,7 +1,8 @@
 name: Release
 
-# Pushing a tag like v0.2.0 builds static Linux binaries and creates a
-# *draft* GitHub release. A maintainer reviews and publishes it by hand.
+# Pushing a tag like v0.2.0 builds static Linux binaries and macOS binaries
+# and creates a *draft* GitHub release. A maintainer reviews and publishes it
+# by hand.
 on:
   push:
     tags: ["v*"]
@@ -17,6 +18,9 @@ jobs:
         include:
           - { target: x86_64-unknown-linux-musl, os: ubuntu-24.04 }
           - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04-arm }
+          - { target: aarch64-apple-darwin, os: macos-14 }
+          # Cross-built on Apple silicon; tested natively by the arm64 job.
+          - { target: x86_64-apple-darwin, os: macos-14, cross: true }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -28,8 +32,10 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - run: cargo test --workspace --locked
+        if: ${{ !matrix.cross }}
       - run: cargo build --release --locked --target ${{ matrix.target }}
       - run: scripts/smoke.sh target/${{ matrix.target }}/release
+        if: ${{ !matrix.cross }}
       - run: scripts/package.sh ${{ matrix.target }} dist
       - uses: actions/upload-artifact@v5
         with:

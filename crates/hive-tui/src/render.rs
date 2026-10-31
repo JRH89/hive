@@ -209,40 +209,54 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let left_width: usize = left.iter().map(|s| s.content.chars().count()).sum();
     let room = (area.width as usize).saturating_sub(left_width);
     frame.render_widget(Paragraph::new(Line::from(left)).style(bar), area);
-    if app.tabs.len() > 1 {
-        // Tab bar in place of the tagline: each tab named by its focused
-        // session, the active one highlighted.
-        let mut spans = Vec::new();
-        let mut ranges = Vec::new();
-        for (i, t) in app.tabs.iter().enumerate() {
-            let name = app
-                .sessions
-                .get(&t.focus)
-                .map_or_else(|| format!("#{}", t.focus), |s| s.label.clone());
-            let name = truncate(theme, &name, 14);
-            let style = if i == app.tab {
-                theme.highlight()
-            } else {
-                bar.fg(theme.muted)
-            };
-            let label = format!(" {}:{name} ", i + 1);
-            ranges.push((label.chars().count() as u16, i));
-            spans.push(Span::styled(label, style));
+    if !app.tabs.is_empty() {
+        // Tab bar in place of the tagline, herdr-style: every tab named by
+        // its focused session, then `+` for a new terminal tab. Names are
+        // dropped (numbers only) when it doesn't fit.
+        for named in [true, false] {
+            let mut spans = Vec::new();
+            let mut hits_at = Vec::new();
+            for (i, t) in app.tabs.iter().enumerate() {
+                let label = if named {
+                    let name = app
+                        .sessions
+                        .get(&t.focus)
+                        .map_or_else(|| format!("#{}", t.focus), |s| s.label.clone());
+                    format!(" {}:{} ", i + 1, truncate(theme, &name, 14))
+                } else {
+                    format!(" {} ", i + 1)
+                };
+                let style = if i == app.tab {
+                    theme.highlight()
+                } else {
+                    bar.fg(theme.muted)
+                };
+                hits_at.push((label.chars().count() as u16, SidebarHit::Tab(i)));
+                spans.push(Span::styled(label, style));
+                spans.push(Span::styled(" ", bar));
+            }
+            hits_at.push((3, SidebarHit::NewTab));
+            spans.push(Span::styled(
+                " + ",
+                bar.fg(theme.accent).add_modifier(Modifier::BOLD),
+            ));
             spans.push(Span::styled(" ", bar));
-        }
-        let width: usize = spans.iter().map(|s| s.content.chars().count()).sum();
-        if width + 2 <= room {
+            let width: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+            if width + 2 > room {
+                continue;
+            }
             // Right-aligned, so the bar starts `width` cells from the edge.
             let mut x = area.x + area.width - width as u16;
             let mut hits = app.sidebar_hits.borrow_mut();
-            for (w, i) in ranges {
-                hits.push((Rect::new(x, area.y, w, 1), SidebarHit::Tab(i)));
+            for (w, hit) in hits_at {
+                hits.push((Rect::new(x, area.y, w, 1), hit));
                 x += w + 1;
             }
             frame.render_widget(
                 Paragraph::new(Line::from(spans)).alignment(Alignment::Right),
                 area,
             );
+            break;
         }
         return;
     }

@@ -3,6 +3,8 @@
 #
 #   curl -fsSL https://github.com/jrh89/hive/releases/latest/download/install.sh | sh
 #
+# Linux (x86_64, ARM64; static) and macOS (Apple silicon, Intel).
+#
 # Environment:
 #   HIVE_VERSION       release tag to install (default: latest), e.g. v0.2.0
 #   HIVE_INSTALL_DIR   where to put the binaries (default: ~/.local/bin)
@@ -16,10 +18,14 @@ dir="${HIVE_INSTALL_DIR:-$HOME/.local/bin}"
 say() { printf 'hive-install: %s\n' "$*"; }
 die() { say "$*" >&2; exit 1; }
 
-[ "$(uname -s)" = Linux ] || die "only Linux is supported for now (this is $(uname -s))"
+case "$(uname -s)" in
+    Linux) os=unknown-linux-musl ;;
+    Darwin) os=apple-darwin ;;
+    *) die "no prebuilt binary for $(uname -s); build from source instead (see README)" ;;
+esac
 case "$(uname -m)" in
-    x86_64 | amd64) target=x86_64-unknown-linux-musl ;;
-    aarch64 | arm64) target=aarch64-unknown-linux-musl ;;
+    x86_64 | amd64) target=x86_64-$os ;;
+    aarch64 | arm64) target=aarch64-$os ;;
     *) die "no prebuilt binary for $(uname -m); build from source instead (see README)" ;;
 esac
 

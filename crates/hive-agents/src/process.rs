@@ -84,9 +84,60 @@ pub fn argv(pid: i32) -> Option<Vec<String>> {
     (!argv.is_empty()).then_some(argv)
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(all(unix, not(target_os = "linux")))]
+pub fn argv(pid: i32) -> Option<Vec<String>> {
+    ps_table()
+        .into_iter()
+        .find(|p| p.pid == pid)
+        .map(|p| p.argv)
+        .filter(|a| !a.is_empty())
+}
+
+#[cfg(not(unix))]
 pub fn argv(_pid: i32) -> Option<Vec<String>> {
     None
+}
+
+/// One row of `ps`: where there's no /proc (macOS, BSDs).
+#[cfg(unix)]
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+#[derive(Debug)]
+struct PsRow {
+    pid: i32,
+    pgid: i32,
+    /// `ps` joins argv with spaces, so arguments containing spaces are
+    /// split; identification only needs the program and script names.
+    argv: Vec<String>,
+}
+
+#[cfg(unix)]
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+fn ps_table() -> Vec<PsRow> {
+    let Ok(out) = std::process::Command::new("ps")
+        .args(["-A", "-ww", "-o", "pid=,pgid=,args="])
+        .stderr(std::process::Stdio::null())
+        .output()
+    else {
+        return Vec::new();
+    };
+    parse_ps(&String::from_utf8_lossy(&out.stdout))
+}
+
+#[cfg(unix)]
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+fn parse_ps(text: &str) -> Vec<PsRow> {
+    text.lines()
+        .filter_map(|line| {
+            let mut words = line.split_whitespace();
+            let pid = words.next()?.parse().ok()?;
+            let pgid = words.next()?.parse().ok()?;
+            Some(PsRow {
+                pid,
+                pgid,
+                argv: words.map(str::to_string).collect(),
+            })
+        })
+        .collect()
 }
 
 /// Pids of the members of a process group.
@@ -109,7 +160,16 @@ pub fn group_members(pgid: i32) -> Vec<i32> {
         .collect()
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(all(unix, not(target_os = "linux")))]
+pub fn group_members(pgid: i32) -> Vec<i32> {
+    ps_table()
+        .into_iter()
+        .filter(|p| p.pgid == pgid)
+        .map(|p| p.pid)
+        .collect()
+}
+
+#[cfg(not(unix))]
 pub fn group_members(_pgid: i32) -> Vec<i32> {
     Vec::new()
 }
@@ -130,6 +190,30 @@ pub fn identify_group(pgid: i32) -> Option<&'static AgentKind> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn ps_output_is_parsed_into_pid_group_and_argv() {
+        let rows =
+            parse_ps("  101   100 node /opt/homebrew/bin/claude --resume\n  7 7 -zsh\nbad line\n");
+        assert_eq!(rows.len(), 2);
+        assert_eq!((rows[0].pid, rows[0].pgid), (101, 100));
+        assert_eq!(identify(&rows[0].argv).map(|k| k.id), Some("claude"));
+        assert_eq!(rows[1].argv, vec!["-zsh"]);
+    }
+
+    /// The macOS path (`ps`) agrees with /proc on Linux.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn ps_agrees_with_proc() {
+        let me = std::process::id() as i32;
+        let row = ps_table()
+            .into_iter()
+            .find(|r| r.pid == me)
+            .expect("ps lists us");
+        assert_eq!(row.argv.first(), argv(me).unwrap().first());
+        assert!(group_members(row.pgid).contains(&me));
+    }
+
     use super::*;
 
     fn id(argv: &[&str]) -> Option<&'static str> {

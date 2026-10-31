@@ -193,6 +193,8 @@ pub enum SidebarHit {
     Menu,
     /// A tab in the header's tab bar.
     Tab(usize),
+    /// The tab bar's `+`: a new terminal tab.
+    NewTab,
 }
 
 /// Where the next session created from the UI goes.
@@ -1176,8 +1178,10 @@ impl App {
             .find(|(r, _)| r.contains(at))
             .map(|(_, h)| *h);
         let click = matches!(m.kind, MouseEventKind::Down(MouseButton::Left));
-        if let (true, Some(SidebarHit::Tab(i))) = (click, hit) {
-            return self.select_tab(i);
+        match (click, hit) {
+            (true, Some(SidebarHit::Tab(i))) => return self.select_tab(i),
+            (true, Some(SidebarHit::NewTab)) => return self.new_terminal_tab(),
+            _ => {}
         }
         if self.sidebar_visible && m.column < px && m.row >= py {
             return match (m.kind, hit) {
@@ -1410,7 +1414,7 @@ impl App {
             Command::NewSession => self.open_picker_for(Place::Replace),
             Command::SplitRight => self.open_picker_for(Place::Split(Dir::Right)),
             Command::SplitDown => self.open_picker_for(Place::Split(Dir::Down)),
-            Command::NewTab => self.open_picker_for(Place::NewTab),
+            Command::NewTab => return self.new_terminal_tab(),
             Command::NextTab | Command::PrevTab if self.tabs.len() > 1 => {
                 let before = self.tab_sessions();
                 let delta = if cmd == Command::NextTab { 1 } else { -1 };
@@ -1761,6 +1765,35 @@ impl App {
                     Tone::Info,
                     format!("No agents in {name} yet. Click new (or leader {new}) to start one."),
                 );
+                Vec::new()
+            }
+        }
+    }
+
+    /// A shell in a new tab, like herdr: in the focused agent's directory,
+    /// or the selected space's root.
+    fn new_terminal_tab(&mut self) -> Vec<ClientMessage> {
+        let workspace = self.active_workspace();
+        let cwd = self
+            .current()
+            .filter(|s| Some(s.workspace) == workspace)
+            .map(|s| PathBuf::from(&s.cwd))
+            .or_else(|| {
+                workspace
+                    .and_then(|w| self.workspaces.get(&w))
+                    .map(|w| PathBuf::from(&w.root))
+            });
+        match launch::create_request(&self.config, "shell", None, cwd, &[], self.panel) {
+            Ok(mut req) => {
+                req.workspace = workspace;
+                self.place = Place::NewTab;
+                self.awaiting_create = true;
+                self.mode = Mode::Normal;
+                self.set_status(Tone::Info, "Opening a terminal…");
+                vec![ClientMessage::CreateSession(req)]
+            }
+            Err(e) => {
+                self.set_status(Tone::Error, e.to_string());
                 Vec::new()
             }
         }
@@ -2621,7 +2654,12 @@ mod tests {
     #[test]
     fn tabs_keep_their_own_panes() {
         let mut app = app();
-        launch_via(&mut app, 't');
+        app.on_terminal_event(leader());
+        let out = app.on_terminal_event(ch('t'));
+        let [ClientMessage::CreateSession(req)] = out.as_slice() else {
+            panic!("leader t opens a terminal tab, got {out:?}");
+        };
+        assert_eq!(req.agent, "shell");
         let out = app.on_server(ServerMessage::SessionCreated(info(
             5,
             SessionState::Running,
@@ -2955,7 +2993,12 @@ mod tests {
         assert_eq!(app.focused(), Some(1), "wraps within the space");
 
         // A tab in the header's tab bar.
-        launch_via(&mut app, 't');
+        app.on_terminal_event(leader());
+        let out = app.on_terminal_event(ch('t'));
+        let [ClientMessage::CreateSession(req)] = out.as_slice() else {
+            panic!("leader t opens a terminal tab, got {out:?}");
+        };
+        assert_eq!(req.agent, "shell");
         app.on_server(ServerMessage::SessionCreated(info(
             9,
             SessionState::Running,
@@ -2964,6 +3007,11 @@ mod tests {
         set_hits(&app, vec![(Rect::new(80, 0, 9, 1), SidebarHit::Tab(0))]);
         app.on_terminal_event(press(82, 0));
         assert_eq!(app.tab, 0);
+        set_hits(&app, vec![(Rect::new(95, 0, 3, 1), SidebarHit::NewTab)]);
+        let out = app.on_terminal_event(press(96, 0));
+        assert!(matches!(out.as_slice(), [ClientMessage::CreateSession(r)] if r.agent == "shell"));
+        assert_eq!(app.place, Place::NewTab);
+        app.place = Place::Replace;
         app.on_terminal_event(alt(KeyCode::Right));
         assert_eq!(app.tab, 1, "with tabs, Alt+Right moves between them");
     }
