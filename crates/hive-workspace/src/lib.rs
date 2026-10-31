@@ -5,6 +5,10 @@
 //! operations that change a repository (adding and removing worktrees) and
 //! the dirty check invoke `git` with an argv, never through a shell.
 
+mod tasks;
+
+pub use tasks::{Task, find_tasks};
+
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};

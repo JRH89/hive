@@ -62,6 +62,47 @@ enum Phase {
 
 type Term = ratatui::DefaultTerminal;
 
+/// Carries out an [`app::Effect`]. Failures are logged, never shown: these
+/// are conveniences, and the bell and sidebar already carry the news.
+fn run_effect(config: &Config, effect: app::Effect) {
+    match effect {
+        app::Effect::Notify { title, body } => {
+            let cmd = &config.integrations.desktop_notify.command;
+            let Some((program, args)) = cmd.split_first() else {
+                return;
+            };
+            let spawned = std::process::Command::new(program)
+                .args(args)
+                .args([title, body])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
+            match spawned {
+                // Reap it off the UI thread.
+                Ok(mut child) => drop(std::thread::spawn(move || child.wait())),
+                Err(e) => tracing::warn!("desktop notification failed: {e}"),
+            }
+        }
+        app::Effect::Journal { dir, line } => {
+            let now = jiff::Zoned::now();
+            let path = dir.join(format!("{}.md", now.strftime("%Y-%m-%d")));
+            let entry = format!("- {} {line}\n", now.strftime("%H:%M"));
+            let written = std::fs::create_dir_all(&dir).and_then(|_| {
+                use std::io::Write as _;
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&path)?
+                    .write_all(entry.as_bytes())
+            });
+            if let Err(e) = written {
+                tracing::warn!("journal {}: {e}", path.display());
+            }
+        }
+    }
+}
+
 /// Validates the frontend parts of the config (theme, keys), so mistakes are
 /// reported before the terminal switches to the alternate screen.
 pub fn check_config(config: &Config) -> anyhow::Result<()> {
@@ -209,6 +250,9 @@ async fn connected(
         if std::mem::take(&mut app.bell) {
             let mut out = stdout();
             let _ = out.write_all(b"\x07").and_then(|_| out.flush());
+        }
+        for effect in std::mem::take(&mut app.effects) {
+            run_effect(&app.config, effect);
         }
 
         let out = tokio::select! {

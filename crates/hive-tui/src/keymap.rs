@@ -35,6 +35,9 @@ pub enum Command {
     PrevTab,
     CloseTab,
     Notes,
+    Review,
+    PullRequest,
+    RunTask,
     Rename,
     Kill,
     TakeControl,
@@ -44,7 +47,7 @@ pub enum Command {
 }
 
 impl Command {
-    pub const ALL: [Command; 29] = [
+    pub const ALL: [Command; 32] = [
         Command::Palette,
         Command::SearchSessions,
         Command::NewSession,
@@ -68,6 +71,9 @@ impl Command {
         Command::PrevTab,
         Command::CloseTab,
         Command::Notes,
+        Command::Review,
+        Command::PullRequest,
+        Command::RunTask,
         Command::Rename,
         Command::Kill,
         Command::TakeControl,
@@ -102,6 +108,9 @@ impl Command {
             Command::PrevTab => "prev_tab",
             Command::CloseTab => "close_tab",
             Command::Notes => "notes",
+            Command::Review => "review",
+            Command::PullRequest => "pull_request",
+            Command::RunTask => "run_task",
             Command::Rename => "rename_session",
             Command::Kill => "kill_session",
             Command::TakeControl => "take_control",
@@ -137,6 +146,9 @@ impl Command {
             Command::PrevTab => "Previous tab",
             Command::CloseTab => "Close the tab (sessions keep running)",
             Command::Notes => "Open the workspace's notes (Obsidian vault)",
+            Command::Review => "Review changes in the session's directory",
+            Command::PullRequest => "Pull request checks for the session's branch",
+            Command::RunTask => "Run a project task beside the session",
             Command::Rename => "Rename session",
             Command::Kill => "Terminate session",
             Command::TakeControl => "Take input control",
@@ -179,6 +191,9 @@ impl Command {
             Command::PrevTab => &["["],
             Command::CloseTab => &[],
             Command::Notes => &["N"],
+            Command::Review => &["G"],
+            Command::PullRequest => &["H"],
+            Command::RunTask => &["T"],
             Command::Rename => &["r"],
             Command::Kill => &["x"],
             Command::TakeControl => &["a"],

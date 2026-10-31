@@ -9,7 +9,9 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
-use crate::app::{Activity, App, Focus, Link, Mode, SIDEBAR_WIDTH, SidebarHit, Target, Tone};
+use crate::app::{
+    Activity, App, Focus, Link, Mode, SIDEBAR_WIDTH, Scope, SidebarHit, Target, Tone,
+};
 use crate::keymap::Command;
 use crate::layout::{Dir, PaneArea};
 use crate::theme::Theme;
@@ -606,16 +608,12 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             spans.extend(hints(&pairs));
             spans
         }
-        Mode::Palette {
-            query,
-            sessions_only,
-            ..
-        } => vec![
+        Mode::Palette { query, scope, .. } => vec![
             Span::styled(
-                if *sessions_only {
-                    " Search sessions: "
-                } else {
-                    " Command: "
+                match scope {
+                    Scope::Sessions => " Search sessions: ",
+                    Scope::Tasks => " Run task: ",
+                    Scope::All => " Command: ",
                 },
                 bar.fg(theme.accent),
             ),
@@ -1153,6 +1151,7 @@ fn draw_palette(frame: &mut Frame, area: Rect, app: &App, selected: usize, theme
                     .get(&id)
                     .map_or(" ", |s| state_dot(&s.state, theme).0),
                 Target::Workspace(_) => theme.glyphs.group,
+                Target::Task(_) => theme.glyphs.caret,
             };
             let key = item.key.clone().unwrap_or_default();
             let room = width.saturating_sub(4 + key.chars().count() + 1);

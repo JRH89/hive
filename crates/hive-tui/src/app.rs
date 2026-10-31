@@ -8,6 +8,7 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU16;
+use std::path::PathBuf;
 
 const OBSERVING: &str =
     "Observing: another client controls this session. Leader then a to take control.";
@@ -94,8 +95,18 @@ pub enum Mode {
     Palette {
         query: String,
         selected: usize,
-        sessions_only: bool,
+        scope: Scope,
     },
+}
+
+/// What the palette lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    /// Commands, sessions and workspaces.
+    All,
+    Sessions,
+    /// `TaskList` entries.
+    Tasks,
 }
 
 /// What a palette entry does when chosen.
@@ -104,6 +115,8 @@ pub enum Target {
     Command(Command),
     Session(SessionId),
     Workspace(WorkspaceId),
+    /// Index into `App::tasks`.
+    Task(usize),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -238,6 +251,12 @@ pub struct App {
     pub done: BTreeSet<SessionId>,
     /// Ring the terminal bell after this update.
     pub bell: bool,
+    /// Tasks the palette is offering (`run_task`).
+    pub tasks: Option<TaskList>,
+    /// Side effects for the frontend loop to carry out.
+    pub effects: Vec<Effect>,
+    /// When each session's agent started its current turn.
+    working_since: BTreeMap<SessionId, std::time::Instant>,
     /// Screen rows of sidebar entries as last drawn (render fills this), so
     /// clicks hit what the user saw.
     pub sidebar_hits: RefCell<Vec<(u16, SidebarHit)>>,
@@ -312,15 +331,66 @@ fn digit(key: &KeyEvent) -> Option<usize> {
     }
 }
 
-/// Agent name of sessions opened by the Obsidian integration.
+/// Agent names of sessions opened by integrations.
 pub const NOTES_AGENT: &str = "notes";
+pub const REVIEW_AGENT: &str = "review";
+pub const GITHUB_AGENT: &str = "checks";
+pub const TASK_AGENT: &str = "task";
+
+/// Work outside the app state, done by the frontend loop.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Effect {
+    /// Run `[integrations.desktop_notify] command` with these two arguments.
+    Notify { title: String, body: String },
+    /// Append `line` to today's daily note in `dir` (the frontend adds the
+    /// date and time).
+    Journal { dir: PathBuf, line: String },
+}
+
+/// Tasks offered by the palette after `run_task`.
+#[derive(Debug, Clone)]
+pub struct TaskList {
+    pub tasks: Vec<hive_workspace::Task>,
+    dir: PathBuf,
+    workspace: WorkspaceId,
+}
+
+fn argv_def(argv: &[String]) -> hive_core::config::AgentDef {
+    hive_core::config::AgentDef {
+        command: argv.first().cloned().unwrap_or_default(),
+        args: argv.iter().skip(1).cloned().collect(),
+        env: Default::default(),
+    }
+}
+
+/// lazygit, else tig, else plain `git diff` in a pager.
+fn default_review_command() -> Vec<String> {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let has = |c: &str| launch::find_executable(c, &path).is_some();
+    let argv: &[&str] = if has("lazygit") {
+        &["lazygit"]
+    } else if has("tig") {
+        &["tig", "status"]
+    } else {
+        &["git", "-p", "diff", "HEAD"]
+    };
+    argv.iter().map(|s| s.to_string()).collect()
+}
 
 /// Commands of integrations that are switched off: no keys, no palette
 /// entries, no help lines.
 pub fn hidden_commands(config: &Config) -> Vec<Command> {
     let mut hidden = Vec::new();
-    if !config.integrations.obsidian.enabled {
-        hidden.push(Command::Notes);
+    let i = &config.integrations;
+    for (on, cmd) in [
+        (i.obsidian.enabled, Command::Notes),
+        (i.review.enabled, Command::Review),
+        (i.github.enabled, Command::PullRequest),
+        (i.tasks.enabled, Command::RunTask),
+    ] {
+        if !on {
+            hidden.push(cmd);
+        }
     }
     hidden
 }
@@ -360,6 +430,9 @@ impl App {
             remove_worktree_after: BTreeMap::new(),
             done: BTreeSet::new(),
             bell: false,
+            tasks: None,
+            effects: Vec::new(),
+            working_since: BTreeMap::new(),
             sidebar_hits: RefCell::new(Vec::new()),
         };
         app.set_terminal_size(terminal);
@@ -618,20 +691,77 @@ impl App {
         let id = new.id;
         let status = agent_status(new).filter(|_| new.state.is_alive());
         let unseen = !self.viewing(id);
+        let started = match status {
+            Some(AgentStatus::Working) => {
+                self.working_since
+                    .entry(id)
+                    .or_insert_with(std::time::Instant::now);
+                None
+            }
+            _ => self.working_since.remove(&id),
+        };
         match status {
             Some(AgentStatus::Idle) if old == Some(AgentStatus::Working) && unseen => {
                 self.done.insert(id);
                 self.bell |= self.config.notifications.bell;
+                self.notify(new, "finished");
+                self.journal(new, started.map(|t| t.elapsed()));
             }
             Some(AgentStatus::Idle) => {}
             Some(AgentStatus::Blocked) if old != Some(AgentStatus::Blocked) && unseen => {
                 self.done.remove(&id);
                 self.bell |= self.config.notifications.bell;
+                self.notify(new, "needs input");
             }
             _ => {
                 self.done.remove(&id);
             }
         }
+    }
+
+    fn notify(&mut self, s: &SessionInfo, what: &str) {
+        if self.config.integrations.desktop_notify.enabled {
+            let agent = s
+                .presence
+                .as_ref()
+                .map_or(s.agent.as_str(), |p| p.agent.as_str());
+            self.effects.push(Effect::Notify {
+                title: format!("{} {what}", s.label),
+                body: format!("#{} {agent} · {}", s.id, self.workspace_name(s.workspace)),
+            });
+        }
+    }
+
+    /// `[integrations.obsidian] journal`: a line in the vault's daily note
+    /// when an agent finishes while you're elsewhere.
+    fn journal(&mut self, s: &SessionInfo, took: Option<std::time::Duration>) {
+        let obsidian = &self.config.integrations.obsidian;
+        if !obsidian.enabled || !obsidian.journal {
+            return;
+        }
+        let cwd = PathBuf::from(&s.cwd);
+        let root = self
+            .workspaces
+            .get(&s.workspace)
+            .map_or_else(|| cwd.clone(), |w| PathBuf::from(&w.root));
+        let Some(vault) = hive_workspace::find_obsidian_vault(&cwd, &root) else {
+            return;
+        };
+        let agent = s
+            .presence
+            .as_ref()
+            .map_or(s.agent.as_str(), |p| p.agent.as_str());
+        let mut line = format!("{agent} finished in #{} {}", s.id, s.label);
+        if let Some(b) = &s.branch {
+            line.push_str(&format!(" ({b})"));
+        }
+        if let Some(d) = took.filter(|d| d.as_secs() >= 60) {
+            line.push_str(&format!(" after {}m", d.as_secs() / 60));
+        }
+        self.effects.push(Effect::Journal {
+            dir: vault.join(&obsidian.journal_dir),
+            line,
+        });
     }
 
     pub fn workspace_name(&self, id: WorkspaceId) -> &str {
@@ -1265,6 +1395,16 @@ impl App {
                 return self.open_notes();
             }
             Command::Notes => {}
+            Command::Review if self.config.integrations.review.enabled => {
+                return self.open_review(false);
+            }
+            Command::PullRequest if self.config.integrations.github.enabled => {
+                return self.open_review(true);
+            }
+            Command::RunTask if self.config.integrations.tasks.enabled => {
+                return self.pick_task();
+            }
+            Command::Review | Command::PullRequest | Command::RunTask => {}
             Command::CloseTab => return self.close_tab(),
             Command::NewWorktreeSession => {
                 self.open_picker_for(Place::Replace);
@@ -1346,21 +1486,33 @@ impl App {
         self.mode = Mode::Palette {
             query: String::new(),
             selected: 0,
-            sessions_only,
+            scope: if sessions_only {
+                Scope::Sessions
+            } else {
+                Scope::All
+            },
         };
     }
 
     /// Palette entries matching the current query, best first.
     pub fn palette_items(&self) -> Vec<PaletteItem> {
-        let Mode::Palette {
-            query,
-            sessions_only,
-            ..
-        } = &self.mode
-        else {
+        let Mode::Palette { query, scope, .. } = &self.mode else {
             return Vec::new();
         };
         let mut items: Vec<(PaletteItem, String)> = Vec::new();
+        if *scope == Scope::Tasks {
+            let tasks = self.tasks.as_ref().map_or(&[][..], |l| &l.tasks[..]);
+            for (i, t) in tasks.iter().enumerate() {
+                let item = PaletteItem {
+                    target: Target::Task(i),
+                    title: t.title.clone(),
+                    detail: String::new(),
+                    key: None,
+                };
+                items.push((item, t.title.clone()));
+            }
+        }
+        let sessions_only = *scope != Scope::All;
         if !sessions_only {
             let hidden = hidden_commands(&self.config);
             for cmd in Command::ALL {
@@ -1378,7 +1530,7 @@ impl App {
                 items.push((item, cmd.title().to_string()));
             }
         }
-        for id in self.order() {
+        for id in self.order().into_iter().filter(|_| *scope != Scope::Tasks) {
             let s = &self.sessions[&id];
             let workspace = self.workspace_name(s.workspace);
             let mut detail = format!("#{} {} · {workspace}", s.id, s.agent);
@@ -1455,6 +1607,7 @@ impl App {
                     Some(Target::Session(id)) if self.is_lost(id) => self.relaunch(id),
                     Some(Target::Session(id)) => self.switch_to(id),
                     Some(Target::Workspace(w)) => self.open_workspace(w),
+                    Some(Target::Task(i)) => self.run_task(i),
                     None => Vec::new(),
                 };
             }
@@ -1876,23 +2029,32 @@ impl App {
         }
     }
 
-    /// Opens the Obsidian vault of the focused session's workspace with the
-    /// configured editor, or shows the notes pane already open for it.
-    fn open_notes(&mut self) -> Vec<ClientMessage> {
+    /// The focused (or selected) session's directory, workspace and that
+    /// workspace's root, for integrations that work "beside" it.
+    fn context(&mut self) -> Option<(PathBuf, WorkspaceId, PathBuf)> {
         let Some(s) = self
             .focused()
             .or(self.cursor)
             .and_then(|id| self.sessions.get(&id))
         else {
             self.set_status(Tone::Warning, "Open a session in the workspace first.");
-            return Vec::new();
+            return None;
         };
-        let cwd = std::path::PathBuf::from(&s.cwd);
+        let cwd = PathBuf::from(&s.cwd);
         let workspace = s.workspace;
         let root = self
             .workspaces
             .get(&workspace)
-            .map_or_else(|| cwd.clone(), |w| std::path::PathBuf::from(&w.root));
+            .map_or_else(|| cwd.clone(), |w| PathBuf::from(&w.root));
+        Some((cwd, workspace, root))
+    }
+
+    /// Opens the Obsidian vault of the focused session's workspace with the
+    /// configured editor, or shows the notes pane already open for it.
+    fn open_notes(&mut self) -> Vec<ClientMessage> {
+        let Some((cwd, workspace, root)) = self.context() else {
+            return Vec::new();
+        };
         let Some(vault) = hive_workspace::find_obsidian_vault(&cwd, &root) else {
             let name = self.workspace_name(workspace);
             self.set_status(
@@ -1901,14 +2063,6 @@ impl App {
             );
             return Vec::new();
         };
-        let open = self.sessions.values().find(|s| {
-            s.agent == NOTES_AGENT
-                && s.state == SessionState::Running
-                && std::path::Path::new(&s.cwd) == vault
-        });
-        if let Some(id) = open.map(|s| s.id) {
-            return self.show(id);
-        }
         let obsidian = &self.config.integrations.obsidian;
         let Some(def) = obsidian.notes_agent(&self.config) else {
             self.set_status(
@@ -1920,23 +2074,114 @@ impl App {
             );
             return Vec::new();
         };
-        let label = Some(format!("notes · {}", hive_workspace::default_name(&vault)));
-        match launch::request_for(&def, NOTES_AGENT, label, Some(vault), &[], self.panel) {
-            Ok(mut req) => {
-                req.workspace = Some(workspace);
-                self.place = match obsidian.open_in {
-                    OpenIn::Tab => Place::NewTab,
-                    OpenIn::Split => Place::Split(Dir::Right),
-                };
-                self.awaiting_create = true;
-                self.set_status(Tone::Info, "Opening notes…");
-                vec![ClientMessage::CreateSession(req)]
-            }
+        let label = format!("notes · {}", hive_workspace::default_name(&vault));
+        let open_in = obsidian.open_in;
+        self.open_tool(NOTES_AGENT, &def, label, vault, workspace, open_in)
+    }
+
+    /// Review (`[integrations.review]`) or pull request checks
+    /// (`[integrations.github]`) in the focused session's directory.
+    fn open_review(&mut self, github: bool) -> Vec<ClientMessage> {
+        let Some((cwd, workspace, _)) = self.context() else {
+            return Vec::new();
+        };
+        let integrations = &self.config.integrations;
+        let (tool, agent, label) = if github {
+            (&integrations.github, GITHUB_AGENT, "checks")
+        } else {
+            (&integrations.review, REVIEW_AGENT, "review")
+        };
+        let argv = if !tool.command.is_empty() {
+            tool.command.clone()
+        } else if github {
+            ["gh", "pr", "checks", "--watch"].map(String::from).to_vec()
+        } else {
+            default_review_command()
+        };
+        let open_in = tool.open_in;
+        let def = argv_def(&argv);
+        let label = format!("{label} · {}", hive_workspace::default_name(&cwd));
+        self.open_tool(agent, &def, label, cwd, workspace, open_in)
+    }
+
+    /// Lists the project tasks next to the focused session in the palette.
+    fn pick_task(&mut self) -> Vec<ClientMessage> {
+        let Some((cwd, workspace, root)) = self.context() else {
+            return Vec::new();
+        };
+        let found = [cwd, root]
+            .into_iter()
+            .map(|d| (hive_workspace::find_tasks(&d), d))
+            .find(|(t, _)| !t.is_empty());
+        let Some((tasks, dir)) = found else {
+            self.set_status(
+                Tone::Warning,
+                "No tasks found (justfile, package.json, Makefile or Cargo.toml).",
+            );
+            return Vec::new();
+        };
+        self.tasks = Some(TaskList {
+            tasks,
+            dir,
+            workspace,
+        });
+        self.mode = Mode::Palette {
+            query: String::new(),
+            selected: 0,
+            scope: Scope::Tasks,
+        };
+        Vec::new()
+    }
+
+    fn run_task(&mut self, i: usize) -> Vec<ClientMessage> {
+        let Some(list) = self.tasks.take() else {
+            return Vec::new();
+        };
+        let Some(task) = list.tasks.get(i) else {
+            return Vec::new();
+        };
+        let def = argv_def(&task.argv);
+        let label = format!("task · {}", task.title);
+        let open_in = self.config.integrations.tasks.open_in;
+        self.open_tool(TASK_AGENT, &def, label, list.dir, list.workspace, open_in)
+    }
+
+    /// Shows the running session already doing this, or starts it in a tab
+    /// or split.
+    fn open_tool(
+        &mut self,
+        agent: &str,
+        def: &hive_core::config::AgentDef,
+        label: String,
+        cwd: PathBuf,
+        workspace: WorkspaceId,
+        open_in: OpenIn,
+    ) -> Vec<ClientMessage> {
+        let mut req = match launch::request_for(def, agent, Some(label), Some(cwd), &[], self.panel)
+        {
+            Ok(req) => req,
             Err(e) => {
                 self.set_status(Tone::Error, e.to_string());
-                Vec::new()
+                return Vec::new();
             }
+        };
+        let open = self.sessions.values().find(|s| {
+            s.agent == agent
+                && s.state == SessionState::Running
+                && s.cwd == req.cwd
+                && s.command == req.command
+        });
+        if let Some(id) = open.map(|s| s.id) {
+            return self.show(id);
         }
+        req.workspace = Some(workspace);
+        self.place = match open_in {
+            OpenIn::Tab => Place::NewTab,
+            OpenIn::Split => Place::Split(Dir::Right),
+        };
+        self.awaiting_create = true;
+        self.set_status(Tone::Info, format!("Opening {}…", req.label));
+        vec![ClientMessage::CreateSession(req)]
     }
 
     fn create_session(
@@ -2411,6 +2656,7 @@ mod tests {
         let mut notes = info(2, SessionState::Running);
         notes.agent = NOTES_AGENT.into();
         notes.cwd = req.cwd.clone();
+        notes.command = req.command.clone();
         app.on_server(ServerMessage::SessionCreated(notes));
         assert_eq!(app.tabs.len(), 2);
         assert_eq!(app.focused(), Some(2));
@@ -2440,6 +2686,112 @@ mod tests {
         attached(&mut app, 1);
         assert!(app.run(Command::Notes).is_empty());
         assert!(matches!(&app.status, Some((Tone::Warning, m)) if m.contains("No Obsidian vault")));
+    }
+
+    /// An app with every integration on and session 1 in `dir`.
+    fn integrated(dir: &std::path::Path) -> App {
+        let mut config = Config::default();
+        let i = &mut config.integrations;
+        i.obsidian.enabled = true;
+        i.obsidian.journal = true;
+        i.obsidian.journal_dir = "Daily".into();
+        i.review.enabled = true;
+        i.review.command = vec!["sh".into()];
+        i.github.enabled = true;
+        i.tasks.enabled = true;
+        i.desktop_notify.enabled = true;
+        let mut app = App::new(config, Start::Attach(1), (100, 26));
+        app.on_connect();
+        let mut one = info(1, SessionState::Running);
+        one.cwd = dir.display().to_string();
+        let mut two = info(2, SessionState::Running);
+        two.cwd = dir.display().to_string();
+        app.on_server(ServerMessage::SessionList(vec![one.clone(), two]));
+        attached(&mut app, 1);
+        app.on_server(ServerMessage::SessionUpdated(one));
+        app
+    }
+
+    #[test]
+    fn review_opens_beside_the_session_and_is_reused() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = integrated(dir.path());
+        assert!(palette_has(&mut app, Command::Review));
+        app.on_terminal_event(leader());
+        let out = app.on_terminal_event(ch('G'));
+        let [ClientMessage::CreateSession(req)] = out.as_slice() else {
+            panic!("expected CreateSession, got {out:?}");
+        };
+        assert_eq!(req.agent, REVIEW_AGENT);
+        assert_eq!(req.cwd, dir.path().display().to_string());
+        let mut review = info(3, SessionState::Running);
+        review.agent = REVIEW_AGENT.into();
+        review.cwd = req.cwd.clone();
+        review.command = req.command.clone();
+        app.on_server(ServerMessage::SessionCreated(review));
+        assert_eq!(app.tabs[0].root.panes(), vec![1, 3], "split by default");
+        app.run(Command::FocusNextPane);
+        let out = app.run(Command::Review);
+        assert!(
+            !out.iter()
+                .any(|m| matches!(m, ClientMessage::CreateSession(_)))
+        );
+        assert_eq!(app.focused(), Some(3));
+    }
+
+    #[test]
+    fn tasks_are_offered_in_the_palette_and_run_in_a_split() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("Makefile"),
+            "test:\n\ttrue\nlint:\n\ttrue\n",
+        )
+        .unwrap();
+        let mut app = integrated(dir.path());
+        app.on_terminal_event(leader());
+        app.on_terminal_event(ch('T'));
+        let titles: Vec<String> = app.palette_items().into_iter().map(|i| i.title).collect();
+        assert_eq!(titles, vec!["make test", "make lint"]);
+        for c in "lint".chars() {
+            app.on_terminal_event(ch(c));
+        }
+        let out = app.on_terminal_event(key(KeyCode::Enter, KeyModifiers::NONE));
+        let [ClientMessage::CreateSession(req)] = out.as_slice() else {
+            panic!("expected CreateSession, got {out:?}");
+        };
+        assert_eq!(req.label, "task · make lint");
+        assert_eq!(req.command.last().map(String::as_str), Some("lint"));
+        assert_eq!(app.place, Place::Split(Dir::Right));
+    }
+
+    #[test]
+    fn finished_agents_notify_and_write_the_journal() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".obsidian")).unwrap();
+        let mut app = integrated(dir.path());
+        let mut s = with_status(2, AgentStatus::Working);
+        s.cwd = dir.path().display().to_string();
+        app.on_server(ServerMessage::SessionUpdated(s.clone()));
+        let mut idle = with_status(2, AgentStatus::Idle);
+        idle.cwd = s.cwd.clone();
+        app.on_server(ServerMessage::SessionUpdated(idle));
+        let effects = std::mem::take(&mut app.effects);
+        assert!(matches!(&effects[0], Effect::Notify { title, .. } if title.ends_with("finished")));
+        assert!(matches!(&effects[1],
+            Effect::Journal { dir: d, line } if *d == dir.path().join("Daily") && line.starts_with("claude finished in #2")));
+
+        // Off by default: nothing queued.
+        let mut plain = self::app();
+        plain.on_server(ServerMessage::SessionUpdated(with_status(
+            2,
+            AgentStatus::Working,
+        )));
+        plain.on_server(ServerMessage::SessionUpdated(with_status(
+            2,
+            AgentStatus::Idle,
+        )));
+        assert!(plain.done.contains(&2));
+        assert!(plain.effects.is_empty());
     }
 
     #[test]
@@ -3236,7 +3588,7 @@ mod tests {
         assert!(matches!(
             app.mode,
             Mode::Palette {
-                sessions_only: false,
+                scope: Scope::All,
                 ..
             }
         ));

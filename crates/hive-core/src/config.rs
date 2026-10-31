@@ -110,6 +110,68 @@ impl Default for Notifications {
 #[serde(default, deny_unknown_fields)]
 pub struct Integrations {
     pub obsidian: Obsidian,
+    pub review: ToolPane,
+    pub github: ToolPane,
+    pub tasks: Tasks,
+    pub desktop_notify: DesktopNotify,
+}
+
+/// `[integrations.review]` / `[integrations.github]`: a tool opened in the
+/// focused session's directory.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ToolPane {
+    pub enabled: bool,
+    /// argv to run; empty picks a default (see the TUI).
+    pub command: Vec<String>,
+    pub open_in: OpenIn,
+}
+
+impl Default for ToolPane {
+    fn default() -> Self {
+        ToolPane {
+            enabled: false,
+            command: Vec::new(),
+            open_in: OpenIn::Split,
+        }
+    }
+}
+
+/// `[integrations.tasks]`: run project tasks (just, package.json, make,
+/// cargo) beside the agent.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Tasks {
+    pub enabled: bool,
+    pub open_in: OpenIn,
+}
+
+impl Default for Tasks {
+    fn default() -> Self {
+        Tasks {
+            enabled: false,
+            open_in: OpenIn::Split,
+        }
+    }
+}
+
+/// `[integrations.desktop_notify]`: a desktop notification when a session
+/// you aren't viewing needs input or finishes.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DesktopNotify {
+    pub enabled: bool,
+    /// argv; the title and body are appended as two arguments.
+    pub command: Vec<String>,
+}
+
+impl Default for DesktopNotify {
+    fn default() -> Self {
+        DesktopNotify {
+            enabled: false,
+            command: vec!["notify-send".into(), "--app-name=Hive".into()],
+        }
+    }
 }
 
 /// `[integrations.obsidian]`: open a workspace's Obsidian vault in a pane.
@@ -120,6 +182,10 @@ pub struct Obsidian {
     /// Agent to open the vault with; empty means `$VISUAL`, `$EDITOR`, `vi`.
     pub agent: String,
     pub open_in: OpenIn,
+    /// Append a line to today's note in the vault when an agent finishes.
+    pub journal: bool,
+    /// Folder of daily notes inside the vault; empty is the vault root.
+    pub journal_dir: String,
 }
 
 /// Where the notes pane opens.
@@ -375,6 +441,10 @@ mod tests {
             on.agent("shell").unwrap().command
         );
         assert!(Config::parse("[integrations.obsidian]\nopen_in = \"window\"\n").is_err());
+        let i = Config::default().integrations;
+        assert!(!i.review.enabled && !i.github.enabled && !i.tasks.enabled);
+        assert!(!i.desktop_notify.enabled && !i.obsidian.journal);
+        assert_eq!(i.review.open_in, OpenIn::Split);
     }
 
     #[test]
