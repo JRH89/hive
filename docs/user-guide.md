@@ -74,7 +74,7 @@ Everything you type goes to the agent, except the **leader** key (`Ctrl+Space`) 
 | `/` | Search sessions by name, agent, workspace or branch |
 | `c` | New terminal in the focused pane's directory (start an agent by typing it, e.g. `claude`; Hive detects it) |
 | `A` | New agent: pick one from a list (`w` in the picker toggles its own worktree) |
-| `C` | New session in its own git worktree |
+| `C` | New terminal in its own git worktree, on a fresh branch `hive/shell-<id>` (start an agent there; agents never share files) |
 | `n` / `p` (or `j` / `k`) | Next / previous session |
 | `1`–`9` | Jump to a session |
 | `s` | Focus the sidebar (`↑↓`, `enter`, `n`, `x`, `esc`) |

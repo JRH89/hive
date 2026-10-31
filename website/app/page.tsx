@@ -29,16 +29,16 @@ const features = [
   {
     number: "03",
     symbol: "keyboard" as const,
-    title: "Stay on the keyboard.",
-    text: "Normal input goes straight to your agent. A leader key handles Hive commands, with tmux-style splits and tabs to keep several agents in view, and the mouse when you want it.",
+    title: "Terminal first.",
+    text: "Click + new and you get a terminal. Type claude or codex to start an agent, cd anywhere first. A leader key handles Hive commands, tmux-style splits and tabs keep several agents in view, and the mouse works too.",
     foot: "CTRL+SPACE · SPLITS · TABS",
   },
   {
     number: "04",
     symbol: "branch" as const,
     title: "Every project in its place.",
-    text: "Sessions group by repository with the live Git branch beside each one. Give an agent its own worktree so two agents never edit the same checkout.",
-    foot: "WORKSPACES · BRANCHES · WORKTREES",
+    text: "Each repository you work in is a space with its own tabs, and a terminal follows you when you cd into another repo. Ctrl+Space C opens a terminal in its own worktree, so two agents never edit the same checkout.",
+    foot: "SPACES · BRANCHES · WORKTREES",
   },
   {
     number: "05",
@@ -59,7 +59,7 @@ const features = [
 const faqs = [
   [
     "Is Hive ready to use?",
-    "Yes, on Linux. Hive is new but feature-complete for its first version: many sessions in split panes and tabs, live agent status, detach and reattach, automatic reconnection, workspaces, Git worktrees, a command palette, themes, and configurable keys. It is tested with real terminals in CI. Version 0.3.0 is released with static Linux binaries and a one-line installer.",
+    "Yes, on Linux, macOS and Windows. Hive is young but complete: terminals and agents in split panes and tabs, live agent status, detach and reattach, automatic reconnection, spaces that follow your cd, Git worktrees, a command palette, themes and configurable keys. It is tested with real terminals in CI on all three platforms. Version 0.4.4 ships prebuilt binaries and a one-line installer; hive update upgrades in place.",
   ],
   [
     "Which agents can I run?",
@@ -68,6 +68,10 @@ const faqs = [
   [
     "What happens when I close Hive?",
     "Closing or detaching the frontend leaves your agent running in the local hived daemon. Reopening Hive reconnects to the live session. Stopping the daemon or rebooting the machine ends those processes; Hive does not recover them after a reboot.",
+  ],
+  [
+    "Do agents step on each other's changes?",
+    "Not if you don't let them. Agents don't isolate themselves: two agents in the same directory edit the same files. Press Ctrl+Space C (or run hive new codex -w) to open a terminal in its own Git worktree on a fresh branch, then start the agent there. Hive warns when two agents share a directory, and never removes a worktree with uncommitted changes.",
   ],
   [
     "Is Hive open source?",
@@ -79,7 +83,7 @@ const faqs = [
   ],
   [
     "Can I run it on macOS or Windows?",
-    "Linux is supported today. Hive compiles for macOS but has not been tested there yet. Windows needs a dedicated port and is not supported.",
+    "Yes. Hive supports Linux (x86_64, aarch64), macOS (Apple silicon, Intel) and Windows 10+ (x86_64), and CI tests all three. On Windows, agent status comes only from agents that report it with hive report-agent, and spaces don't yet follow cd.",
   ],
 ];
 
@@ -94,8 +98,8 @@ const structuredData = [
     url: siteUrl,
     applicationCategory: "DeveloperApplication",
     applicationSubCategory: "Terminal multiplexer",
-    operatingSystem: "Linux",
-    softwareVersion: "0.4.3",
+    operatingSystem: "Linux, macOS, Windows",
+    softwareVersion: "0.4.4",
     downloadUrl: `${repoUrl}/releases/latest`,
     installUrl: siteUrl + "#get-started",
     license: "https://opensource.org/licenses/MIT",
@@ -158,7 +162,7 @@ export default function Home() {
             </a>
           </div>
           <p className="release-note">
-            <span className="tiny-square" /> Linux{" "}
+            <span className="tiny-square" /> Linux · macOS · Windows{" "}
             <span aria-hidden="true">/</span> Open source · MIT{" "}
             <span aria-hidden="true">/</span> Built to stay local
           </p>
@@ -229,6 +233,38 @@ export default function Home() {
                 <p>{feature.text}</p>
                 <span className="feature-foot">{feature.foot}</span>
               </article>
+            ))}
+          </div>
+        </section>
+
+        <section
+          id="screenshots"
+          className="section wrapper"
+          aria-labelledby="screenshots-title"
+        >
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">THE REAL THING</p>
+              <h2 id="screenshots-title">What it looks like.</h2>
+            </div>
+            <p className="section-aside">
+              Captured from a live session.
+              <br />
+              Spaces on the left, tabs on top.
+            </p>
+          </div>
+          <div className="screens">
+            {[
+              ["main", "Claude working beside a git log split, in the shop space"],
+              ["worktree", "Codex in its own worktree, waiting for approval"],
+              ["palette", "The command palette: Ctrl+Space :"],
+            ].map(([name, caption]) => (
+              <figure key={name}>
+                {/* Static export: plain img with intrinsic size. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={`/screenshots/${name}.png`} alt={caption} width={2443} height={1553} loading="lazy" />
+                <figcaption>{caption}</figcaption>
+              </figure>
             ))}
           </div>
         </section>
@@ -309,7 +345,7 @@ export default function Home() {
               <h2 id="start-title">Your terminal. Your platform.</h2>
             </div>
             <span className="development-badge">
-              <span className="tiny-square" /> v0.4.3 RELEASED
+              <span className="tiny-square" /> v0.4.4 RELEASED
             </span>
           </div>
           <ReleaseInstall />
@@ -317,7 +353,7 @@ export default function Home() {
             <summary>
               Or build from source{" "}
               <span>
-                Linux · Rust 1.89+ <span aria-hidden="true">+</span>
+                Rust 1.89+ <span aria-hidden="true">+</span>
               </span>
             </summary>
             <div className="source-build-content">
@@ -327,7 +363,7 @@ export default function Home() {
                   already use.
                 </p>
                 <div className="setup-requirements" aria-label="Requirements">
-                  <span>Linux</span>
+                  <span>Linux, macOS or Windows</span>
                   <span>Rust 1.89+</span>
                   <span>Your agent CLI</span>
                 </div>
@@ -434,8 +470,22 @@ export default function Home() {
                 <p>
                   Agent status, split panes and tabs, a clickable sidebar of
                   spaces and agents, Alt-arrow navigation, optional review,
-                  task and notification integrations, and hive update. Static Linux binaries with a
-                  checksum-verified installer. macOS testing comes next.
+                  task and notification integrations, and hive update.
+                </p>
+              </div>
+            </article>
+            <article>
+              <span className="roadmap-marker current" />
+              <div>
+                <span className="roadmap-status available">RELEASED · v0.4.4</span>
+                <h3>Everywhere, terminal first</h3>
+                <p>
+                  macOS and Windows binaries. New opens a terminal, spaces
+                  follow your cd, each space keeps its own tabs, and worktree
+                  terminals keep agents apart.{" "}
+                  <a className="text-link" href="/changelog/">
+                    Full changelog <Arrow />
+                  </a>
                 </p>
               </div>
             </article>
@@ -489,6 +539,8 @@ export default function Home() {
         <nav aria-label="Footer navigation">
           <a href="#get-started">Get started</a>
           <a href="#roadmap">Roadmap</a>
+          <a href="/changelog/">Changelog</a>
+          <a href="/changelog/rss.xml">RSS</a>
           <a href="#questions">FAQ</a>
           <a href={repoUrl}>GitHub</a>
           <a href={`${repoUrl}/blob/master/LICENSE`}>MIT License</a>

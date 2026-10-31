@@ -28,7 +28,7 @@ export function SiteHeader() {
   return (
     <div className="header-shell">
       <header className="site-header wrapper">
-        <a className="brand-link" href="#" aria-label="Hive home" onClick={() => setOpen(false)}><Brand /></a>
+        <a className="brand-link" href="/" aria-label="Hive home" onClick={() => setOpen(false)}><Brand /></a>
         <button ref={toggle} type="button" className="menu-toggle" aria-expanded={open} aria-controls="main-navigation" onClick={() => setOpen(!open)}>
           {open ? "Close" : "Menu"}
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
@@ -38,10 +38,11 @@ export function SiteHeader() {
         <nav id="main-navigation" aria-label="Main navigation" className={`main-navigation ${open ? "is-open" : ""}`} onClick={() => setOpen(false)} onBlur={(event) => {
           if (!event.currentTarget.contains(event.relatedTarget) && event.relatedTarget !== toggle.current) setOpen(false);
         }}>
-          <a className="nav-link" href="#features">Features</a>
-          <a className="nav-link" href="#how-it-works">How it works</a>
+          <a className="nav-link" href="/#features">Features</a>
+          <a className="nav-link" href="/#how-it-works">How it works</a>
+          <a className="nav-link" href="/changelog/">Changelog</a>
           <a className="nav-link nav-github" href="https://github.com/jrh89/hive" aria-label="Hive on GitHub"><Icon name="github" size={18} /><span>GitHub</span></a>
-          <a className="nav-cta" href="#get-started">Get started <Icon name="arrow" size={17} /></a>
+          <a className="nav-cta" href="/#get-started">Get started <Icon name="arrow" size={17} /></a>
         </nav>
       </header>
     </div>

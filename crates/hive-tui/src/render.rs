@@ -108,7 +108,7 @@ fn draw_pane_chrome(
         let mut text = match app.sessions.get(&pane.session) {
             Some(s) => {
                 let (dot, _) = session_dot(s, app, theme);
-                format!(" {dot} #{} {}", s.id, s.label)
+                format!(" {dot} #{} {}", s.id, display_name(s))
             }
             None => format!(" #{}", pane.session),
         };
@@ -224,6 +224,15 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             .alignment(Alignment::Right),
             area,
         );
+    }
+}
+
+/// A session's name: its label, except that an unrenamed terminal running
+/// an agent is called by the agent, like herdr (`claude`, not `shell`).
+fn display_name(s: &SessionInfo) -> String {
+    match s.presence.as_ref().filter(|_| s.state.is_alive()) {
+        Some(p) if s.agent == "shell" && s.label == s.agent => p.agent.clone(),
+        _ => s.label.clone(),
     }
 }
 
@@ -530,12 +539,8 @@ fn draw_sidebar_session(
     theme: &Theme,
 ) {
     let width = row1.width as usize;
-    // A terminal running an agent is listed as that agent, like herdr.
     let detected = s.presence.as_ref().filter(|_| s.state.is_alive());
-    let name = match detected {
-        Some(p) if s.agent == "shell" && s.label == s.agent => p.agent.clone(),
-        _ => s.label.clone(),
-    };
+    let name = display_name(s);
     let base = if is_cursor {
         theme.cursor_row()
     } else {
@@ -803,7 +808,7 @@ fn session_summary<'a>(s: &SessionInfo, app: &App, theme: &Theme, bar: Style) ->
     }
     let mut spans = vec![
         Span::styled(format!(" {dot} "), bar.fg(color)),
-        Span::styled(format!("#{} {}", s.id, s.label), bar),
+        Span::styled(format!("#{} {}", s.id, display_name(s)), bar),
         Span::styled(
             format!(" · {place} · {state} · {}", counts(app)),
             bar.fg(theme.muted),

@@ -1062,8 +1062,8 @@ impl App {
                     let shared = self.sharing_dir(id);
                     if !shared.is_empty() {
                         let ids: Vec<_> = shared.iter().map(|i| format!("#{i}")).collect();
-                        let fix = match self.keymap.hint(Command::NewWorktreeSession) {
-                            Some(k) => format!(" Leader {k} starts one in its own worktree."),
+                        let fix = match self.keymap.hint(Command::NewWorktreeTerminal) {
+                            Some(k) => format!(" Leader {k} opens a terminal in its own worktree."),
                             None => String::new(),
                         };
                         self.set_status(
@@ -1597,6 +1597,7 @@ impl App {
             }
             Command::Review | Command::PullRequest | Command::RunTask => {}
             Command::CloseTab => return self.close_tab(),
+            Command::NewWorktreeTerminal => return self.new_worktree_terminal(),
             Command::NewWorktreeSession => {
                 self.open_picker_for(Place::Replace);
                 if self.picker_can_worktree() {
@@ -1924,6 +1925,27 @@ impl App {
     /// space's root. Agents and dev servers are started from it by hand and
     /// detected from the process.
     fn new_terminal(&mut self, place: Place) -> Vec<ClientMessage> {
+        self.open_terminal(place, false)
+    }
+
+    /// A shell in a fresh git worktree on its own branch (`hive/shell-N`),
+    /// so an agent started there can't touch other checkouts' files.
+    fn new_worktree_terminal(&mut self) -> Vec<ClientMessage> {
+        let repo = self
+            .active_workspace()
+            .and_then(|w| self.workspaces.get(&w))
+            .is_some_and(|w| w.is_repo);
+        if !repo {
+            self.set_status(
+                Tone::Warning,
+                "This space isn't a git repository, so it can't have worktrees. cd into a repo first.",
+            );
+            return Vec::new();
+        }
+        self.open_terminal(Place::NewTab, true)
+    }
+
+    fn open_terminal(&mut self, place: Place, worktree: bool) -> Vec<ClientMessage> {
         let workspace = self.active_workspace();
         let cwd = self
             .current()
@@ -1937,10 +1959,18 @@ impl App {
         match launch::create_request(&self.config, "shell", None, cwd, &[], self.panel) {
             Ok(mut req) => {
                 req.workspace = workspace;
+                req.worktree = worktree.then_some(NewWorktree { branch: None });
                 self.place = place;
                 self.awaiting_create = true;
                 self.mode = Mode::Normal;
-                self.set_status(Tone::Info, "Opening a terminal…");
+                self.set_status(
+                    Tone::Info,
+                    if worktree {
+                        "Creating a worktree and opening a terminal in it…"
+                    } else {
+                        "Opening a terminal…"
+                    },
+                );
                 vec![ClientMessage::CreateSession(req)]
             }
             Err(e) => {
@@ -3320,6 +3350,29 @@ mod tests {
         assert_eq!((req.agent.as_str(), req.workspace), ("shell", Some(7)));
         assert_eq!(Path::new(&req.cwd), root);
         assert_eq!(app.place, Place::NewTab);
+    }
+
+    #[test]
+    fn leader_c_opens_a_terminal_in_its_own_worktree() {
+        let mut app = app_with_workspaces();
+        app.on_terminal_event(leader());
+        let out = app.on_terminal_event(ch('C'));
+        let [ClientMessage::CreateSession(req)] = out.as_slice() else {
+            panic!("expected a worktree terminal, got {out:?}")
+        };
+        assert_eq!(req.agent, "shell");
+        assert_eq!(req.worktree, Some(NewWorktree { branch: None }));
+        assert_eq!(app.place, Place::NewTab);
+
+        // Not a repository: explained, nothing created.
+        let mut plain = app_with_workspaces();
+        for s in plain.sessions.values_mut() {
+            s.workspace = 3;
+        }
+        plain.space = Some(3);
+        plain.on_terminal_event(leader());
+        assert!(plain.on_terminal_event(ch('C')).is_empty());
+        assert!(matches!(&plain.status, Some((Tone::Warning, m)) if m.contains("git")));
     }
 
     #[test]

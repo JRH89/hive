@@ -16,6 +16,7 @@ pub enum Command {
     SearchSessions,
     NewSession,
     NewAgent,
+    NewWorktreeTerminal,
     NewWorktreeSession,
     Workspaces,
     AddWorkspace,
@@ -48,11 +49,12 @@ pub enum Command {
 }
 
 impl Command {
-    pub const ALL: [Command; 33] = [
+    pub const ALL: [Command; 34] = [
         Command::Palette,
         Command::SearchSessions,
         Command::NewSession,
         Command::NewAgent,
+        Command::NewWorktreeTerminal,
         Command::NewWorktreeSession,
         Command::Workspaces,
         Command::AddWorkspace,
@@ -91,6 +93,7 @@ impl Command {
             Command::SearchSessions => "search_sessions",
             Command::NewSession => "new_session",
             Command::NewAgent => "new_agent",
+            Command::NewWorktreeTerminal => "new_worktree_terminal",
             Command::NewWorktreeSession => "new_worktree_session",
             Command::Workspaces => "workspaces",
             Command::AddWorkspace => "add_workspace",
@@ -130,7 +133,8 @@ impl Command {
             Command::SearchSessions => "Search sessions",
             Command::NewSession => "New terminal",
             Command::NewAgent => "New agent (pick one)",
-            Command::NewWorktreeSession => "New session in its own worktree",
+            Command::NewWorktreeTerminal => "New terminal in its own worktree (own branch)",
+            Command::NewWorktreeSession => "New agent in its own worktree (pick one)",
             Command::Workspaces => "Switch workspace",
             Command::AddWorkspace => "New space (a folder)",
             Command::RenameWorkspace => "Rename workspace",
@@ -204,7 +208,8 @@ impl Command {
             Command::TakeControl => &["a"],
             Command::Detach => &["d", "q"],
             Command::Help => &["?"],
-            Command::NewWorktreeSession => &["C"],
+            Command::NewWorktreeTerminal => &["C"],
+            Command::NewWorktreeSession => &[],
             Command::AddWorkspace | Command::RenameWorkspace | Command::Settings => &[],
         }
     }
