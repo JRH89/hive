@@ -548,12 +548,22 @@ async fn switching_between_sessions_keeps_both_running() {
     .await
     .unwrap();
     wait_for_text(&mut c, &mut echo_screen, "first").await;
-    tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Switch back: the ticker kept counting while it was in the background.
-    let screen = attach(&mut c, ticker, size).await;
-    let after = counter(&screen, "tick=");
-    assert!(after > before + 5, "ticker stalled: {before} -> {after}");
+    // No assumption about its speed: re-attach until it has visibly moved.
+    let deadline = std::time::Instant::now() + T;
+    loop {
+        let screen = attach(&mut c, ticker, size).await;
+        let after = counter(&screen, "tick=");
+        if after > before + 5 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "ticker stalled: {before} -> {after}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 
     // And the echo session kept its screen and still takes input.
     let mut echo_screen = attach(&mut c, echo, size).await;
@@ -969,7 +979,9 @@ async fn worktree_sessions_are_isolated_and_cleanup_is_safe() {
     let path = PathBuf::from(wt.worktree.clone().expect("runs in a linked worktree"));
     assert_eq!(wt.workspace, main.workspace);
     assert_eq!(wt.branch, Some(format!("hive/shell-{}", wt.id)));
-    assert!(path.starts_with(h.paths.state_dir.join("worktrees")));
+    // Canonical on both sides: macOS's temp dir is behind a symlink.
+    let worktrees = h.paths.state_dir.join("worktrees").canonicalize().unwrap();
+    assert!(path.canonicalize().unwrap().starts_with(worktrees));
     assert_eq!(PathBuf::from(&wt.cwd), path);
 
     c.send(&ClientMessage::ListWorktrees(main.workspace))
