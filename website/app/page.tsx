@@ -59,7 +59,7 @@ const features = [
 const faqs = [
   [
     "Is Hive ready to use?",
-    "Yes, on Linux. Hive is new but feature-complete for its first version: many sessions in split panes and tabs, live agent status, detach and reattach, automatic reconnection, workspaces, Git worktrees, a command palette, themes, and configurable keys. It is tested with real terminals in CI. Version 0.2.0 is released with static Linux binaries and a one-line installer.",
+    "Yes, on Linux. Hive is new but feature-complete for its first version: many sessions in split panes and tabs, live agent status, detach and reattach, automatic reconnection, workspaces, Git worktrees, a command palette, themes, and configurable keys. It is tested with real terminals in CI. Version 0.3.0 is released with static Linux binaries and a one-line installer.",
   ],
   [
     "Which agents can I run?",
@@ -95,7 +95,7 @@ const structuredData = [
     applicationCategory: "DeveloperApplication",
     applicationSubCategory: "Terminal multiplexer",
     operatingSystem: "Linux",
-    softwareVersion: "0.2.0",
+    softwareVersion: "0.3.0",
     downloadUrl: `${repoUrl}/releases/latest`,
     installUrl: siteUrl + "#get-started",
     license: "https://opensource.org/licenses/MIT",
@@ -309,7 +309,7 @@ export default function Home() {
               <h2 id="start-title">Your terminal. Your platform.</h2>
             </div>
             <span className="development-badge">
-              <span className="tiny-square" /> v0.2.0 RELEASED
+              <span className="tiny-square" /> v0.3.0 RELEASED
             </span>
           </div>
           <ReleaseInstall />
@@ -429,11 +429,12 @@ export default function Home() {
             <article>
               <span className="roadmap-marker current" />
               <div>
-                <span className="roadmap-status available">RELEASED · v0.2.0</span>
+                <span className="roadmap-status available">RELEASED · v0.3.0</span>
                 <h3>Many agents at a glance</h3>
                 <p>
-                  Agent detection and status, split panes and tabs, herdr-style
-                  keys and mouse support. Static Linux binaries with a
+                  Agent status, split panes and tabs, a clickable sidebar of
+                  spaces and agents, Alt-arrow navigation, optional review,
+                  task and notification integrations, and hive update. Static Linux binaries with a
                   checksum-verified installer. macOS testing comes next.
                 </p>
               </div>
