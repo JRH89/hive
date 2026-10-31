@@ -367,7 +367,7 @@ impl Daemon {
             .map(|(w, dirty)| WorktreeInfo {
                 sessions: live
                     .iter()
-                    .filter(|s| s.is_alive() && s.tree_root() == Some(w.path.as_path()))
+                    .filter(|s| s.is_alive() && s.tree_root().as_deref() == Some(w.path.as_path()))
                     .map(|s| s.id)
                     .collect(),
                 path: w.path.display().to_string(),
@@ -391,7 +391,8 @@ impl Daemon {
             .values()
             .filter(|s| {
                 s.is_alive()
-                    && (s.tree_root() == Some(path.as_path()) || s.cwd().starts_with(&path))
+                    && (s.tree_root().as_deref() == Some(path.as_path())
+                        || s.cwd().starts_with(&path))
             })
             .map(|s| format!("#{}", s.id))
             .collect();
@@ -410,11 +411,45 @@ impl Daemon {
 
     /// Republishes sessions whose branch changed (e.g. the agent ran
     /// `git switch`).
-    fn refresh_branches(&self) {
+    /// Follows each session's process to where it is now (`cd`) and
+    /// re-reads branches; republishes what changed.
+    fn refresh_places(&self) {
         let live: Vec<_> = self.sessions.lock().unwrap().values().cloned().collect();
         for s in live {
-            if s.refresh_branch() {
+            let mut changed = false;
+            if let Some(cwd) = s.live_cwd().filter(|c| *c != s.cwd()) {
+                let workspace = self.space_for(&cwd, s.workspace());
+                if workspace != s.workspace() {
+                    tracing::info!(session = s.id, cwd = %cwd.display(), workspace, "session moved");
+                }
+                s.move_to(&cwd, workspace);
+                changed = true;
+            }
+            if s.refresh_branch() || changed {
                 s.publish();
+            }
+        }
+    }
+
+    /// The workspace a session that moved to `cwd` belongs to: its
+    /// repository's (created if new, so spaces are the repos in use), else
+    /// the deepest workspace containing it, else where it was.
+    fn space_for(&self, cwd: &Path, current: WorkspaceId) -> WorkspaceId {
+        let mut workspaces = self.workspaces.lock().unwrap();
+        match hive_workspace::discover(cwd) {
+            Some(repo) => match workspaces
+                .values()
+                .find(|w| Path::new(&w.root) == repo.main_root)
+            {
+                Some(w) => w.id,
+                None => {
+                    self.insert_workspace(&mut workspaces, &repo.main_root, None)
+                        .id
+                }
+            },
+            None => {
+                let roots = workspaces.values().map(|w| (w.id, Path::new(&w.root)));
+                hive_workspace::best_match(roots, cwd).unwrap_or(current)
             }
         }
     }
@@ -524,7 +559,9 @@ async fn branch_loop(daemon: Arc<Daemon>) {
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tick.tick().await;
-        daemon.refresh_branches();
+        let d = daemon.clone();
+        // Reads /proc (or runs lsof) and .git files: off the runtime threads.
+        let _ = tokio::task::spawn_blocking(move || d.refresh_places()).await;
     }
 }
 

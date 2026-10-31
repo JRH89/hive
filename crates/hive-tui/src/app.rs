@@ -187,7 +187,8 @@ fn agent_status(s: &SessionInfo) -> Option<AgentStatus> {
 pub enum SidebarHit {
     Session(SessionId),
     Workspace(WorkspaceId),
-    /// The "new" button: a new space (asks for its folder).
+    /// The "new" button: a terminal in a new tab; `cd` somewhere and its
+    /// space follows.
     New,
     /// The "menu" button: the command palette.
     Menu,
@@ -275,6 +276,8 @@ pub struct App {
     space_tab: BTreeMap<WorkspaceId, usize>,
     /// A space this client asked for: open a terminal in it once created.
     pending_space: Option<PathBuf>,
+    /// Sessions whose tab was closed here: not given a tab again.
+    dismissed: BTreeSet<SessionId>,
 }
 
 /// Result of a key in a one-line text prompt.
@@ -452,6 +455,7 @@ impl App {
             space: None,
             space_tab: BTreeMap::new(),
             pending_space: None,
+            dismissed: BTreeSet::new(),
         };
         app.set_terminal_size(terminal);
         if let Some(e) = key_error {
@@ -711,6 +715,16 @@ impl App {
     }
 
     /// Sidebar groups: each workspace with its sessions in creation order.
+    /// The sidebar's SPACES: spaces with something open (plus the selected
+    /// one), so the list is the repos in use.
+    pub fn spaces(&self) -> Vec<(WorkspaceId, Vec<SessionId>)> {
+        let shown = self.shown_space();
+        self.groups()
+            .into_iter()
+            .filter(|(w, ids)| Some(*w) == shown || ids.iter().any(|id| !self.is_lost(*id)))
+            .collect()
+    }
+
     pub fn groups(&self) -> Vec<(WorkspaceId, Vec<SessionId>)> {
         self.workspace_order()
             .into_iter()
@@ -1135,12 +1149,23 @@ impl App {
                 }
             }
             ServerMessage::SessionUpdated(info) => {
+                // A terminal that `cd`s into another repo moves space; the
+                // view follows the one you're in.
+                if self.focused() == Some(info.id)
+                    && self
+                        .sessions
+                        .get(&info.id)
+                        .is_some_and(|s| s.workspace != info.workspace)
+                {
+                    self.space = Some(info.workspace);
+                }
                 let old = self.sessions.get(&info.id).and_then(agent_status);
                 self.note_activity(old, &info);
                 self.sessions.insert(info.id, info);
             }
             ServerMessage::SessionRemoved(id) => {
                 self.sessions.remove(&id);
+                self.dismissed.remove(&id);
                 self.done.remove(&id);
                 out.extend(self.drop_pane(id));
                 if matches!(&self.status, Some((Tone::Info, m)) if *m == terminating(id)) {
@@ -1202,8 +1227,37 @@ impl App {
                 );
             }
         }
+        out.extend(self.adopt_sessions());
         self.fix_cursor();
         out
+    }
+
+    /// Every running session has a tab, like herdr: ones started elsewhere
+    /// (another window, the CLI, before a restart) get one in the
+    /// background. Hidden tabs cost nothing (ADR-0018).
+    fn adopt_sessions(&mut self) -> Vec<ClientMessage> {
+        if self.awaiting_create || matches!(self.start, Some(Start::Auto)) {
+            return Vec::new();
+        }
+        let was_empty = self.tabs.is_empty();
+        let mut ids: Vec<SessionId> = self
+            .sessions
+            .values()
+            .filter(|s| s.state.is_alive() && !self.dismissed.contains(&s.id))
+            .map(|s| s.id)
+            .collect();
+        ids.sort_unstable();
+        for id in ids {
+            if !self.tabs.iter().any(|t| t.root.contains(id)) {
+                self.tabs.push(Tab::new(id));
+            }
+        }
+        if was_empty && !self.tabs.is_empty() {
+            self.tab = 0;
+            self.space = self.tab_space(&self.tabs[0]);
+            return self.sync_panes(Vec::new());
+        }
+        Vec::new()
     }
 
     pub fn on_terminal_event(&mut self, event: Event) -> Vec<ClientMessage> {
@@ -1272,7 +1326,7 @@ impl App {
                     self.open_space(w)
                 }
                 (MouseEventKind::Down(MouseButton::Left), Some(SidebarHit::New)) => {
-                    self.run(Command::AddWorkspace)
+                    self.new_terminal(Place::NewTab)
                 }
                 (MouseEventKind::Down(MouseButton::Left), Some(SidebarHit::Menu)) => {
                     self.run(Command::Palette)
@@ -1799,6 +1853,7 @@ impl App {
             let Some(i) = self.tab_index() else {
                 return Vec::new();
             };
+            self.dismissed.insert(id);
             self.tabs[i].remove(id);
             self.cursor = self.focused();
             return self.sync_panes(before);
@@ -1816,6 +1871,7 @@ impl App {
             return Vec::new();
         }
         let before = self.tab_sessions();
+        self.dismissed.extend(before.iter().copied());
         self.tabs.remove(self.tab);
         self.tab = self.tab.min(self.tabs.len() - 1);
         self.cursor = self.focused();
@@ -1916,7 +1972,7 @@ impl App {
 
     /// Selects the next/previous space (empty ones too), wrapping around.
     fn switch_workspace(&mut self, delta: isize) -> Vec<ClientMessage> {
-        let spaces: Vec<WorkspaceId> = self.groups().into_iter().map(|(w, _)| w).collect();
+        let spaces: Vec<WorkspaceId> = self.spaces().into_iter().map(|(w, _)| w).collect();
         if spaces.is_empty() {
             return Vec::new();
         }
@@ -2830,6 +2886,8 @@ mod tests {
     #[test]
     fn tabs_keep_their_own_panes() {
         let mut app = app();
+        // Every running session has a tab, like herdr.
+        assert_eq!(app.tabs.len(), 3);
         app.on_terminal_event(leader());
         let out = app.on_terminal_event(ch('t'));
         let [ClientMessage::CreateSession(req)] = out.as_slice() else {
@@ -2840,46 +2898,56 @@ mod tests {
             5,
             SessionState::Running,
         )));
-        assert_eq!(app.tabs.len(), 2);
-        assert_eq!(app.tab, 1);
+        assert_eq!(app.tabs.len(), 4);
+        assert_eq!(app.tab, 3);
         assert_eq!(out[0], ClientMessage::Detach { session: Some(1) });
         assert_eq!(sizes(&out), vec![(5, app.panel)]);
         attached(&mut app, 5);
 
-        // Back to the first tab: its pane comes back, the other goes. The
+        // The previous tab: its pane comes back, the other goes. The
         // daemon's reply to that detach leaves the hidden tab alone.
         app.on_terminal_event(leader());
         let out = app.on_terminal_event(ch('['));
-        assert_eq!(app.focused(), Some(1));
+        assert_eq!(app.focused(), Some(3));
         assert_eq!(out[0], ClientMessage::Detach { session: Some(5) });
-        assert_eq!(attaches(out), attach_msg(&app, 1));
+        assert_eq!(attaches(out), attach_msg(&app, 3));
         assert!(
             app.on_server(ServerMessage::Detached { session: 5 })
                 .is_empty()
         );
-        assert_eq!(app.tabs.len(), 2);
+        assert_eq!(app.tabs.len(), 4);
 
-        // Switching to a session shown in another tab activates that tab.
-        attached(&mut app, 1);
+        // Switching to a session activates its tab.
+        attached(&mut app, 3);
         app.on_terminal_event(Event::Key(KeyEvent::new(
             KeyCode::Char('2'),
             KeyModifiers::ALT,
         )));
-        assert_eq!(
-            app.tab, 0,
-            "#2 isn't in a tab: it replaces the focused pane"
-        );
-        assert_eq!(app.tabs[0].root.panes(), vec![2]);
-        let out = app.run(Command::NextTab);
-        assert_eq!(app.focused(), Some(5));
-        assert_eq!(attaches(out), attach_msg(&app, 5));
+        assert_eq!(app.tab, 1);
+        assert_eq!(app.focused(), Some(2));
 
         // A session that ends leaves its tab; an emptied tab closes.
+        app.run(Command::NextTab);
+        app.run(Command::NextTab);
+        assert_eq!(app.focused(), Some(5));
         attached(&mut app, 5);
         app.on_server(ServerMessage::SessionRemoved(5));
         app.on_server(ServerMessage::Detached { session: 5 });
-        assert_eq!(app.tabs.len(), 1);
-        assert_eq!(app.focused(), Some(2));
+        assert_eq!(app.tabs.len(), 3);
+        assert!(app.tabs.iter().all(|t| !t.root.contains(5)));
+
+        // A closed tab stays closed while its session keeps running.
+        app.run(Command::CloseTab);
+        let n = app.tabs.len();
+        app.on_server(ServerMessage::SessionUpdated(info(
+            2,
+            SessionState::Running,
+        )));
+        app.on_server(ServerMessage::SessionUpdated(info(
+            3,
+            SessionState::Running,
+        )));
+        assert_eq!(app.tabs.len(), n);
     }
 
     #[test]
@@ -3141,15 +3209,21 @@ mod tests {
             }
         ));
         app.on_terminal_event(key(KeyCode::Esc, KeyModifiers::NONE));
-        // "new" under spaces asks for a folder for a new space.
-        assert!(app.on_terminal_event(press(2, 10)).is_empty());
-        assert!(matches!(&app.mode, Mode::AddWorkspace { input } if input.ends_with('/')));
-        app.on_terminal_event(key(KeyCode::Esc, KeyModifiers::NONE));
+        // "new" opens a terminal in a new tab: `cd` and its space follows.
+        let out = app.on_terminal_event(press(2, 10));
+        assert!(
+            matches!(out.as_slice(), [ClientMessage::CreateSession(r)] if r.agent == "shell"),
+            "{out:?}"
+        );
+        assert_eq!(app.place, Place::NewTab);
+        app.awaiting_create = false;
+        app.place = Place::Replace;
 
         // Alt+Up/Down walk the spaces, wrapping.
         let alt = |code| key(code, KeyModifiers::ALT);
+        // The third space has nothing open: it isn't listed, so it's skipped.
         app.on_terminal_event(alt(KeyCode::Down));
-        assert_eq!(app.shown_space(), Some(spaces[2 % spaces.len()]));
+        assert_eq!(app.shown_space(), Some(spaces[0]));
         app.on_terminal_event(alt(KeyCode::Up));
         assert_eq!(app.shown_space(), Some(other));
 
@@ -3180,9 +3254,9 @@ mod tests {
             9,
             SessionState::Running,
         )));
-        // Tabs belong to spaces: tab 1 is the other space's (session 3).
-        assert_eq!(app.tab, 2);
-        assert_eq!(app.space_tabs(Some(1)), vec![0, 2]);
+        // Tabs belong to spaces: tab 2 is the other space's (session 3).
+        assert_eq!(app.tab, 3);
+        assert_eq!(app.space_tabs(Some(1)), vec![0, 1, 3]);
         set_hits(&app, vec![(Rect::new(80, 0, 9, 1), SidebarHit::Tab(0))]);
         app.on_terminal_event(press(82, 0));
         assert_eq!(app.tab, 0);
@@ -3191,14 +3265,17 @@ mod tests {
         assert!(matches!(out.as_slice(), [ClientMessage::CreateSession(r)] if r.agent == "shell"));
         assert_eq!(app.place, Place::NewTab);
         app.place = Place::Replace;
+        app.awaiting_create = false;
         app.on_terminal_event(alt(KeyCode::Right));
-        assert_eq!(app.tab, 2, "Alt+Right moves between this space's tabs only");
+        assert_eq!(app.tab, 1);
+        app.on_terminal_event(alt(KeyCode::Right));
+        assert_eq!(app.tab, 3, "Alt+Right moves between this space's tabs only");
         // Back in the other space, its own tab is shown.
         app.on_terminal_event(alt(KeyCode::Down));
-        assert_eq!(app.tab, 1);
+        assert_eq!(app.tab, 2);
         assert_eq!(app.focused(), Some(3));
         app.on_terminal_event(alt(KeyCode::Up));
-        assert_eq!(app.tab, 2, "and coming back returns to the last tab");
+        assert_eq!(app.tab, 3, "and coming back returns to the last tab");
     }
 
     #[test]
@@ -3539,7 +3616,8 @@ mod tests {
             vec![ClientMessage::KillSession(1)]
         );
         let out = app.on_server(ServerMessage::SessionRemoved(1));
-        assert_eq!(attaches(out), attach_msg(&app, 3));
+        // Its tab closes; the neighbouring tab is shown.
+        assert_eq!(attaches(out), attach_msg(&app, 2));
         assert!(
             app.on_server(ServerMessage::Detached { session: 1 })
                 .is_empty()

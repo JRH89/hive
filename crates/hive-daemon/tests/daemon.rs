@@ -961,6 +961,50 @@ async fn sessions_are_grouped_into_workspaces_by_repository() {
     assert_eq!(plain_ws.name, "notes");
 }
 
+/// A terminal that `cd`s into a repository moves to that repository's
+/// workspace (created on the fly), with its branch.
+#[tokio::test]
+async fn sessions_follow_cd_into_a_repository() {
+    let h = Harness::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = git_repo(tmp.path());
+    let start = tmp.path().join("plain");
+    std::fs::create_dir_all(&start).unwrap();
+    let mut c = h.client().await;
+    let script = format!(
+        "read x; cd '{}'; echo moved; sleep 60",
+        repo.join("sub").display()
+    );
+    let info = create_info(&mut c, sh_in(&script, &start)).await;
+    attach(&mut c, info.id, TermSize::DEFAULT).await;
+    c.send(&ClientMessage::Input {
+        session: info.id,
+        data: b"\n".to_vec(),
+    })
+    .await
+    .unwrap();
+    let moved = timeout(
+        T,
+        c.recv_until(|m| match m {
+            ServerMessage::SessionUpdated(s)
+                if s.id == info.id && Path::new(&s.cwd) == repo.join("sub") =>
+            {
+                Some(s)
+            }
+            _ => None,
+        }),
+    )
+    .await
+    .expect("session followed the cd")
+    .unwrap();
+    assert_ne!(moved.workspace, info.workspace);
+    assert_eq!(moved.branch.as_deref(), Some("main"));
+    let ws = workspaces(&mut c).await;
+    let w = ws.iter().find(|w| w.id == moved.workspace).unwrap();
+    assert_eq!(Path::new(&w.root), repo);
+    assert!(w.is_repo);
+}
+
 #[tokio::test]
 async fn worktree_sessions_are_isolated_and_cleanup_is_safe() {
     let h = Harness::start().await;
