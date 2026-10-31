@@ -466,6 +466,15 @@ where
                 paths.socket.display()
             ),
             Err(ClientError::NotRunning(_)) => println!("hived is not running"),
+            Err(ClientError::VersionMismatch {
+                daemon,
+                client,
+                daemon_pid,
+            }) => println!(
+                "hived running (pid {daemon_pid}) but speaks protocol v{daemon}, \
+                 not v{client}: run `hive daemon stop` (ends its sessions)\nsocket: {}",
+                paths.socket.display()
+            ),
             Err(e) => return Err(e.into()),
         },
         DaemonAction::Stop => match connect(false).await {
@@ -479,6 +488,18 @@ where
                 println!("hived stopped");
             }
             Err(ClientError::NotRunning(_)) => println!("hived is not running"),
+            // An older (or newer) daemon after an upgrade: it can't decode our
+            // Shutdown, but it told us its pid in the Welcome.
+            Err(ClientError::VersionMismatch {
+                daemon, daemon_pid, ..
+            }) => {
+                println!("stopping hived (pid {daemon_pid}, protocol v{daemon})");
+                if hive_core::client::terminate_daemon(daemon_pid, Duration::from_secs(15))? {
+                    println!("hived stopped");
+                } else {
+                    bail!("hived (pid {daemon_pid}) did not exit within 15 s");
+                }
+            }
             Err(e) => return Err(e.into()),
         },
     }

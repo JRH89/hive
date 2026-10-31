@@ -74,7 +74,7 @@ Linux (x86_64 and aarch64) is supported. macOS and Windows are not yet.
 curl -fsSL https://github.com/jrh89/hive/releases/latest/download/install.sh | sh
 ```
 
-The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.3.0` to pin a version.
+The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.3.1` to pin a version.
 
 **From source** (Rust ≥ 1.89):
 

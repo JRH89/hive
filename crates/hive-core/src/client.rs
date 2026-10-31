@@ -27,7 +27,13 @@ pub enum ClientError {
         "daemon speaks protocol v{daemon}, this client speaks v{client}. \
          Run `hive daemon stop` (terminates all sessions) to restart it"
     )]
-    VersionMismatch { daemon: u32, client: u32 },
+    VersionMismatch {
+        daemon: u32,
+        client: u32,
+        /// From the Welcome, which every version sends the same way, so
+        /// `hive daemon stop` can still stop an older daemon.
+        daemon_pid: u32,
+    },
     #[error("daemon closed the connection")]
     Closed,
     #[error("daemon error: {0}")]
@@ -100,6 +106,7 @@ impl Client {
                     return Err(ClientError::VersionMismatch {
                         daemon: protocol_version,
                         client: PROTOCOL_VERSION,
+                        daemon_pid,
                     });
                 }
                 Ok(Client {
@@ -201,4 +208,42 @@ pub fn spawn_daemon(paths: &Paths) -> Result<(), ClientError> {
     // hived calls setsid() itself, detaching from our terminal and session.
     // The child is reaped by init once we exit; we never wait on it.
     cmd.spawn().map(drop).map_err(ClientError::Spawn)
+}
+
+/// Stops a daemon we can't speak to (another protocol version) with
+/// SIGTERM, which every version handles as a graceful shutdown, and waits
+/// up to `wait` for it to exit. Returns whether it exited.
+pub fn terminate_daemon(pid: u32, wait: std::time::Duration) -> std::io::Result<bool> {
+    use rustix::process::{Pid, Signal, kill_process, test_kill_process};
+    let pid = i32::try_from(pid)
+        .ok()
+        .and_then(Pid::from_raw)
+        .ok_or_else(|| std::io::Error::other("invalid daemon pid"))?;
+    kill_process(pid, Signal::TERM)?;
+    let deadline = std::time::Instant::now() + wait;
+    while test_kill_process(pid).is_ok() {
+        if std::time::Instant::now() > deadline {
+            return Ok(false);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminate_daemon_stops_a_process_by_pid() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        // Reap it in the background so it doesn't linger as a zombie.
+        let reaper = std::thread::spawn(move || child.wait());
+        assert!(terminate_daemon(pid, std::time::Duration::from_secs(10)).unwrap());
+        assert!(!reaper.join().unwrap().unwrap().success());
+    }
 }
