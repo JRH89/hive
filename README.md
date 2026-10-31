@@ -66,7 +66,7 @@ Without Unicode or colour (`TERM=linux`, `NO_COLOR=1`) the same UI falls back to
 ```
 
 ## Install
-Linux (x86_64 and aarch64) is supported. macOS and Windows are not yet.
+Linux (x86_64 and aarch64) and macOS (Apple silicon and Intel) are supported; CI tests both. Windows is not yet.
 
 **Prebuilt binaries** ([latest release](https://github.com/jrh89/hive/releases/latest)):
 
