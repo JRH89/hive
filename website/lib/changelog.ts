@@ -11,7 +11,7 @@ export type Release = {
 export const releases: Release[] = [
   {
     version: "0.4.9",
-    date: "2026-10-31T17:00:00-07:00",
+    date: "2026-10-31T15:51:21-07:00",
     title: "Layouts",
     changes: [
       "Optional [layouts.<name>]: a set of panes (agents, commands such as npm run dev, terminals) that Ctrl+Space L opens together in a new tab of the current space. A layout listing a space opens there without asking; otherwise you pick one.",
