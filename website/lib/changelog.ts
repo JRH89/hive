@@ -11,7 +11,7 @@ export type Release = {
 export const releases: Release[] = [
   {
     version: "0.4.4",
-    date: "2026-10-31T13:30:00-07:00",
+    date: "2026-10-31T12:28:25-07:00",
     title: "Worktree terminals",
     changes: [
       "Ctrl+Space C opens a terminal in its own git worktree on a fresh branch, so agents never edit the same files. Ctrl+Space A picks an agent from a list.",
