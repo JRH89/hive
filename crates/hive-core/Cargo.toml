@@ -8,8 +8,8 @@ repository.workspace = true
 
 [dependencies]
 dirs = "7.0.0"
-hive-agents = { version = "0.4.8", path = "../hive-agents" }
-hive-protocol = { version = "0.4.8", path = "../hive-protocol" }
+hive-agents = { version = "0.4.9", path = "../hive-agents" }
+hive-protocol = { version = "0.4.9", path = "../hive-protocol" }
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"
 tokio = { version = "1.54.1", features = ["net", "io-util", "time", "rt"] }

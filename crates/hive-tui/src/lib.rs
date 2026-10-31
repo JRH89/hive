@@ -123,6 +123,16 @@ pub fn check_config(config: &Config) -> anyhow::Result<()> {
             obsidian.agent
         );
     }
+    for (name, layout) in &config.layouts {
+        if layout.panes.is_empty() {
+            anyhow::bail!("[layouts.{name}] has no panes");
+        }
+        for pane in layout.panes.iter().filter(|p| p.run.is_empty()) {
+            if config.agent(&pane.agent).is_none() {
+                anyhow::bail!("[layouts.{name}] agent `{}` is not defined", pane.agent);
+            }
+        }
+    }
     Ok(())
 }
 

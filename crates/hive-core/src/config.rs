@@ -20,6 +20,51 @@ pub struct Config {
     pub keys: Keys,
     /// User-defined or overridden agents, keyed by name.
     pub agents: BTreeMap<String, AgentDef>,
+    /// Pane arrangements opened together in a new tab (`Ctrl+Space L`).
+    pub layouts: BTreeMap<String, Layout>,
+}
+
+/// `[layouts.<name>]`: panes opened together in a new tab of the current
+/// space. The first pane fills the tab; each next one splits the one
+/// before it.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct Layout {
+    /// Space names this layout is for: there it opens without asking.
+    pub spaces: Vec<String>,
+    pub panes: Vec<LayoutPane>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LayoutPane {
+    /// Agent to start (default `shell`, a terminal).
+    pub agent: String,
+    /// argv to run instead of an agent, e.g. `["npm", "run", "dev"]`.
+    pub run: Vec<String>,
+    /// Where it goes relative to the previous pane.
+    pub split: SplitDir,
+    /// Session label; empty uses the agent's or the command's name.
+    pub label: String,
+}
+
+impl Default for LayoutPane {
+    fn default() -> Self {
+        LayoutPane {
+            agent: "shell".into(),
+            run: Vec::new(),
+            split: SplitDir::Right,
+            label: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SplitDir {
+    #[default]
+    Right,
+    Down,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -482,5 +527,24 @@ mod tests {
     #[test]
     fn unknown_keys_are_rejected() {
         assert!(Config::parse("[general]\nthme = \"x\"").is_err());
+    }
+
+    #[test]
+    fn layouts_parse_with_terminal_defaults() {
+        assert!(Config::parse("").unwrap().layouts.is_empty());
+        let c = Config::parse(
+            r#"
+[layouts.web]
+spaces = ["web"]
+panes = [{}, { run = ["npm", "run", "dev"], split = "down" }, { agent = "claude" }]
+"#,
+        )
+        .unwrap();
+        let panes = &c.layouts["web"].panes;
+        assert_eq!(panes[0].agent, "shell");
+        assert_eq!(panes[1].split, SplitDir::Down);
+        assert_eq!(panes[1].run, ["npm", "run", "dev"]);
+        assert_eq!(panes[2].split, SplitDir::Right);
+        assert!(Config::parse("[layouts.x]\npanes = [{ split = \"left\" }]").is_err());
     }
 }

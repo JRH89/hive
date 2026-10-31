@@ -7,7 +7,7 @@ import { CopyCommand } from "./copy-command";
 const releasesUrl = "https://github.com/jrh89/hive/releases";
 const assetBase = `${releasesUrl}/latest/download`;
 
-const version = "v0.4.8";
+const version = "v0.4.9";
 
 // Enable a platform only after its installer and binaries are uploaded and
 // tested on that OS. Asset names carry no version (see ADR-0015).
