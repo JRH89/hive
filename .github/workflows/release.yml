@@ -18,9 +18,9 @@ jobs:
         include:
           - { target: x86_64-unknown-linux-musl, os: ubuntu-24.04 }
           - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04-arm }
-          - { target: aarch64-apple-darwin, os: macos-14 }
+          - { target: aarch64-apple-darwin, os: macos-15 }
           # Cross-built on Apple silicon; tested natively by the arm64 job.
-          - { target: x86_64-apple-darwin, os: macos-14, cross: true }
+          - { target: x86_64-apple-darwin, os: macos-15, cross: true }
           - { target: x86_64-pc-windows-msvc, os: windows-2022 }
     runs-on: ${{ matrix.os }}
     steps:

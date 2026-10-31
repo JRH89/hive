@@ -105,7 +105,9 @@ If an agent needs one of these, rebind or unbind it under `[keys.global]` (see [
 
 ### Panes and tabs
 
-Split the panel to watch several agents at once. Each pane is its own terminal at its own size, with a title row showing the session and its status. Keys go to the focused pane. Switching to a session that is already in a pane focuses that pane (and its tab); otherwise the session replaces the focused pane. The tab row above the panes (`1  2  +`) is clickable: pick a tab, or `+` for a new terminal tab in the current directory. Every new tab, split and "new" is a plain terminal, like herdr; the sidebar's agents list shows what runs in them. Hidden tabs cost nothing: Hive only mirrors what is on screen. The layout lasts until you quit `hive`; sessions keep running either way.
+Split the panel to watch several agents at once. Each pane is its own terminal at its own size, with a title row showing the session and its status. Keys go to the focused pane. Switching to a session that is already in a pane focuses that pane (and its tab); otherwise the session replaces the focused pane. The tab row above the panes (`1  2  +`) is clickable: pick a tab, or `+` for a new terminal tab in the current directory. Every new tab and split is a plain terminal, like herdr. Tabs belong to a space: the row shows the selected space's tabs, Alt+←/→ moves between them, and Alt+↑/↓ switches space (back to the tab you left there). The sidebar's AGENTS list shows agents only, including one started by hand in a terminal (listed by its name, e.g. `claude`).
+
+**New space:** the sidebar's "+ new" (or `new space` in the palette) asks for a folder, starting next to the current space (`~/Projects/`); Tab completes. It becomes a space (its repository, if any) with a terminal open in it. Hidden tabs cost nothing: Hive only mirrors what is on screen. The layout lasts until you quit `hive`; sessions keep running either way.
 
 ### Notes (Obsidian, optional)
 

@@ -188,11 +188,12 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let mut spans = vec![Span::raw(" ")];
     let mut x = area.x + 1;
     let mut hits = app.sidebar_hits.borrow_mut();
-    for i in 0..app.tabs.len() {
-        let label = format!("  {}  ", i + 1);
+    // This space's tabs only, numbered from 1.
+    for (n, i) in app.space_tabs(app.view_space()).into_iter().enumerate() {
+        let label = format!("  {}  ", n + 1);
         let width = label.chars().count() as u16;
         hits.push((Rect::new(x, area.y, width, 1), SidebarHit::Tab(i)));
-        let style = if i == app.tab {
+        let style = if app.active_tab().is_some() && i == app.tab {
             theme.highlight()
         } else {
             muted
@@ -456,7 +457,7 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         if y < bottom {
             frame.render_widget(
                 Paragraph::new(Span::styled(
-                    "   none yet: + new",
+                    "   none: run one in a tab",
                     Style::new().fg(theme.muted),
                 )),
                 row(y),
@@ -529,6 +530,12 @@ fn draw_sidebar_session(
     theme: &Theme,
 ) {
     let width = row1.width as usize;
+    // A terminal running an agent is listed as that agent, like herdr.
+    let detected = s.presence.as_ref().filter(|_| s.state.is_alive());
+    let name = match detected {
+        Some(p) if s.agent == "shell" && s.label == s.agent => p.agent.clone(),
+        _ => s.label.clone(),
+    };
     let base = if is_cursor {
         theme.cursor_row()
     } else {
@@ -560,7 +567,7 @@ fn draw_sidebar_session(
             }),
         ),
         Span::styled(format!("{dot} "), base.fg(dot_color)),
-        Span::styled(truncate(theme, &s.label, label_width), label_style),
+        Span::styled(truncate(theme, &name, label_width), label_style),
     ];
     if shared {
         // Another running agent uses the same directory.
@@ -584,8 +591,8 @@ fn draw_sidebar_session(
     }
     detail.push(place);
     // The agent actually running, e.g. Claude Code started from a shell.
-    match s.presence.as_ref().filter(|_| s.state.is_alive()) {
-        Some(p) if p.label != s.label => detail.push(p.label.clone()),
+    match detected {
+        Some(p) if p.label != s.label && name == s.label => detail.push(p.label.clone()),
         Some(_) => {}
         None if s.label != s.agent => detail.push(s.agent.clone()),
         None => {}
@@ -683,10 +690,10 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             )]
         }
         Mode::AddWorkspace { input } => vec![
-            Span::styled(" Add workspace (directory): ", bar.fg(theme.accent)),
+            Span::styled(" New space (folder): ", bar.fg(theme.accent)),
             Span::styled(input.clone(), bar.add_modifier(Modifier::BOLD)),
             Span::styled(theme.glyphs.caret, key),
-            Span::styled("  enter add · esc cancel", muted),
+            Span::styled("  tab complete · enter open · esc cancel", muted),
         ],
         Mode::RenameWorkspace { input, .. } => vec![
             Span::styled(" Rename workspace: ", bar.fg(theme.accent)),
