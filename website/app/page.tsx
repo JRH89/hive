@@ -95,7 +95,7 @@ const structuredData = [
     applicationCategory: "DeveloperApplication",
     applicationSubCategory: "Terminal multiplexer",
     operatingSystem: "Linux",
-    softwareVersion: "0.4.2",
+    softwareVersion: "0.4.3",
     downloadUrl: `${repoUrl}/releases/latest`,
     installUrl: siteUrl + "#get-started",
     license: "https://opensource.org/licenses/MIT",
@@ -309,7 +309,7 @@ export default function Home() {
               <h2 id="start-title">Your terminal. Your platform.</h2>
             </div>
             <span className="development-badge">
-              <span className="tiny-square" /> v0.4.2 RELEASED
+              <span className="tiny-square" /> v0.4.3 RELEASED
             </span>
           </div>
           <ReleaseInstall />
