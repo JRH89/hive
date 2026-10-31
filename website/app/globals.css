@@ -3004,3 +3004,70 @@ body { padding-top: 92px; }
     grid-template-columns: 1fr;
   }
 }
+
+/* Integrations */
+.integrations-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  margin-top: 40px;
+  background: var(--line);
+  border: 1px solid var(--line);
+}
+.integration {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 28px;
+  background: var(--background);
+}
+/* Obsidian leads: notes plus a journal of agent activity. */
+.integration:first-child {
+  grid-column: span 2;
+}
+@media (max-width: 900px) {
+  .integrations-grid {
+    grid-template-columns: 1fr;
+  }
+  .integration:first-child {
+    grid-column: auto;
+  }
+}
+.integration-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.integration h3 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+.integration kbd {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--amber);
+  white-space: nowrap;
+}
+.integration p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+  flex: 1;
+}
+.integration code {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.integration-config {
+  margin: 24px 0 0;
+  padding: 20px 24px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: var(--text);
+}

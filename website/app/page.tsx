@@ -56,10 +56,43 @@ const features = [
   },
 ];
 
+const integrations = [
+  {
+    name: "Obsidian notes",
+    key: "Ctrl+Space N",
+    text: "Open your repository's Obsidian vault beside your agents, in an editor or an agent of your choice. With journaling on, Hive appends “claude finished in #3 api (main)” to today's daily note, so your vault keeps a log of what your agents did.",
+    config: "[integrations.obsidian]",
+  },
+  {
+    name: "Review changes",
+    key: "Ctrl+Space G",
+    text: "lazygit, tig or git diff in a split beside the agent, opened in the agent's own directory or worktree. See what it changed without leaving Hive.",
+    config: "[integrations.review]",
+  },
+  {
+    name: "Pull request checks",
+    key: "Ctrl+Space H",
+    text: "Watch the CI checks of the session's branch with the GitHub CLI, live, next to the agent that pushed it.",
+    config: "[integrations.github]",
+  },
+  {
+    name: "Project tasks",
+    key: "Ctrl+Space T",
+    text: "Pick a just, npm, make or cargo task from the project and run it beside the agent: the dev server, the tests, the linter.",
+    config: "[integrations.tasks]",
+  },
+  {
+    name: "Desktop notifications",
+    key: "automatic",
+    text: "A notification when an agent you aren't looking at finishes or needs your input. Walk away; Hive calls you back.",
+    config: "[integrations.desktop_notify]",
+  },
+];
+
 const faqs = [
   [
     "Is Hive ready to use?",
-    "Yes, on Linux, macOS and Windows. Hive is young but complete: terminals and agents in split panes and tabs, live agent status, detach and reattach, automatic reconnection, spaces that follow your cd, Git worktrees, a command palette, themes and configurable keys. It is tested with real terminals in CI on all three platforms. Version 0.4.6 ships prebuilt binaries and a one-line installer; hive update upgrades in place.",
+    "Yes, on Linux, macOS and Windows. Hive is young but complete: terminals and agents in split panes and tabs, live agent status, detach and reattach, automatic reconnection, spaces that follow your cd, Git worktrees, a command palette, themes and configurable keys. It is tested with real terminals in CI on all three platforms. Version 0.4.7 ships prebuilt binaries and a one-line installer; hive update upgrades in place.",
   ],
   [
     "Which agents can I run?",
@@ -72,6 +105,10 @@ const faqs = [
   [
     "Do agents step on each other's changes?",
     "Not if you don't let them. Agents don't isolate themselves: two agents in the same directory edit the same files. Press Ctrl+Space C (or run hive new codex -w) to open a terminal in its own Git worktree on a fresh branch, then start the agent there. Hive warns when two agents share a directory, and never removes a worktree with uncommitted changes.",
+  ],
+  [
+    "What are integrations?",
+    "Optional extras that connect Hive to tools you already use: Obsidian notes and a daily journal of agent activity, change review with lazygit, GitHub pull request checks, project tasks, and desktop notifications. Each is off by default and invisible until you enable it with two lines in config.toml, and each opens as an ordinary session beside your agents.",
   ],
   [
     "Is Hive open source?",
@@ -99,7 +136,7 @@ const structuredData = [
     applicationCategory: "DeveloperApplication",
     applicationSubCategory: "Terminal multiplexer",
     operatingSystem: "Linux, macOS, Windows",
-    softwareVersion: "0.4.6",
+    softwareVersion: "0.4.7",
     downloadUrl: `${repoUrl}/releases/latest`,
     installUrl: siteUrl + "#get-started",
     license: "https://opensource.org/licenses/MIT",
@@ -238,6 +275,46 @@ export default function Home() {
         </section>
 
         <section
+          id="integrations"
+          className="section wrapper"
+          aria-labelledby="integrations-title"
+        >
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">MORE THAN A MULTIPLEXER</p>
+              <h2 id="integrations-title">
+                Your tools,
+                <br />
+                beside your agents.
+              </h2>
+            </div>
+            <p className="section-aside">
+              Optional integrations. Off by default,
+              <br />
+              invisible until you turn them on.
+            </p>
+          </div>
+          <div className="integrations-grid">
+            {integrations.map((item) => (
+              <article className="integration" key={item.name}>
+                <div className="integration-top">
+                  <h3>{item.name}</h3>
+                  <kbd>{item.key}</kbd>
+                </div>
+                <p>{item.text}</p>
+                <code>{item.config}</code>
+              </article>
+            ))}
+          </div>
+          <pre className="integration-config">
+            <code>{`# ~/.config/hive/config.toml
+[integrations.obsidian]
+enabled = true
+journal = true        # log agent activity to today's note`}</code>
+          </pre>
+        </section>
+
+        <section
           id="screenshots"
           className="section wrapper"
           aria-labelledby="screenshots-title"
@@ -345,7 +422,7 @@ export default function Home() {
               <h2 id="start-title">Your terminal. Your platform.</h2>
             </div>
             <span className="development-badge">
-              <span className="tiny-square" /> v0.4.6 RELEASED
+              <span className="tiny-square" /> v0.4.7 RELEASED
             </span>
           </div>
           <ReleaseInstall />
@@ -477,7 +554,7 @@ export default function Home() {
             <article>
               <span className="roadmap-marker current" />
               <div>
-                <span className="roadmap-status available">RELEASED · v0.4.6</span>
+                <span className="roadmap-status available">RELEASED · v0.4.7</span>
                 <h3>Everywhere, terminal first</h3>
                 <p>
                   macOS and Windows binaries. New opens a terminal, spaces

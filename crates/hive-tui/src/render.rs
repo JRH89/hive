@@ -460,7 +460,7 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         )),
         row(top),
     );
-    let ids = app.space_sessions();
+    let ids = app.agents();
     let mut y = top + 2;
     if ids.is_empty() {
         if y < bottom {
@@ -581,12 +581,22 @@ fn draw_sidebar_session(
             base.fg(theme.warning).add_modifier(Modifier::BOLD),
         ));
     }
-    // Branch (or directory) first: it tells sessions apart, so it should
-    // survive truncation.
-    let place = s
+    // Where it runs: its space (agents of every space are listed), then
+    // the branch, or the directory outside git.
+    let space = app
+        .workspaces
+        .get(&s.workspace)
+        .map(|w| w.name.clone())
+        .unwrap_or_default();
+    let spot = s
         .branch
         .clone()
         .unwrap_or_else(|| dir_name(&s.cwd).to_string());
+    let place = if spot == space || space.is_empty() {
+        spot
+    } else {
+        format!("{space} · {spot}")
+    };
     let mut detail = Vec::new();
     if s.state == SessionState::Lost {
         detail.push("ended".to_string());
@@ -1399,7 +1409,8 @@ mod tests {
         assert_eq!(app.order(), vec![1, 3, 2]);
 
         // Spaces with their branch (the main checkout's) and agent count;
-        // the agents listed are the selected space's.
+        // AGENTS lists every space's agents, grouped by space, with the
+        // space they run in.
         let lines = rendered(&app, 80, 24);
         assert!(lines[2].contains("· web") && lines[2].contains('2'));
         assert!(lines[3].contains("main"), "{:?}", lines[3]);
@@ -1409,11 +1420,17 @@ mod tests {
             !lines.iter().any(|l| l.contains("empty")),
             "spaces with nothing open aren't listed"
         );
-        assert!(lines[11].contains("● codex") && lines[11].contains('1'));
-        assert!(lines[12].contains("wt hive/codex-2"), "{:?}", lines[12]);
-        assert!(!lines.iter().any(|l| l.contains("later")), "other space");
+        assert!(lines[11].contains("claude") && lines[11].contains('1'));
+        assert!(lines[12].contains("web · main"), "{:?}", lines[12]);
+        assert!(lines[13].contains("later") && lines[13].contains('2'));
+        assert!(lines[15].contains("● codex") && lines[15].contains('3'));
+        assert!(
+            lines[16].contains("wt api · hive/codex-2"),
+            "{:?}",
+            lines[16]
+        );
 
-        // Clicking a space lists its agents, numbered from 1 for Alt+digit.
+        // Clicking a space selects it; the agents list stays complete.
         let hit = app
             .sidebar_hits
             .borrow()
@@ -1424,8 +1441,9 @@ mod tests {
         assert_eq!(hit.y, 2);
         app.cursor = Some(1);
         assert_eq!(app.space_sessions(), vec![1, 3]);
+        assert_eq!(app.agents(), vec![1, 3, 2]);
         let lines = rendered(&app, 80, 24);
-        assert!(lines[13].contains("● later") && lines[13].contains('2'));
+        assert!(lines[15].contains("codex"), "{:?}", lines[15]);
     }
 
     #[test]

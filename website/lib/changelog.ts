@@ -10,8 +10,17 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    version: "0.4.7",
+    date: "2026-10-31T16:00:00-07:00",
+    title: "Every agent in one list",
+    changes: [
+      "The sidebar's AGENTS list shows every agent in every space, grouped by space, with the space it runs in. Alt+1–9 jump to any of them, switching space as needed.",
+      "The website and README describe Hive's integrations: Obsidian notes and journal, change review, pull request checks, project tasks and desktop notifications.",
+    ],
+  },
+  {
     version: "0.4.6",
-    date: "2026-10-31T15:00:00-07:00",
+    date: "2026-10-31T14:08:53-07:00",
     title: "+ new opens a new space",
     changes: [
       "The sidebar's + new (or Ctrl+Space S) opens a new space with a terminal in your home folder. cd into a repo or folder and the terminal becomes that place's space; the temporary space disappears. The tab row's + still adds a tab to the current space.",
