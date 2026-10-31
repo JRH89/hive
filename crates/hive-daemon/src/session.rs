@@ -28,7 +28,6 @@ use hive_protocol::{
     SessionInfo, SessionState, TermSize, WorkspaceId,
 };
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
-use rustix::process::{Pid, Signal};
 use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::responder::Responder;
@@ -345,6 +344,19 @@ impl Session {
         }
     }
 
+    /// The PTY's foreground process group. Windows has none, so the
+    /// session's own process stands in (agents there are found by their
+    /// own reports only).
+    #[cfg(unix)]
+    fn foreground(&self) -> Option<i32> {
+        lock(&self.term).master.process_group_leader()
+    }
+
+    #[cfg(not(unix))]
+    fn foreground(&self) -> Option<i32> {
+        self.pid.map(|p| p as i32)
+    }
+
     /// Re-checks which agent is in the foreground and what it is doing.
     /// Returns true if the presence changed, in which case the caller should
     /// `publish`. Blocking (reads `/proc`); run off the async runtime.
@@ -353,7 +365,7 @@ impl Session {
             return false;
         }
         let mut d = lock(&self.detect);
-        let pgid = lock(&self.term).master.process_group_leader();
+        let pgid = self.foreground();
         if d.reported.as_ref().is_some_and(|r| r.pgid != pgid) {
             d.reported = None;
         }
@@ -458,7 +470,7 @@ impl Session {
             return Ok(false);
         }
         d.last_seq = seq;
-        let pgid = lock(&self.term).master.process_group_leader();
+        let pgid = self.foreground();
         d.reported = Some(Reported {
             agent,
             status,
@@ -621,7 +633,7 @@ impl Session {
 
     /// SIGTERM to the child's process group, then SIGKILL after `timeout`.
     pub async fn terminate(&self, timeout: Duration) {
-        let Some(pid) = self.pid.and_then(|p| Pid::from_raw(p as i32)) else {
+        let Some(pid) = self.pid else {
             return;
         };
         if !self.is_alive() {
@@ -629,7 +641,7 @@ impl Session {
         }
         // The PTY child is a session leader, so its pid is also its process
         // group id. Signalling the group catches its descendants too.
-        signal_group(pid, Signal::TERM);
+        signal_group(pid, false);
         let mut exited = self.exited.subscribe();
         let waited = tokio::time::timeout(timeout, wait_true(&mut exited)).await;
         if waited.is_err() && self.is_alive() {
@@ -637,7 +649,7 @@ impl Session {
                 session = self.id,
                 "did not exit after SIGTERM; sending SIGKILL"
             );
-            signal_group(pid, Signal::KILL);
+            signal_group(pid, true);
             let _ = tokio::time::timeout(Duration::from_secs(2), wait_true(&mut exited)).await;
         }
     }
@@ -675,14 +687,38 @@ pub(crate) async fn wait_true(rx: &mut watch::Receiver<bool>) {
 
 /// The `hive` CLI next to this `hived`, for agents that report their status.
 fn hive_bin() -> Option<PathBuf> {
-    let bin = std::env::current_exe().ok()?.with_file_name("hive");
+    let bin = std::env::current_exe()
+        .ok()?
+        .with_file_name(format!("hive{}", std::env::consts::EXE_SUFFIX));
     bin.is_file().then_some(bin)
 }
 
-fn signal_group(pid: Pid, sig: Signal) {
+/// SIGTERM (or with `force`, SIGKILL) to the process group led by `pid`.
+#[cfg(unix)]
+fn signal_group(pid: u32, force: bool) {
+    use rustix::process::{Pid, Signal};
+    let Some(pid) = Pid::from_raw(pid as i32) else {
+        return;
+    };
+    let sig = if force { Signal::KILL } else { Signal::TERM };
     if rustix::process::kill_process_group(pid, sig).is_err() {
         let _ = rustix::process::kill_process(pid, sig);
     }
+}
+
+/// `taskkill /T` asks the process tree to close; console programs often
+/// ignore that, so `force` adds `/F`.
+#[cfg(windows)]
+fn signal_group(pid: u32, force: bool) {
+    let mut cmd = std::process::Command::new("taskkill");
+    cmd.args(["/T", "/PID", &pid.to_string()]);
+    if force {
+        cmd.arg("/F");
+    }
+    let _ = cmd
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
 }
 
 fn write_loop(mut writer: Box<dyn Write + Send>, mut rx: mpsc::Receiver<Vec<u8>>) {

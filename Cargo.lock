@@ -724,7 +724,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hive-agents"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "regex",
  "serde",
@@ -733,7 +733,7 @@ dependencies = [
 
 [[package]]
 name = "hive-cli"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -752,7 +752,7 @@ dependencies = [
 
 [[package]]
 name = "hive-core"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "dirs",
  "hive-agents",
@@ -763,11 +763,12 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "toml",
+ "windows-sys",
 ]
 
 [[package]]
 name = "hive-daemon"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "hive-agents",
@@ -788,7 +789,7 @@ dependencies = [
 
 [[package]]
 name = "hive-protocol"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "postcard",
  "serde",
@@ -798,7 +799,7 @@ dependencies = [
 
 [[package]]
 name = "hive-tui"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "crossterm",
@@ -818,7 +819,7 @@ dependencies = [
 
 [[package]]
 name = "hive-workspace"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "serde_json",
  "tempfile",

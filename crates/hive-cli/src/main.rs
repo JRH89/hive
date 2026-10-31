@@ -251,9 +251,41 @@ fn init_logging(paths: &Paths) {
         .init();
 }
 
+#[cfg(not(windows))]
 const INSTALLER: &str = "https://github.com/jrh89/hive/releases/latest/download/install.sh";
 
+#[cfg(windows)]
+const INSTALLER_PS1: &str = "https://github.com/jrh89/hive/releases/latest/download/install.ps1";
+
+/// Windows: the PowerShell installer, which moves the running binaries
+/// aside (Windows can't overwrite them) and installs next to them.
+#[cfg(windows)]
+fn update(tag: Option<&str>) -> anyhow::Result<()> {
+    use std::process::Command as Cmd;
+    let exe = std::env::current_exe().context("cannot locate the running hive")?;
+    let dir = exe
+        .parent()
+        .context("cannot locate the running hive's directory")?;
+    let mut install = Cmd::new("powershell.exe");
+    install
+        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"])
+        .arg(format!("irm '{INSTALLER_PS1}' | iex"))
+        .env("HIVE_INSTALL_DIR", dir);
+    if let Some(tag) = tag {
+        install.env("HIVE_VERSION", tag);
+    }
+    if !install
+        .status()
+        .context("could not run powershell")?
+        .success()
+    {
+        bail!("the installer failed (see above)");
+    }
+    Ok(())
+}
+
 /// Runs the release installer into the directory holding this binary.
+#[cfg(not(windows))]
 fn update(tag: Option<&str>) -> anyhow::Result<()> {
     use std::process::Command as Cmd;
     let exe = std::env::current_exe().context("cannot locate the running hive")?;
@@ -291,6 +323,7 @@ fn update(tag: Option<&str>) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(not(windows))]
 fn tempfile_path() -> PathBuf {
     std::env::temp_dir().join(format!("hive-install-{}.sh", std::process::id()))
 }
@@ -463,7 +496,7 @@ where
                 "hived {} running (pid {})\nsocket: {}",
                 client.daemon.version,
                 client.daemon.pid,
-                paths.socket.display()
+                paths.endpoint()
             ),
             Err(ClientError::NotRunning(_)) => println!("hived is not running"),
             Err(ClientError::VersionMismatch {
@@ -473,7 +506,7 @@ where
             }) => println!(
                 "hived running (pid {daemon_pid}) but speaks protocol v{daemon}, \
                  not v{client}: run `hive daemon stop` (ends its sessions)\nsocket: {}",
-                paths.socket.display()
+                paths.endpoint()
             ),
             Err(e) => return Err(e.into()),
         },
@@ -897,9 +930,9 @@ async fn doctor(paths: &Paths) -> anyhow::Result<()> {
         }
     };
 
-    row("socket", paths.socket.display().to_string());
+    row("socket", paths.endpoint());
     let socket_len = paths.socket.as_os_str().len();
-    if socket_len > 107 {
+    if cfg!(unix) && socket_len > 107 {
         problems += 1;
         row(
             "",

@@ -252,3 +252,5 @@ rm ~/.local/bin/hive ~/.local/bin/hived
 rm -rf ~/.config/hive ~/.local/state/hive    # config, logs, session metadata
 # Worktrees under ~/.local/share/hive/worktrees may hold your work: check them first.
 ```
+
+On Windows: `hive daemon stop`, then delete `%LOCALAPPDATA%\hive` (binaries, runtime files) and the config and state folders `hive doctor` lists. Check worktrees first.

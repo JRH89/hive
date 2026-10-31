@@ -11,7 +11,6 @@
 
 use std::fs;
 use std::io::{self, Write};
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
 use hive_protocol::{SessionId, SessionInfo, SessionState, TermSize, WorkspaceId, WorkspaceInfo};
@@ -164,12 +163,11 @@ impl Store {
     /// Writes atomically: a crash mid-write leaves the previous file intact.
     pub fn write_bytes(path: &Path, bytes: &[u8]) -> io::Result<()> {
         let tmp = path.with_extension("json.tmp");
-        let mut f = fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&tmp)?;
+        let mut opts = fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
+        let mut f = opts.open(&tmp)?;
         f.write_all(bytes)?;
         f.sync_all()?;
         fs::rename(&tmp, path)
@@ -205,13 +203,14 @@ mod tests {
 
     #[test]
     fn round_trips_through_disk_with_private_mode() {
-        use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sessions.json");
         Store::write_bytes(&path, &sample().to_bytes()).unwrap();
         assert_eq!(Store::load(&path), sample());
+        #[cfg(unix)]
         assert_eq!(
-            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            std::os::unix::fs::PermissionsExt::mode(&fs::metadata(&path).unwrap().permissions())
+                & 0o777,
             0o600
         );
     }

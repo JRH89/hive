@@ -70,7 +70,8 @@ Full detail is in `AGENTS.md` §16. **Don't start a phase until the previous one
 - [x] macOS CI job (clippy, test, release build, smoke)
 - [x] Release targets aarch64/x86_64-apple-darwin, installer handles Darwin
 
-## Phase 10 — Windows (in progress)
-- [ ] Named-pipe transport with token auth (ADR-0021)
-- [ ] ConPTY sessions, process control, daemon spawn
-- [ ] Windows CI, release zip, `install.ps1`
+## Phase 10 — Windows (done)
+[[Phase 10 - Windows]]
+- [x] Named-pipe transport with token auth ([[ADR-0021 Windows named pipe with token auth]])
+- [x] ConPTY sessions, process control, daemon spawn
+- [x] Windows CI, release zip, `install.ps1`

@@ -1,5 +1,7 @@
 //! End-to-end tests against an in-process daemon using real PTYs and simple
 //! shell commands (no agent CLIs required).
+//! Unix-only: they drive `/bin/sh` scripts.
+#![cfg(unix)]
 
 use std::num::NonZeroU16;
 use std::path::{Path, PathBuf};

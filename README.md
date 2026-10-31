@@ -66,12 +66,18 @@ Without Unicode or colour (`TERM=linux`, `NO_COLOR=1`) the same UI falls back to
 ```
 
 ## Install
-Linux (x86_64 and aarch64) and macOS (Apple silicon and Intel) are supported; CI tests both. Windows is not yet.
+Linux (x86_64 and aarch64), macOS (Apple silicon and Intel) and Windows 10+ (x86_64) are supported; CI tests all three. On Windows, agent status comes only from agents that report it (`hive report-agent`).
 
 **Prebuilt binaries** ([latest release](https://github.com/jrh89/hive/releases/latest)):
 
 ```bash
 curl -fsSL https://github.com/jrh89/hive/releases/latest/download/install.sh | sh
+```
+
+On Windows (PowerShell):
+
+```powershell
+irm https://github.com/jrh89/hive/releases/latest/download/install.ps1 | iex
 ```
 
 The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.3.1` to pin a version.

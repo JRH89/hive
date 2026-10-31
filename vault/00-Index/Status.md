@@ -10,7 +10,7 @@ updated: 2026-10-31
 
 **Phase 8 done** ([[Phase 8 - Ease of use]]): herdr-style spaces/agents sidebar, Alt-arrow navigation, five optional integrations, `hive update`. **Phase 7 released as v0.2.0**: agent discovery, detection, status, controls, mouse, split panes and tabs are done (protocol v6). An optional Obsidian notes integration (off by default, [[ADR-0019 Optional integrations, off and invisible by default]]) is done too. See [[Phase 7 - herdr parity]].
 
-**Phase 9 (macOS) done**: CI runs clippy, tests and smoke on macos-14; release builds aarch64/x86_64-apple-darwin ([[Phase 9 - macOS]]). **Phase 10 (Windows) in progress** on `phase-10-windows`.
+**Phase 9 (macOS) done**: CI runs clippy, tests and smoke on macos-14; release builds aarch64/x86_64-apple-darwin ([[Phase 9 - macOS]]). **Phase 10 (Windows) done** ([[Phase 10 - Windows]]); v0.4.0 ships Linux, macOS and Windows binaries.
 
 **Open:** `restore_workspace` config key is inert.
 

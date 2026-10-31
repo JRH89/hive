@@ -10,7 +10,6 @@ mod tasks;
 pub use tasks::{Task, find_tasks};
 
 use std::fs;
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -44,9 +43,9 @@ impl Repo {
 /// boundary.
 pub fn discover(path: &Path) -> Option<Repo> {
     let path = path.canonicalize().ok()?;
-    let device = fs::metadata(&path).ok()?.dev();
+    let device = device_of(&path)?;
     for dir in path.ancestors() {
-        if fs::metadata(dir).ok()?.dev() != device {
+        if device_of(dir)? != device {
             return None;
         }
         let dot_git = dir.join(".git");
@@ -97,6 +96,19 @@ pub fn read_branch(git_dir: &Path) -> Option<String> {
         return Some(r.strip_prefix("refs/heads/").unwrap_or(r).to_string());
     }
     (head.len() >= 7 && head.bytes().all(|b| b.is_ascii_hexdigit())).then(|| head[..7].to_string())
+}
+
+/// The filesystem a path lives on (Unix); a constant elsewhere, where the
+/// search simply runs to the root.
+#[cfg(unix)]
+fn device_of(path: &Path) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    fs::metadata(path).ok().map(|m| m.dev())
+}
+
+#[cfg(not(unix))]
+fn device_of(path: &Path) -> Option<u64> {
+    fs::metadata(path).ok().map(|_| 0)
 }
 
 /// The path that identifies the workspace `cwd` belongs to: its

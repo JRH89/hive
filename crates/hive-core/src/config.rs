@@ -370,7 +370,12 @@ impl Config {
     /// user's shell, and `[agents.*]`, which override built-ins of the same
     /// name. Built-ins may not be installed; check before offering them.
     pub fn agents(&self) -> BTreeMap<String, AgentDef> {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+        let default = if cfg!(windows) {
+            "powershell.exe"
+        } else {
+            "/bin/sh"
+        };
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| default.into());
         let mut agents: BTreeMap<String, AgentDef> = hive_agents::CATALOG
             .iter()
             .map(|k| (k.id.to_string(), AgentDef::simple(k.command)))

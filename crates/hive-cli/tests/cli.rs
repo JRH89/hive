@@ -1,5 +1,7 @@
 //! End-to-end tests of the `hive` binary against a private, auto-started
 //! `hived`. Each test gets its own runtime, state, config and HOME.
+//! Unix-only: they drive `/bin/sh` scripts.
+#![cfg(unix)]
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
