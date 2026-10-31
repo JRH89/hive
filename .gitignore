@@ -1,2 +1,4 @@
 /target
 /vault/.obsidian/workspace*.json
+.vercel
+.env*

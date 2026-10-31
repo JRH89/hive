@@ -4,9 +4,9 @@ updated: 2026-10-30
 ---
 # Status
 
-**Phase 6 complete** (2026-10-30, branch `phase-6-distribution`, not yet committed). All six roadmap phases are done. Robustness and stress tests, CLI end-to-end tests, CI and draft-release workflows, static musl binaries, installer, user guide, troubleshooting and `hive doctor`. See [[Phase 6 - Testing and Distribution]]. Phases 1–5 are merged to master.
+**Phase 6 complete; published 2026-10-30.** All six roadmap phases are merged to master. Public repo: https://github.com/JRH89/hive (MIT). CI is green on GitHub (fmt, clippy, tests, MSRV, static x86_64/aarch64 builds and smoke tests). Website: Vercel project `hive` (scope `jrh89s-projects`, root `website/`, deploys on push to master), domain `hive.codefrontlabs.com`. See [[Phase 6 - Testing and Distribution]].
 
-**Before a public release:** choose a license, add a GitHub remote and let CI run, dry-run a tag to a draft release, test on macOS. Spec §18 future features stay out of scope.
+**Open:** no binaries released yet (push a `v0.1.0` tag for a draft release, then publish it). macOS runtime testing. `mouse_support` and `restore_workspace` config keys are inert.
 
 ## Gate before every change
 ```bash
@@ -26,10 +26,7 @@ cargo test --workspace
 - Sidebar/picker keys aren't configurable; theme is fixed at startup.
 - No activity indicator for background sessions (see [[ADR-0007 Switching re-attaches]]).
 
-## Website (separate from Rust phases)
-- Terminal-first Next.js/React/TypeScript/Tailwind landing page implemented in `website/` using AGENTS branding. User approved the plan on 2026-10-30.
-- Typecheck, production static export, exported anchor/asset checks, and local homepage HTTP 200 passed. Independent static review found no blockers.
-- Browser QA remains pending: no browser available to verify 375px/desktop rendering or real interactions. See [[Website Design]] and [[Website Implementation Plan]].
-- Run from `website/`: `npm ci`, then `npm run dev` (http://127.0.0.1:4310). No deployment configured. Rust phase status is independent.
-
-- Website polish: reduced hero headline/padding after user screenshots, sparse SVG honeycomb background, self-hosted fonts, illustrative selectable sessions, compact source steps, and upcoming Linux/macOS/Windows release install UI for `jrh89/hive`. Installers remain unpublished with inactive downloads.
+## Website
+- Next.js static export in `website/`, deployed by Vercel from GitHub (`vercel.json`: framework nextjs, image content types for the extensionless OG/apple-icon routes).
+- SEO (2026-10-30): canonical, title/description/keywords, OG and Twitter large-image cards (generated 1200×630 PNG), robots.txt, sitemap.xml, manifest, apple icon, SoftwareApplication + FAQPage JSON-LD. Content updated to the finished roadmap. Verified by headless Chromium screenshots at 1440 and 390 px and by checking the exported head tags.
+- DNS for codefrontlabs.com is on Cloudflare: `hive` needs a CNAME to `cname.vercel-dns.com` (DNS only).
