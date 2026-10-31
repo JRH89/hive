@@ -86,6 +86,11 @@ struct Meta {
     /// `SessionUpdated` can follow the `SessionRemoved` broadcast.
     removed: bool,
     presence: Option<AgentPresence>,
+    /// Where the session's process is now: it follows `cd`, and with it the
+    /// workspace and repository (see `Daemon::refresh_places`).
+    cwd: String,
+    workspace: WorkspaceId,
+    repo: Option<hive_workspace::Repo>,
 }
 
 /// Agent detection state, used only by the agent loop and agent reports.
@@ -119,11 +124,8 @@ pub(crate) struct Session {
     pub id: SessionId,
     agent: String,
     command: Vec<String>,
-    cwd: String,
     created_at: u64,
     pid: Option<u32>,
-    workspace: WorkspaceId,
-    repo: Option<hive_workspace::Repo>,
     meta: Mutex<Meta>,
     term: Mutex<Term>,
     detect: Mutex<Detector>,
@@ -213,13 +215,11 @@ impl Session {
             id,
             agent: req.agent,
             command: req.command.clone(),
-            cwd: req.cwd,
             created_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0),
             pid: child.process_id(),
-            workspace: placement.workspace,
             meta: Mutex::new(Meta {
                 label: req.label,
                 branch: placement.repo.as_ref().and_then(|r| r.branch()),
@@ -229,6 +229,9 @@ impl Session {
                 attached: BTreeSet::new(),
                 removed: false,
                 presence: None,
+                cwd: req.cwd,
+                workspace: placement.workspace,
+                repo: placement.repo,
             }),
             term: Mutex::new(Term {
                 parser: vt100::Parser::new_with_callbacks(
@@ -246,7 +249,6 @@ impl Session {
             exited: watch::channel(false).0,
             removed: watch::channel(false).0,
             events,
-            repo: placement.repo,
         });
 
         let s = session.clone();
@@ -328,14 +330,14 @@ impl Session {
             agent: self.agent.clone(),
             label: meta.label.clone(),
             command: self.command.clone(),
-            cwd: self.cwd.clone(),
+            cwd: meta.cwd.clone(),
             state: meta.state.clone(),
             size: meta.size,
             created_at: self.created_at,
             attached_clients: meta.attached.len() as u32,
-            workspace: self.workspace,
+            workspace: meta.workspace,
             branch: meta.branch.clone(),
-            worktree: self
+            worktree: meta
                 .repo
                 .as_ref()
                 .filter(|r| r.is_linked_worktree())
@@ -502,18 +504,45 @@ impl Session {
     }
 
     /// Root of the git working tree the session runs in, if any.
-    pub fn tree_root(&self) -> Option<&std::path::Path> {
-        self.repo.as_ref().map(|r| r.worktree_root.as_path())
+    pub fn tree_root(&self) -> Option<PathBuf> {
+        lock(&self.meta)
+            .repo
+            .as_ref()
+            .map(|r| r.worktree_root.clone())
     }
 
     pub fn cwd(&self) -> PathBuf {
-        PathBuf::from(&self.cwd)
+        PathBuf::from(&lock(&self.meta).cwd)
+    }
+
+    pub fn workspace(&self) -> WorkspaceId {
+        lock(&self.meta).workspace
+    }
+
+    /// The directory the session's process is in now, if the OS tells us.
+    /// Blocking; run off the async runtime.
+    pub fn live_cwd(&self) -> Option<PathBuf> {
+        if !self.is_alive() {
+            return None;
+        }
+        process_cwd(self.pid?)
+    }
+
+    /// Records that the process moved (`cd`) to `cwd`, in `workspace`.
+    pub fn move_to(&self, cwd: &std::path::Path, workspace: WorkspaceId) {
+        let repo = hive_workspace::discover(cwd);
+        let branch = repo.as_ref().and_then(|r| r.branch());
+        let mut meta = lock(&self.meta);
+        meta.cwd = cwd.display().to_string();
+        meta.workspace = workspace;
+        meta.repo = repo;
+        meta.branch = branch;
     }
 
     /// Re-reads the checked-out branch. Returns true if it changed, in which
     /// case the caller should `publish`.
     pub fn refresh_branch(&self) -> bool {
-        let Some(repo) = &self.repo else {
+        let Some(repo) = lock(&self.meta).repo.clone() else {
             return false;
         };
         let branch = repo.branch();
@@ -719,6 +748,30 @@ fn signal_group(pid: u32, force: bool) {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status();
+}
+
+#[cfg(target_os = "linux")]
+fn process_cwd(pid: u32) -> Option<PathBuf> {
+    std::fs::read_link(format!("/proc/{pid}/cwd")).ok()
+}
+
+/// macOS has no /proc; `lsof -Fn` prints the cwd as an `n<path>` line.
+#[cfg(all(unix, not(target_os = "linux")))]
+fn process_cwd(pid: u32) -> Option<PathBuf> {
+    let out = std::process::Command::new("lsof")
+        .args(["-a", "-p", &pid.to_string(), "-d", "cwd", "-Fn"])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .find_map(|l| l.strip_prefix('n').map(PathBuf::from))
+}
+
+/// Not available cheaply on Windows: sessions stay where they started.
+#[cfg(not(unix))]
+fn process_cwd(_pid: u32) -> Option<PathBuf> {
+    None
 }
 
 fn write_loop(mut writer: Box<dyn Write + Send>, mut rx: mpsc::Receiver<Vec<u8>>) {

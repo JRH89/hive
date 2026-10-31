@@ -315,7 +315,7 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
 
     // SPACES: up to about half the height, scrolled to the selected one.
     let space = app.shown_space();
-    let groups = app.groups();
+    let groups = app.spaces();
     frame.render_widget(
         Paragraph::new(Span::styled(" SPACES", heading)),
         row(inner.y),
@@ -1400,9 +1400,12 @@ mod tests {
         assert!(lines[3].contains("main"), "{:?}", lines[3]);
         assert!(lines[4].contains("● api"), "selected: {:?}", lines[4]);
         assert!(lines[5].contains("hive/codex-2"));
-        assert!(lines[6].contains("· empty"));
-        assert!(lines[13].contains("● codex") && lines[13].contains('1'));
-        assert!(lines[14].contains("wt hive/codex-2"), "{:?}", lines[14]);
+        assert!(
+            !lines.iter().any(|l| l.contains("empty")),
+            "spaces with nothing open aren't listed"
+        );
+        assert!(lines[11].contains("● codex") && lines[11].contains('1'));
+        assert!(lines[12].contains("wt hive/codex-2"), "{:?}", lines[12]);
         assert!(!lines.iter().any(|l| l.contains("later")), "other space");
 
         // Clicking a space lists its agents, numbered from 1 for Alt+digit.
@@ -1417,7 +1420,7 @@ mod tests {
         app.cursor = Some(1);
         assert_eq!(app.space_sessions(), vec![1, 3]);
         let lines = rendered(&app, 80, 24);
-        assert!(lines[15].contains("● later") && lines[15].contains('2'));
+        assert!(lines[13].contains("● later") && lines[13].contains('2'));
     }
 
     #[test]
