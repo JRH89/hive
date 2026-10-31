@@ -132,7 +132,7 @@ impl Command {
             Command::NewAgent => "New agent (pick one)",
             Command::NewWorktreeSession => "New session in its own worktree",
             Command::Workspaces => "Switch workspace",
-            Command::AddWorkspace => "Add workspace",
+            Command::AddWorkspace => "New space (a folder)",
             Command::RenameWorkspace => "Rename workspace",
             Command::NextSession => "Next session",
             Command::PrevSession => "Previous session",

@@ -8,7 +8,7 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU16;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const OBSERVING: &str =
     "Observing: another client controls this session. Leader then a to take control.";
@@ -187,7 +187,7 @@ fn agent_status(s: &SessionInfo) -> Option<AgentStatus> {
 pub enum SidebarHit {
     Session(SessionId),
     Workspace(WorkspaceId),
-    /// The "new" button: a terminal in the selected space.
+    /// The "new" button: a new space (asks for its folder).
     New,
     /// The "menu" button: the command palette.
     Menu,
@@ -271,6 +271,10 @@ pub struct App {
     /// The space (workspace) whose agents the sidebar lists. Follows the
     /// focused session; a click can pick an empty space.
     pub space: Option<WorkspaceId>,
+    /// The tab last shown in each space, so switching back returns to it.
+    space_tab: BTreeMap<WorkspaceId, usize>,
+    /// A space this client asked for: open a terminal in it once created.
+    pending_space: Option<PathBuf>,
 }
 
 /// Result of a key in a one-line text prompt.
@@ -446,6 +450,8 @@ impl App {
             working_since: BTreeMap::new(),
             sidebar_hits: RefCell::new(Vec::new()),
             space: None,
+            space_tab: BTreeMap::new(),
+            pending_space: None,
         };
         app.set_terminal_size(terminal);
         if let Some(e) = key_error {
@@ -480,7 +486,7 @@ impl App {
 
     /// The session keys go to: the active tab's focused pane.
     pub fn focused(&self) -> Option<SessionId> {
-        self.tabs.get(self.tab).map(|t| t.focus)
+        self.active_tab().map(|t| t.focus)
     }
 
     /// The focused pane's mirror, once attached.
@@ -489,7 +495,48 @@ impl App {
     }
 
     pub fn active_tab(&self) -> Option<&Tab> {
-        self.tabs.get(self.tab)
+        self.tab_index().map(|i| &self.tabs[i])
+    }
+
+    /// The space a tab belongs to: its focused session's. Unknown (not yet
+    /// listed) sessions belong anywhere.
+    pub fn tab_space(&self, t: &Tab) -> Option<WorkspaceId> {
+        self.sessions.get(&t.focus).map(|s| s.workspace)
+    }
+
+    /// The active tab, unless the selected space is another one (an empty
+    /// space is on screen). Tabs belong to spaces, like herdr's.
+    fn tab_index(&self) -> Option<usize> {
+        let t = self.tabs.get(self.tab)?;
+        match (
+            self.space.filter(|w| self.workspaces.contains_key(w)),
+            self.tab_space(t),
+        ) {
+            (Some(w), Some(ts)) if w != ts => None,
+            _ => Some(self.tab),
+        }
+    }
+
+    /// The space whose tabs are on screen.
+    pub fn view_space(&self) -> Option<WorkspaceId> {
+        self.space
+            .filter(|w| self.workspaces.contains_key(w))
+            .or_else(|| self.current().map(|s| s.workspace))
+    }
+
+    /// Indexes into `tabs` of a space's tabs, in order.
+    pub fn space_tabs(&self, w: Option<WorkspaceId>) -> Vec<usize> {
+        (0..self.tabs.len())
+            .filter(|&i| {
+                w.is_none() || self.tab_space(&self.tabs[i]).is_none_or(|ts| Some(ts) == w)
+            })
+            .collect()
+    }
+
+    fn remember_tab(&mut self) {
+        if let Some(w) = self.active_tab().and_then(|t| self.tab_space(t)) {
+            self.space_tab.insert(w, self.tab);
+        }
     }
 
     /// Sessions in the active tab (attached even when zoomed away).
@@ -568,17 +615,23 @@ impl App {
     /// the focused pane (or a first tab).
     fn show(&mut self, id: SessionId) -> Vec<ClientMessage> {
         let before = self.tab_sessions();
+        let space = self.sessions.get(&id).map(|s| s.workspace);
+        let same_space = self
+            .tab_index()
+            .and_then(|i| self.tab_space(&self.tabs[i]))
+            .is_none_or(|ts| space.is_none_or(|w| w == ts));
         if let Some(i) = self.tabs.iter().position(|t| t.root.contains(id)) {
             self.tab = i;
             self.tabs[i].focus = id;
-        } else if let Some(t) = self.tabs.get_mut(self.tab) {
-            t.replace_focused(id);
+        } else if let (Some(i), true) = (self.tab_index(), same_space) {
+            self.tabs[i].replace_focused(id);
         } else {
             self.tabs.push(Tab::new(id));
             self.tab = self.tabs.len() - 1;
         }
         self.cursor = Some(id);
-        self.space = self.sessions.get(&id).map(|s| s.workspace);
+        self.space = space.or(self.space);
+        self.remember_tab();
         self.done.remove(&id);
         self.sync_panes(before)
     }
@@ -587,8 +640,8 @@ impl App {
     fn place_new(&mut self, id: SessionId) -> Vec<ClientMessage> {
         let place = std::mem::replace(&mut self.place, Place::Replace);
         let before = self.tab_sessions();
-        match (place, self.tabs.get_mut(self.tab)) {
-            (Place::Split(dir), Some(t)) => t.split_focused(id, dir),
+        match (place, self.tab_index()) {
+            (Place::Split(dir), Some(i)) => self.tabs[i].split_focused(id, dir),
             (Place::NewTab, _) | (Place::Split(_), None) => {
                 self.tabs.push(Tab::new(id));
                 self.tab = self.tabs.len() - 1;
@@ -596,6 +649,10 @@ impl App {
             (Place::Replace, _) => return self.show(id),
         }
         self.cursor = Some(id);
+        if let Some(w) = self.sessions.get(&id).map(|s| s.workspace) {
+            self.space = Some(w);
+        }
+        self.remember_tab();
         self.sync_panes(before)
     }
 
@@ -606,7 +663,7 @@ impl App {
         let Some(i) = self.tabs.iter().position(|t| t.root.contains(id)) else {
             return Vec::new();
         };
-        let active = i == self.tab;
+        let active = Some(i) == self.tab_index();
         let before = self.tab_sessions();
         if self.tabs[i].remove(id) {
             if !active {
@@ -687,6 +744,7 @@ impl App {
     }
 
     /// The agents listed under the shown space, numbered 1-9 for jumps.
+    /// Plain terminals live in tabs only, like herdr.
     pub fn space_sessions(&self) -> Vec<SessionId> {
         let space = self.shown_space();
         self.groups()
@@ -694,6 +752,9 @@ impl App {
             .find(|(w, _)| Some(*w) == space)
             .map(|(_, ids)| ids)
             .unwrap_or_default()
+            .into_iter()
+            .filter(|id| self.sessions.get(id).is_some_and(is_agent))
+            .collect()
     }
 
     pub fn order(&self) -> Vec<SessionId> {
@@ -832,8 +893,7 @@ impl App {
     /// Other running agents in exactly the same directory (not isolated by
     /// a worktree). Plain terminals don't count: they don't edit files.
     pub fn sharing_dir(&self, id: SessionId) -> Vec<SessionId> {
-        let agent =
-            |s: &&SessionInfo| s.state.is_alive() && (s.agent != "shell" || s.presence.is_some());
+        let agent = |s: &&SessionInfo| s.state.is_alive() && is_agent(s);
         let Some(s) = self.sessions.get(&id).filter(agent) else {
             return Vec::new();
         };
@@ -1105,6 +1165,23 @@ impl App {
             ServerMessage::WorkspaceList(list) => {
                 self.workspaces = list.into_iter().map(|w| (w.id, w)).collect();
             }
+            ServerMessage::WorkspaceCreated(w)
+                if self
+                    .pending_space
+                    .as_deref()
+                    .is_some_and(|p| same_dir(p, Path::new(&w.root))) =>
+            {
+                // Ours: show it with a terminal in its root.
+                self.pending_space = None;
+                let id = w.id;
+                self.workspaces.insert(id, w);
+                let before = self.tab_sessions();
+                self.space = Some(id);
+                self.cursor = None;
+                let mut out = self.sync_panes(before);
+                out.extend(self.new_terminal(Place::NewTab));
+                return out;
+            }
             ServerMessage::WorkspaceCreated(w) | ServerMessage::WorkspaceUpdated(w) => {
                 self.workspaces.insert(w.id, w);
             }
@@ -1195,7 +1272,7 @@ impl App {
                     self.open_space(w)
                 }
                 (MouseEventKind::Down(MouseButton::Left), Some(SidebarHit::New)) => {
-                    self.run(Command::NewSession)
+                    self.run(Command::AddWorkspace)
                 }
                 (MouseEventKind::Down(MouseButton::Left), Some(SidebarHit::Menu)) => {
                     self.run(Command::Palette)
@@ -1221,8 +1298,8 @@ impl App {
         };
         if matches!(m.kind, MouseEventKind::Down(_)) {
             self.focus = Focus::Terminal;
-            if let Some(t) = self.tabs.get_mut(self.tab) {
-                t.focus = pane.session;
+            if let Some(i) = self.tab_index() {
+                self.tabs[i].focus = pane.session;
             }
             self.cursor = Some(pane.session);
             if pane.title.contains(at) {
@@ -1419,22 +1496,22 @@ impl App {
             Command::SplitRight => return self.new_terminal(Place::Split(Dir::Right)),
             Command::SplitDown => return self.new_terminal(Place::Split(Dir::Down)),
             Command::NewTab => return self.new_terminal(Place::NewTab),
-            Command::NextTab | Command::PrevTab if self.tabs.len() > 1 => {
-                let before = self.tab_sessions();
+            Command::NextTab | Command::PrevTab if self.space_tabs(self.view_space()).len() > 1 => {
+                // Within the space, like herdr.
+                let tabs = self.space_tabs(self.view_space());
                 let delta = if cmd == Command::NextTab { 1 } else { -1 };
-                self.tab =
-                    (self.tab as isize + delta).rem_euclid(self.tabs.len() as isize) as usize;
-                self.cursor = self.focused();
-                self.space = self.current().map(|s| s.workspace);
-                self.focus = Focus::Terminal;
-                return self.sync_panes(before);
+                let at = tabs
+                    .iter()
+                    .position(|&i| i == self.tab)
+                    .map_or(0, |p| p as isize + delta);
+                return self.select_tab(tabs[at.rem_euclid(tabs.len() as isize) as usize]);
             }
             Command::NextTab | Command::PrevTab => {
                 let delta = if cmd == Command::NextTab { 1 } else { -1 };
                 return self.switch_in_space(delta);
             }
             Command::FocusNextPane => {
-                if let Some(t) = self.tabs.get_mut(self.tab) {
+                if let Some(t) = self.tab_index().map(|i| &mut self.tabs[i]) {
                     t.cycle_focus(1);
                     self.cursor = Some(t.focus);
                     self.focus = Focus::Terminal;
@@ -1442,8 +1519,8 @@ impl App {
             }
             Command::Zoom => {
                 if let Some(t) = self
-                    .tabs
-                    .get_mut(self.tab)
+                    .tab_index()
+                    .map(|i| &mut self.tabs[i])
                     .filter(|t| t.root.panes().len() > 1)
                 {
                     t.zoomed = !t.zoomed;
@@ -1480,12 +1557,7 @@ impl App {
                 }
             }
             Command::Workspaces => self.open_workspaces(),
-            Command::AddWorkspace => {
-                let input = std::env::current_dir()
-                    .map(|d| d.display().to_string())
-                    .unwrap_or_default();
-                self.mode = Mode::AddWorkspace { input };
-            }
+            Command::AddWorkspace => self.prompt_new_space(),
             Command::RenameWorkspace => {
                 if let Some(w) = self.active_workspace() {
                     let input = self.workspace_name(w).to_string();
@@ -1724,7 +1796,10 @@ impl App {
         };
         let before = self.tab_sessions();
         if before.len() > 1 {
-            self.tabs[self.tab].remove(id);
+            let Some(i) = self.tab_index() else {
+                return Vec::new();
+            };
+            self.tabs[i].remove(id);
             self.cursor = self.focused();
             return self.sync_panes(before);
         }
@@ -1733,7 +1808,7 @@ impl App {
 
     /// Closes the active tab; its sessions keep running.
     fn close_tab(&mut self) -> Vec<ClientMessage> {
-        if self.tabs.len() < 2 {
+        if self.tabs.len() < 2 || self.tab_index().is_none() {
             self.set_status(
                 Tone::Info,
                 "This is the only tab. Sessions keep running; detach to leave.",
@@ -1750,6 +1825,18 @@ impl App {
     /// Selects a space: shows its focused-last agent, or just lists it
     /// (empty, ready for "new").
     fn open_space(&mut self, w: WorkspaceId) -> Vec<ClientMessage> {
+        // Its own tabs first: the one last shown there.
+        let tabs = self.space_tabs(Some(w));
+        if let Some(&first) = tabs.first() {
+            let i = self
+                .space_tab
+                .get(&w)
+                .copied()
+                .filter(|i| tabs.contains(i))
+                .unwrap_or(first);
+            self.space = Some(w);
+            return self.select_tab(i);
+        }
         let ids = self
             .groups()
             .into_iter()
@@ -1759,6 +1846,7 @@ impl App {
         match ids.into_iter().find(|&id| !self.is_lost(id)) {
             Some(id) => self.switch_to(id),
             None => {
+                let before = self.tab_sessions();
                 self.space = Some(w);
                 // The sidebar shows the cursor's space while browsing.
                 self.cursor = None;
@@ -1771,7 +1859,7 @@ impl App {
                         "Nothing open in {name} yet. Click new (or leader {new}) for a terminal."
                     ),
                 );
-                Vec::new()
+                self.sync_panes(before)
             }
         }
     }
@@ -1807,14 +1895,15 @@ impl App {
     }
 
     fn select_tab(&mut self, i: usize) -> Vec<ClientMessage> {
-        if i >= self.tabs.len() || i == self.tab {
+        if i >= self.tabs.len() || Some(i) == self.tab_index() {
             return Vec::new();
         }
         let before = self.tab_sessions();
         self.tab = i;
+        self.space = self.tab_space(&self.tabs[i]).or(self.space);
         self.cursor = self.focused();
-        self.space = self.current().map(|s| s.workspace);
         self.focus = Focus::Terminal;
+        self.remember_tab();
         self.sync_panes(before)
     }
 
@@ -2046,7 +2135,30 @@ impl App {
         }
     }
 
+    /// herdr's "new" under spaces: asks for a folder (usually a repo),
+    /// starting next to the current space, e.g. `~/Projects/`.
+    fn prompt_new_space(&mut self) {
+        let base = self
+            .view_space()
+            .and_then(|w| self.workspaces.get(&w))
+            .map(|w| PathBuf::from(&w.root))
+            .or_else(|| std::env::current_dir().ok());
+        let parent = base
+            .as_deref()
+            .map(|p| p.parent().unwrap_or(p).to_path_buf())
+            .unwrap_or_default();
+        let mut input = tilde(&parent.display().to_string());
+        if !input.ends_with('/') {
+            input.push('/');
+        }
+        self.mode = Mode::AddWorkspace { input };
+    }
+
     fn on_workspace_prompt_key(&mut self, key: KeyEvent) -> Vec<ClientMessage> {
+        if let (Mode::AddWorkspace { input }, KeyCode::Tab) = (&mut self.mode, key.code) {
+            *input = complete_dir(input);
+            return Vec::new();
+        }
         let (Mode::AddWorkspace { input } | Mode::RenameWorkspace { input, .. }) = &mut self.mode
         else {
             return Vec::new();
@@ -2060,7 +2172,8 @@ impl App {
             Edit::Submit => {
                 let msg = match std::mem::replace(&mut self.mode, Mode::Normal) {
                     Mode::AddWorkspace { input } => {
-                        let path = expand_home(input.trim());
+                        let path = expand_home(input.trim().trim_end_matches('/'));
+                        self.pending_space = Some(PathBuf::from(&path));
                         ClientMessage::CreateWorkspace { path, name: None }
                     }
                     Mode::RenameWorkspace { workspace, input } => ClientMessage::RenameWorkspace {
@@ -2376,6 +2489,63 @@ fn expand_home(path: &str) -> String {
     }
 }
 
+/// An agent session, as opposed to a plain terminal: launched as an agent,
+/// or a shell running one (detected or self-reported).
+pub fn is_agent(s: &SessionInfo) -> bool {
+    s.agent != "shell" || s.presence.is_some()
+}
+
+/// `/home/me/x` as `~/x`.
+fn tilde(path: &str) -> String {
+    match dirs_home() {
+        Some(home) if path == home => "~".into(),
+        Some(home) if path.starts_with(&format!("{home}/")) => format!("~{}", &path[home.len()..]),
+        _ => path.to_string(),
+    }
+}
+
+fn dirs_home() -> Option<String> {
+    std::env::var("HOME").ok().filter(|h| !h.is_empty())
+}
+
+fn same_dir(a: &Path, b: &Path) -> bool {
+    let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    canon(a) == canon(b) || canon(a).starts_with(canon(b))
+}
+
+/// Shell-style Tab completion of the last path component to the longest
+/// common prefix of matching subdirectories (hidden ones only when typed).
+fn complete_dir(input: &str) -> String {
+    let (dir, partial) = match input.rfind('/') {
+        Some(i) => (&input[..=i], &input[i + 1..]),
+        None => ("", input),
+    };
+    let Ok(entries) = std::fs::read_dir(expand_home(if dir.is_empty() { "." } else { dir })) else {
+        return input.to_string();
+    };
+    let mut names: Vec<String> = entries
+        .filter_map(Result::ok)
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|n| n.starts_with(partial) && (partial.starts_with('.') || !n.starts_with('.')))
+        .collect();
+    names.sort();
+    let Some(first) = names.first() else {
+        return input.to_string();
+    };
+    let mut common = first.clone();
+    for n in &names[1..] {
+        while !n.starts_with(&common) {
+            common.pop();
+        }
+    }
+    let mut out = format!("{dir}{common}");
+    if names.len() == 1 {
+        out.push('/');
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2384,7 +2554,8 @@ mod tests {
     fn info(id: SessionId, state: SessionState) -> SessionInfo {
         SessionInfo {
             id,
-            agent: "shell".into(),
+            // An agent, so the sidebar lists it (plain terminals aren't).
+            agent: "claude".into(),
             label: "shell".into(),
             command: vec!["sh".into()],
             cwd: "/".into(),
@@ -2970,14 +3141,10 @@ mod tests {
             }
         ));
         app.on_terminal_event(key(KeyCode::Esc, KeyModifiers::NONE));
-        // "new" opens a terminal straight away, in the selected space.
-        let out = app.on_terminal_event(press(2, 10));
-        assert!(
-            matches!(out.as_slice(), [ClientMessage::CreateSession(r)] if r.agent == "shell"),
-            "{out:?}"
-        );
-        assert!(matches!(app.mode, Mode::Normal));
-        app.awaiting_create = false;
+        // "new" under spaces asks for a folder for a new space.
+        assert!(app.on_terminal_event(press(2, 10)).is_empty());
+        assert!(matches!(&app.mode, Mode::AddWorkspace { input } if input.ends_with('/')));
+        app.on_terminal_event(key(KeyCode::Esc, KeyModifiers::NONE));
 
         // Alt+Up/Down walk the spaces, wrapping.
         let alt = |code| key(code, KeyModifiers::ALT);
@@ -3013,7 +3180,9 @@ mod tests {
             9,
             SessionState::Running,
         )));
-        assert_eq!(app.tab, 1);
+        // Tabs belong to spaces: tab 1 is the other space's (session 3).
+        assert_eq!(app.tab, 2);
+        assert_eq!(app.space_tabs(Some(1)), vec![0, 2]);
         set_hits(&app, vec![(Rect::new(80, 0, 9, 1), SidebarHit::Tab(0))]);
         app.on_terminal_event(press(82, 0));
         assert_eq!(app.tab, 0);
@@ -3023,7 +3192,57 @@ mod tests {
         assert_eq!(app.place, Place::NewTab);
         app.place = Place::Replace;
         app.on_terminal_event(alt(KeyCode::Right));
-        assert_eq!(app.tab, 1, "with tabs, Alt+Right moves between them");
+        assert_eq!(app.tab, 2, "Alt+Right moves between this space's tabs only");
+        // Back in the other space, its own tab is shown.
+        app.on_terminal_event(alt(KeyCode::Down));
+        assert_eq!(app.tab, 1);
+        assert_eq!(app.focused(), Some(3));
+        app.on_terminal_event(alt(KeyCode::Up));
+        assert_eq!(app.tab, 2, "and coming back returns to the last tab");
+    }
+
+    #[test]
+    fn new_space_asks_for_a_folder_and_opens_a_terminal_there() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("projects/alpha-repo")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("projects/beta")).unwrap();
+        let base = format!("{}/projects/", tmp.path().display());
+        assert_eq!(
+            complete_dir(&format!("{base}al")),
+            format!("{base}alpha-repo/")
+        );
+        assert_eq!(complete_dir(&format!("{base}x")), format!("{base}x"));
+
+        let mut app = app_with_workspaces();
+        app.run(Command::AddWorkspace);
+        let Mode::AddWorkspace { input } = &mut app.mode else {
+            panic!("prompt not open: {:?}", app.mode)
+        };
+        *input = format!("{base}al");
+        app.on_terminal_event(key(KeyCode::Tab, KeyModifiers::NONE));
+        let out = app.on_terminal_event(enter());
+        let root = tmp.path().join("projects/alpha-repo");
+        assert!(
+            matches!(out.as_slice(), [ClientMessage::CreateWorkspace { path, .. }] if Path::new(path) == root),
+            "{out:?}"
+        );
+        let out = app.on_server(ServerMessage::WorkspaceCreated(WorkspaceInfo {
+            id: 7,
+            name: "alpha-repo".into(),
+            root: root.display().to_string(),
+            is_repo: false,
+        }));
+        assert_eq!(app.space, Some(7));
+        let req = out
+            .iter()
+            .find_map(|m| match m {
+                ClientMessage::CreateSession(r) => Some(r),
+                _ => None,
+            })
+            .expect("a terminal in the new space");
+        assert_eq!((req.agent.as_str(), req.workspace), ("shell", Some(7)));
+        assert_eq!(Path::new(&req.cwd), root);
+        assert_eq!(app.place, Place::NewTab);
     }
 
     #[test]
