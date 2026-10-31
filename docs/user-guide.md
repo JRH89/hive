@@ -82,7 +82,7 @@ Everything you type goes to the agent, except the **leader** key (`Ctrl+Space`) 
 | `o` | Focus the next pane (or click it) |
 | `z` | Zoom the focused pane; again to restore |
 | `X` | Close the pane (the session keeps running) |
-| `t` | New session in a new tab |
+| `t` | New tab with a terminal (or click `+` in the tab bar) |
 | `]` / `[` | Next / previous tab |
 | `w` | Workspaces |
 | `r` | Rename session |
@@ -104,7 +104,7 @@ If an agent needs one of these, rebind or unbind it under `[keys.global]` (see [
 
 ### Panes and tabs
 
-Split the panel to watch several agents at once. Each pane is its own terminal at its own size, with a title row showing the session and its status. Keys go to the focused pane. Switching to a session that is already in a pane focuses that pane (and its tab); otherwise the session replaces the focused pane. With more than one tab, the header shows the tab bar. Hidden tabs cost nothing: Hive only mirrors what is on screen. The layout lasts until you quit `hive`; sessions keep running either way.
+Split the panel to watch several agents at once. Each pane is its own terminal at its own size, with a title row showing the session and its status. Keys go to the focused pane. Switching to a session that is already in a pane focuses that pane (and its tab); otherwise the session replaces the focused pane. The header's tab bar (`1:api  2:shell  +`) is clickable: pick a tab, or `+` for a new terminal tab in the current directory. Hidden tabs cost nothing: Hive only mirrors what is on screen. The layout lasts until you quit `hive`; sessions keep running either way.
 
 ### Notes (Obsidian, optional)
 

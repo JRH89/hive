@@ -141,7 +141,7 @@ impl Command {
             Command::FocusNextPane => "Focus the next pane",
             Command::Zoom => "Zoom the pane (toggle)",
             Command::ClosePane => "Close the pane (session keeps running)",
-            Command::NewTab => "New tab",
+            Command::NewTab => "New tab (a terminal)",
             Command::NextTab => "Next tab",
             Command::PrevTab => "Previous tab",
             Command::CloseTab => "Close the tab (sessions keep running)",

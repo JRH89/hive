@@ -147,7 +147,7 @@ enum Command {
     },
     /// Check the installation: paths, config, daemon, terminal and agents
     Doctor,
-    /// Install the latest release over this one (Linux binaries)
+    /// Install the latest release over this one (Linux and macOS binaries)
     #[command(
         after_help = "Downloads the official installer from GitHub, which verifies \
         the SHA-256 checksum, and installs next to the running hive. A running \
