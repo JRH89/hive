@@ -2991,6 +2991,9 @@ body { padding-top: 92px; }
 .screens video {
   border-radius: 10px;
   background: #16161e;
+  /* Fits the viewport height on desktop so the whole terminal is visible. */
+  max-width: min(880px, calc(72vh * 1040 / 636));
+  margin-inline: auto;
 }
 .screens img,
 .screens video {
