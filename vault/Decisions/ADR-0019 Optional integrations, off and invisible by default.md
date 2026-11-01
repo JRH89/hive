@@ -20,3 +20,5 @@ date: 2026-10-30
 | Bad config | `open_in` is an enum (parse error); an unknown `agent` fails `check_config`/`hive doctor` |
 
 **Consequences:** Future integrations ([[Phase 7 - herdr parity]] ideas) follow the same shape: config table, hidden commands, built from sessions and panes.
+
+**Amendment (2026-10-31):** a disabled command's leader key is no longer silent. It shows a status hint naming the config table to enable (`Keymap::disabled`, `enable_hint`). The palette and help still hide it. Reason: user pressed `Ctrl+Space U` with no config and thought it was broken.

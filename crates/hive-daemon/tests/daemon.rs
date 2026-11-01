@@ -464,11 +464,11 @@ async fn exit_is_reported_and_kill_removes_session() {
         }
     );
 
-    // A process that ignores SIGTERM is SIGKILLed after the timeout. Wait for
-    // the trap to be installed first, or SIGTERM wins the race.
+    // A process that ignores SIGHUP and SIGTERM is SIGKILLed after the
+    // timeout. Wait for the trap to be installed first, or the signal wins.
     let stubborn = create(
         &mut c,
-        sh("trap '' TERM; echo armed; sleep 60", TermSize::DEFAULT),
+        sh("trap '' HUP TERM; echo armed; sleep 60", TermSize::DEFAULT),
     )
     .await;
     let mut screen = attach(&mut c, stubborn, TermSize::DEFAULT).await;
@@ -490,6 +490,33 @@ async fn exit_is_reported_and_kill_removes_session() {
         started.elapsed() >= Duration::from_secs(1),
         "stubborn session should only die after the SIGKILL timeout"
     );
+}
+
+/// Interactive shells ignore SIGTERM; terminating sends SIGHUP too, as
+/// closing a terminal does.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn kill_hangs_up_on_a_shell_that_ignores_sigterm() {
+    let h = Harness::start().await;
+    let mut c = h.client().await;
+    let dir = tempfile::tempdir().unwrap();
+    let marker = dir.path().join("hup");
+    let script = format!(
+        "trap '' TERM; trap 'touch {}; exit' HUP; echo armed; while :; do sleep 1; done",
+        marker.display()
+    );
+    let id = create(&mut c, sh(&script, TermSize::DEFAULT)).await;
+    let mut screen = attach(&mut c, id, TermSize::DEFAULT).await;
+    wait_for_text(&mut c, &mut screen, "armed").await;
+    c.send(&ClientMessage::KillSession(id)).await.unwrap();
+    timeout(
+        T,
+        c.recv_until(|m| matches!(m, ServerMessage::SessionRemoved(r) if r == id).then_some(())),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(marker.exists(), "the shell got SIGHUP");
 }
 
 #[tokio::test(flavor = "multi_thread")]
