@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
+import { JsonLd } from "@/components/json-ld";
+import { absolute, organization } from "@/lib/site";
 
 const geist = localFont({
   src: "../node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2",
@@ -18,7 +20,7 @@ const geistMono = localFont({
 const siteUrl = "https://hive.codefrontlabs.com";
 const title = "Hive — Terminal multiplexer for AI coding agents";
 const description =
-  "Hive is an open-source, Rust-built terminal multiplexer for AI coding agents. Run Claude Code, Codex, Gemini CLI and OpenCode side by side in real terminals, with sessions that keep running when you detach.";
+  "Open-source terminal multiplexer for AI coding agents. Run Claude Code, Codex, Gemini CLI and OpenCode side by side, with live status and sessions that persist.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
@@ -43,7 +45,6 @@ export const metadata: Metadata = {
   creator: "Jared Hooker",
   publisher: "Codefront Labs",
   category: "Developer tools",
-  alternates: { canonical: "/" },
   robots: {
     index: true,
     follow: true,
@@ -74,7 +75,26 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className={`${geist.variable} ${geistMono.variable}`}>
-      <body>{children}</body>
+      <body>
+        <JsonLd
+          data={{
+            "@context": "https://schema.org",
+            "@graph": [
+              organization,
+              {
+                "@type": "WebSite",
+                "@id": absolute("/#website"),
+                name: "Hive",
+                url: absolute("/"),
+                description,
+                inLanguage: "en",
+                publisher: { "@id": organization["@id"] },
+              },
+            ],
+          }}
+        />
+        {children}
+      </body>
     </html>
   );
 }

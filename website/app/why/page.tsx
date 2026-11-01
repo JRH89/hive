@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import { SiteHeader } from "@/components/site-header";
+import { SiteFooter } from "@/components/site-footer";
+import { Breadcrumbs } from "@/components/breadcrumbs";
 import { Icon } from "@/components/icon";
 
 export const metadata: Metadata = {
-  title: "Why Hive",
+  title: { absolute: "Why Hive: compared with tmux, Zellij and herdr" },
   description:
-    "What sets Hive apart from tmux, Zellij and other agent multiplexers: agent status across every project, one-key worktrees, spaces that follow cd, and built-in integrations.",
+    "What sets Hive apart from tmux, Zellij and herdr: agent status across projects, one-key worktrees, spaces that follow cd, and built-in integrations.",
   alternates: { canonical: "/why/" },
 };
 
@@ -72,6 +74,7 @@ export default function Why() {
       </a>
       <SiteHeader />
       <main id="main" className="section wrapper why">
+        <Breadcrumbs trail={[["Why Hive", "/why/"]]} />
         <div className="section-heading">
           <div>
             <p className="eyebrow">WHAT SETS HIVE APART</p>
@@ -153,6 +156,7 @@ export default function Why() {
           </a>
         </div>
       </main>
+      <SiteFooter />
     </>
   );
 }
