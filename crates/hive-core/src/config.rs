@@ -72,7 +72,10 @@ pub enum SplitDir {
 pub struct General {
     pub theme: String,
     pub default_agent: String,
-    pub restore_workspace: bool,
+    /// Ignored: from early versions of the spec, accepted so configs that
+    /// set it still load.
+    #[serde(rename = "restore_workspace")]
+    _restore_workspace: Option<bool>,
 }
 
 impl Default for General {
@@ -80,7 +83,7 @@ impl Default for General {
         General {
             theme: "hive-dark".into(),
             default_agent: "claude".into(),
-            restore_workspace: true,
+            _restore_workspace: None,
         }
     }
 }
@@ -527,6 +530,7 @@ mod tests {
     #[test]
     fn unknown_keys_are_rejected() {
         assert!(Config::parse("[general]\nthme = \"x\"").is_err());
+        assert!(Config::parse("[general]\nrestore_workspace = true").is_ok());
     }
 
     #[test]

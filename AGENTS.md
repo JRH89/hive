@@ -650,7 +650,6 @@ Example:
 [general]
 theme = "hive-dark"
 default_agent = "claude"
-restore_workspace = true
 
 [branding]
 show_header = true

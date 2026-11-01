@@ -14,7 +14,7 @@ updated: 2026-10-31
 
 **Released v0.4.9** (2026-10-31): layouts (`[layouts.*]`, leader `L`, [[ADR-0023 Layouts are client-side]]). v0.4.8: right-click menus, git status + usage integrations, Why Hive page. v0.4.7: AGENTS lists every agent; website integrations section. v0.4.6: "+ new" opens a new space (protocol v7). v0.4.5: a space for every folder (not just repos). v0.4.4: spaces follow cd, worktree terminals (leader `C`), README screenshots, website changelog + RSS (`/changelog/rss.xml`).
 
-**Open:** `restore_workspace` config key is inert.
+**Open:** none. (`restore_workspace` is accepted and ignored so old configs load; removed from the spec.)
 
 ## Gate before every change
 ```bash

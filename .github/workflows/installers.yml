@@ -28,7 +28,7 @@ jobs:
       HIVE_RUNTIME_DIR: /tmp/hive-inst
       HIVE_STATE_DIR: ${{ github.workspace }}/state
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: sh scripts/install.sh
       - name: Run the installed binaries
         run: |
@@ -45,7 +45,7 @@ jobs:
       HIVE_INSTALL_DIR: ${{ github.workspace }}\bin
       HIVE_STATE_DIR: ${{ github.workspace }}\state
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - shell: pwsh
         run: ./scripts/install.ps1
       - name: Run the installed binaries

@@ -40,4 +40,4 @@ Gate: fmt, clippy `--locked -D warnings`, `cargo test --workspace --locked` → 
 - License: MIT (user decision, 2026-10-30).
 - No PNG/GIF screenshots; the README uses text captures.
 - macOS untested at runtime; Windows unsupported.
-- `[terminal] mouse_support` and `[general] restore_workspace` are parsed but do nothing (undocumented in examples).
+- `[terminal] mouse_support` is implemented (Phase 7). `[general] restore_workspace` is accepted and ignored (2026-10-31), dropped from the spec.
