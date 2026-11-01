@@ -44,7 +44,7 @@ jobs:
         if: ${{ runner.os != 'Windows' }}
       - run: scripts/package.ps1 ${{ matrix.target }} dist
         if: ${{ runner.os == 'Windows' }}
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.target }}
           path: dist/*
@@ -56,7 +56,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v7
         with:
           path: dist
           merge-multiple: true
