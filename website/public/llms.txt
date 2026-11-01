@@ -17,6 +17,10 @@ Source: https://github.com/jrh89/hive
 
 ## Articles
 
+- [How to get notified when Claude Code or Codex needs input](https://hive.codefrontlabs.com/blog/get-notified-when-claude-code-needs-input/)
+- [How to keep Claude Code running after you close the terminal](https://hive.codefrontlabs.com/blog/keep-claude-code-running-after-closing-terminal/)
+- [How to review an AI coding agent's changes before you commit](https://hive.codefrontlabs.com/blog/review-ai-agent-changes-before-commit/)
+- [Zellij or Hive for AI coding agents?](https://hive.codefrontlabs.com/blog/zellij-vs-hive-for-ai-coding-agents/)
 - [How to run several AI coding agents at once](https://hive.codefrontlabs.com/blog/run-multiple-ai-coding-agents/)
 - [Git worktrees for AI coding agents: a practical guide](https://hive.codefrontlabs.com/blog/git-worktrees-for-ai-coding-agents/)
 - [tmux or Hive for Claude Code and Codex?](https://hive.codefrontlabs.com/blog/tmux-vs-hive-for-ai-coding-agents/)
