@@ -31,15 +31,6 @@
       ]
     },
     {
-      "source": "/blog/:slug/opengraph-image",
-      "headers": [
-        {
-          "key": "Content-Type",
-          "value": "image/png"
-        }
-      ]
-    },
-    {
       "source": "/(.*)",
       "headers": [
         {
