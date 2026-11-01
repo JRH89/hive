@@ -1,13 +1,16 @@
 import type { Metadata } from "next";
 import { SiteHeader } from "@/components/site-header";
+import { SiteFooter } from "@/components/site-footer";
+import { Breadcrumbs } from "@/components/breadcrumbs";
 import { Icon } from "@/components/icon";
 import { releases } from "@/lib/changelog";
 
 const repoUrl = "https://github.com/jrh89/hive";
 
 export const metadata: Metadata = {
-  title: "Changelog",
-  description: "What changed in each Hive release.",
+  title: "Changelog and release notes",
+  description:
+    "Release notes for Hive, the terminal multiplexer for AI coding agents: what changed in each version, with an RSS feed.",
   alternates: {
     canonical: "/changelog/",
     types: { "application/rss+xml": "/changelog/rss.xml" },
@@ -24,6 +27,7 @@ export default function Changelog() {
       </a>
       <SiteHeader />
       <main id="main" className="section wrapper changelog">
+        <Breadcrumbs trail={[["Changelog", "/changelog/"]]} />
         <div className="section-heading">
           <div>
             <p className="eyebrow">RELEASE NOTES</p>
@@ -56,6 +60,7 @@ export default function Changelog() {
           ))}
         </ol>
       </main>
+      <SiteFooter />
     </>
   );
 }

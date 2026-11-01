@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { SiteHeader } from "@/components/site-header";
 import { Brand } from "@/components/brand";
 import { CopyCommand } from "@/components/copy-command";
@@ -5,9 +6,23 @@ import { Icon } from "@/components/icon";
 import { TerminalShowcase } from "@/components/terminal-showcase";
 import { HiveBackdrop } from "@/components/hive-backdrop";
 import { ReleaseInstall } from "@/components/release-install";
+import { SiteFooter } from "@/components/site-footer";
+import { integrations } from "@/lib/integrations";
 
 const siteUrl = "https://hive.codefrontlabs.com/";
 const repoUrl = "https://github.com/jrh89/hive";
+
+export const metadata: Metadata = {
+  alternates: {
+    canonical: "/",
+    types: {
+      "application/rss+xml": [
+        { url: "/blog/rss.xml", title: "Hive blog" },
+        { url: "/changelog/rss.xml", title: "Hive releases" },
+      ],
+    },
+  },
+};
 
 const Arrow = () => <Icon name="arrow" size={17} />;
 
@@ -56,56 +71,6 @@ const features = [
   },
 ];
 
-const integrations = [
-  {
-    name: "Obsidian notes",
-    key: "Ctrl+Space N",
-    text: "Open your repository's Obsidian vault beside your agents, in an editor or an agent of your choice. With journaling on, Hive appends “claude finished in #3 api (main)” to today's daily note, so your vault keeps a log of what your agents did.",
-    config: "[integrations.obsidian]",
-  },
-  {
-    name: "Review changes",
-    key: "Ctrl+Space G",
-    text: "lazygit, tig or git diff in a split beside the agent, opened in the agent's own directory or worktree. See what it changed without leaving Hive.",
-    config: "[integrations.review]",
-  },
-  {
-    name: "Pull request checks",
-    key: "Ctrl+Space H",
-    text: "Watch the CI checks of the session's branch with the GitHub CLI, live, next to the agent that pushed it.",
-    config: "[integrations.github]",
-  },
-  {
-    name: "Project tasks",
-    key: "Ctrl+Space T",
-    text: "Pick a just, npm, make or cargo task from the project and run it beside the agent: the dev server, the tests, the linter.",
-    config: "[integrations.tasks]",
-  },
-  {
-    name: "Desktop notifications",
-    key: "automatic",
-    text: "A notification when an agent you aren't looking at finishes or needs your input. Walk away; Hive calls you back.",
-    config: "[integrations.desktop_notify]",
-  },
-  {
-    name: "Git status",
-    key: "sidebar",
-    text: "Changed files and commits ahead or behind under every repository space, e.g. main ~3 ↑2. Know which project has uncommitted agent work at a glance.",
-    config: "[integrations.git_status]",
-  },
-  {
-    name: "Usage and cost",
-    key: "Ctrl+Space U",
-    text: "Token usage and estimated cost of your agents in a pane, live, via ccusage or any tool you choose. Agents keep their own logs; Hive puts the numbers beside the work.",
-    config: "[integrations.usage]",
-  },
-  {
-    name: "Layouts",
-    key: "Ctrl+Space L",
-    text: "Name a set of panes once, say Claude, the dev server and a terminal, and open them together in a new tab. A layout can belong to a space and opens there without asking.",
-    config: "[layouts.<name>]",
-  },
-];
 
 const faqs = [
   [
@@ -126,7 +91,7 @@ const faqs = [
   ],
   [
     "What are integrations?",
-    "Optional extras that connect Hive to tools you already use: Obsidian notes and a daily journal of agent activity, change review with lazygit, GitHub pull request checks, project tasks, desktop notifications, git status in the sidebar and token usage. Each is off by default and invisible until you enable it with two lines in config.toml, and each opens as an ordinary session beside your agents.",
+    "Optional extras that connect Hive to tools you already use: Obsidian notes and a daily journal of agent activity, change review with lazygit, GitHub pull request checks, project tasks, desktop notifications, git status in the sidebar, token usage and pane layouts. Each is off by default until you enable it with two lines in config.toml (its key tells you how), and each opens as an ordinary session beside your agents. See hive.codefrontlabs.com/integrations for every option.",
   ],
   [
     "Is Hive open source?",
@@ -146,6 +111,7 @@ const structuredData = [
   {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
+    "@id": `${siteUrl}#software`,
     name: "Hive",
     alternateName: "Hive terminal multiplexer",
     description:
@@ -162,8 +128,17 @@ const structuredData = [
     programmingLanguage: "Rust",
     isAccessibleForFree: true,
     offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
-    author: { "@type": "Person", name: "Jared Hooker" },
-    publisher: { "@type": "Organization", name: "Codefront Labs" },
+    screenshot: `${siteUrl}screenshots/main.png`,
+    featureList: [
+      "Live status for 20+ AI coding agents: working, needs input, done",
+      "Sessions owned by a background daemon that survive closing the terminal",
+      "Spaces per repository that follow your cd",
+      "One-key git worktree terminals",
+      "Split panes, tabs, layouts and a command palette",
+      "Optional integrations: Obsidian, lazygit review, GitHub checks, tasks, notifications, git status, usage",
+    ],
+    author: { "@type": "Person", "@id": `${siteUrl}#author`, name: "Jared Hooker", url: "https://github.com/jrh89" },
+    publisher: { "@id": `${siteUrl}#organization` },
   },
   {
     "@context": "https://schema.org",
@@ -309,14 +284,18 @@ export default function Home() {
             <p className="section-aside">
               Optional integrations. Off by default,
               <br />
-              invisible until you turn them on.
+              <a className="text-link" href="/integrations/">
+                every option explained <Arrow />
+              </a>
             </p>
           </div>
           <div className="integrations-grid">
             {integrations.map((item) => (
               <article className="integration" key={item.name}>
                 <div className="integration-top">
-                  <h3>{item.name}</h3>
+                  <h3>
+                    <a href={`/integrations/#${item.id}`}>{item.name}</a>
+                  </h3>
                   <kbd>{item.key}</kbd>
                 </div>
                 <p>{item.text}</p>
@@ -576,8 +555,8 @@ journal = true        # log agent activity to today's note`}</code>
                 <h3>Everywhere, terminal first</h3>
                 <p>
                   macOS and Windows binaries. New opens a terminal, spaces
-                  follow your cd, each space keeps its own tabs, and worktree
-                  terminals keep agents apart.{" "}
+                  follow your cd, worktree terminals keep agents apart,
+                  right-click menus, layouts and seven integrations.{" "}
                   <a className="text-link" href="/changelog/">
                     Full changelog <Arrow />
                   </a>
@@ -626,22 +605,7 @@ journal = true        # log agent activity to today's note`}</code>
         </section>
       </main>
 
-      <footer className="site-footer wrapper">
-        <a className="brand-link" href="#" aria-label="Hive home">
-          <Brand />
-        </a>
-        <span>A Codefront Labs product. Built with Rust.</span>
-        <nav aria-label="Footer navigation">
-          <a href="#get-started">Get started</a>
-          <a href="#roadmap">Roadmap</a>
-          <a href="/why/">Why Hive</a>
-          <a href="/changelog/">Changelog</a>
-          <a href="/changelog/rss.xml">RSS</a>
-          <a href="#questions">FAQ</a>
-          <a href={repoUrl}>GitHub</a>
-          <a href={`${repoUrl}/blob/master/LICENSE`}>MIT License</a>
-        </nav>
-      </footer>
+      <SiteFooter />
     </>
   );
 }
