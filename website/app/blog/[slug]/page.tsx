@@ -21,6 +21,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const post = postBySlug((await params).slug);
   if (!post) return {};
   const url = `/blog/${post.slug}/`;
+  const image = { url: `/blog/og/${post.slug}.png`, width: 1200, height: 630, alt: post.title };
   return {
     title: post.title,
     description: post.description,
@@ -36,8 +37,14 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       modifiedTime: post.updated ?? post.date,
       authors: [author.url],
       tags: post.tags,
+      images: [image],
     },
-    twitter: { card: "summary_large_image", title: post.title, description: post.description },
+    twitter: {
+      card: "summary_large_image",
+      title: post.title,
+      description: post.description,
+      images: [image.url],
+    },
   };
 }
 
@@ -61,7 +68,7 @@ export default async function BlogPost({ params }: Props) {
           url,
           headline: post.title,
           description: post.description,
-          image: `${url}opengraph-image`,
+          image: absolute(`/blog/og/${post.slug}.png`),
           datePublished: post.date,
           dateModified: post.updated ?? post.date,
           keywords: post.tags.join(", "),

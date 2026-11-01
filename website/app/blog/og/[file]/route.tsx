@@ -1,16 +1,21 @@
 import { ImageResponse } from "next/og";
 import { postBySlug, posts } from "@/lib/posts";
 
-export const size = { width: 1200, height: 630 };
-export const contentType = "image/png";
-export const alt = "Hive blog post";
+// /blog/og/<slug>.png: a real .png path, so the static export and the
+// trailing-slash rule leave it alone (an extensionless opengraph-image got
+// redirected and served as application/octet-stream).
+
+const size = { width: 1200, height: 630 };
+
+export const dynamic = "force-static";
+export const dynamicParams = false;
 
 export function generateStaticParams() {
-  return posts.map((p) => ({ slug: p.slug }));
+  return posts.map((p) => ({ file: `${p.slug}.png` }));
 }
 
-export default async function Image({ params }: { params: Promise<{ slug: string }> }) {
-  const post = postBySlug((await params).slug);
+export async function GET(_: Request, { params }: { params: Promise<{ file: string }> }) {
+  const post = postBySlug((await params).file.replace(/\.png$/, ""));
   return new ImageResponse(
     (
       <div
