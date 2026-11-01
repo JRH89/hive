@@ -58,11 +58,9 @@ export const metadata: Metadata = {
     type: "website",
     locale: "en_US",
   },
-  twitter: {
-    card: "summary_large_image",
-    title: "Hive — One terminal. Many agents.",
-    description,
-  },
+  // Card only: a title here would be inherited by every page. X falls back
+  // to each page's og:title and og:description.
+  twitter: { card: "summary_large_image" },
 };
 
 export const viewport: Viewport = {

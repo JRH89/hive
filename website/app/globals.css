@@ -3426,3 +3426,42 @@ body { padding-top: 92px; }
     gap: 20px;
   }
 }
+.feature-summary {
+  color: var(--text) !important;
+}
+.feature-shot {
+  margin: 0;
+  align-self: start;
+}
+.feature-shot img {
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.agent-catalog {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: start;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.agent-catalog li {
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+.agent-catalog li span {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.agent-catalog a:hover {
+  color: var(--amber);
+}
+.feature h3 a:hover {
+  color: var(--amber);
+}

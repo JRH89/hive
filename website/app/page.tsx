@@ -29,6 +29,7 @@ const Arrow = () => <Icon name="arrow" size={17} />;
 const features = [
   {
     number: "01",
+    href: "/features/#agent-status",
     symbol: "terminal" as const,
     title: "Your agents. As they are.",
     text: "Claude Code, Codex, Gemini CLI, OpenCode, truss and twenty more. Hive recognises the agent, even one started from a shell, and shows whether it is working, needs you, or is done. Its prompts and permissions stay intact.",
@@ -36,6 +37,7 @@ const features = [
   },
   {
     number: "02",
+    href: "/features/#persistent-sessions",
     symbol: "layers" as const,
     title: "Leave the terminal. Keep the session.",
     text: "The daemon owns the process. Detach from Hive or close its frontend, and your agent stays running. Open Hive again to pick up the live session.",
@@ -43,6 +45,7 @@ const features = [
   },
   {
     number: "03",
+    href: "/features/#panes-and-tabs",
     symbol: "keyboard" as const,
     title: "Terminal first.",
     text: "Click + new and you get a terminal. Type claude or codex to start an agent, cd anywhere first. A leader key handles Hive commands, tmux-style splits and tabs keep several agents in view, and the mouse works too.",
@@ -50,6 +53,7 @@ const features = [
   },
   {
     number: "04",
+    href: "/features/#spaces",
     symbol: "branch" as const,
     title: "Every project in its place.",
     text: "Each repository you work in is a space with its own tabs, and a terminal follows you when you cd into another repo. Ctrl+Space C opens a terminal in its own worktree, so two agents never edit the same checkout.",
@@ -57,6 +61,7 @@ const features = [
   },
   {
     number: "05",
+    href: "/features/#command-palette",
     symbol: "search" as const,
     title: "Find anything in a keystroke.",
     text: "A fuzzy command palette for every action, session and workspace. Rebind any key, pick a theme, and it still works in 16 colours or plain ASCII.",
@@ -64,6 +69,7 @@ const features = [
   },
   {
     number: "06",
+    href: "/features/#several-windows",
     symbol: "detach" as const,
     title: "Survives the bumps.",
     text: "The interface reconnects on its own if the daemon restarts. Open a session in two windows: one types, the other watches, and taking over is explicit.",
@@ -122,7 +128,7 @@ const structuredData = [
     operatingSystem: "Linux, macOS, Windows",
     softwareVersion: "0.4.12",
     downloadUrl: `${repoUrl}/releases/latest`,
-    installUrl: siteUrl + "#get-started",
+    installUrl: `${siteUrl}install/`,
     license: "https://opensource.org/licenses/MIT",
     codeRepository: repoUrl,
     programmingLanguage: "Rust",
@@ -247,7 +253,9 @@ export default function Home() {
             <p className="section-aside">
               Native processes. Familiar commands.
               <br />
-              Everything in its place.
+              <a className="text-link" href="/features/">
+                every feature in detail <Arrow />
+              </a>
             </p>
           </div>
           <div className="features-grid">
@@ -259,7 +267,9 @@ export default function Home() {
                     <Icon name={feature.symbol} size={24} />
                   </span>
                 </div>
-                <h3>{feature.title}</h3>
+                <h3>
+                  <a href={feature.href}>{feature.title}</a>
+                </h3>
                 <p>{feature.text}</p>
                 <span className="feature-foot">{feature.foot}</span>
               </article>
