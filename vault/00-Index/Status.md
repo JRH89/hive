@@ -12,7 +12,7 @@ updated: 2026-10-31
 
 **Phase 9 (macOS) done**: CI runs clippy, tests and smoke on macos-14; release builds aarch64/x86_64-apple-darwin ([[Phase 9 - macOS]]). **Phase 10 (Windows) done** ([[Phase 10 - Windows]]); **Released v0.4.0** (2026-10-31): Linux, macOS and Windows binaries, `install.ps1`.
 
-**Released v0.4.9** (2026-10-31): layouts (`[layouts.*]`, leader `L`, [[ADR-0023 Layouts are client-side]]). v0.4.8: right-click menus, git status + usage integrations, Why Hive page. v0.4.7: AGENTS lists every agent; website integrations section. v0.4.6: "+ new" opens a new space (protocol v7). v0.4.5: a space for every folder (not just repos). v0.4.4: spaces follow cd, worktree terminals (leader `C`), README screenshots, website changelog + RSS (`/changelog/rss.xml`).
+**Released v0.4.10** (2026-10-31): maintenance (restore_workspace ignored, CI on Node 24). v0.4.9: layouts (`[layouts.*]`, leader `L`, [[ADR-0023 Layouts are client-side]]). v0.4.8: right-click menus, git status + usage integrations, Why Hive page. v0.4.7: AGENTS lists every agent; website integrations section. v0.4.6: "+ new" opens a new space (protocol v7). v0.4.5: a space for every folder (not just repos). v0.4.4: spaces follow cd, worktree terminals (leader `C`), README screenshots, website changelog + RSS (`/changelog/rss.xml`).
 
 **Open:** none. (`restore_workspace` is accepted and ignored so old configs load; removed from the spec.)
 
