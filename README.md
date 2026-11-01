@@ -27,7 +27,7 @@ Run Claude Code, Codex, Gemini CLI, OpenCode or any shell side by side, see at a
 </table>
 
 ## Integrations
-Optional, off by default and invisible until enabled. Each opens as an ordinary session beside your agents.
+Optional and off by default: hidden from the palette until enabled, and their keys say how to turn them on. Each opens as an ordinary session beside your agents.
 
 | Integration | Key | What it does |
 |---|---|---|
@@ -75,7 +75,7 @@ curl -fsSL https://github.com/jrh89/hive/releases/latest/download/install.sh | s
 irm https://github.com/jrh89/hive/releases/latest/download/install.ps1 | iex
 ```
 
-The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.4.10` to pin a version. Later, `hive update` upgrades in place (then `hive daemon stop` to restart the daemon on the new version; this ends running sessions).
+The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.4.11` to pin a version. Later, `hive update` upgrades in place (then `hive daemon stop` to restart the daemon on the new version; this ends running sessions).
 
 **From source** (Rust ≥ 1.89):
 
@@ -96,7 +96,7 @@ Keep `hive` and `hived` in the same directory. Run `hive doctor` to check the se
 
 **Keep agents out of each other's way.** Press `Ctrl+Space C`: the new terminal opens in its own worktree on a fresh branch `hive/shell-<id>`. Start an agent there. From the command line: `hive new codex -w` (or `-b my-branch`). List and clean up with `hive worktree list` / `hive worktree rm <path>`.
 
-**Watch two things at once.** `Ctrl+Space v` splits right, `-` splits below, `o` cycles focus, `z` zooms, `X` closes the pane (the session keeps running).
+**Watch two things at once.** `Ctrl+Space v` splits right, `-` splits below, `o` cycles focus, `z` zooms, `X` closes the pane and ends its session (a running agent asks first). To leave sessions running, detach instead.
 
 **Walk away.** `Ctrl+Space d` detaches. Everything keeps running in `hived`. Run `hive` again to come back. Sessions survive the terminal, SSH drops and sleep, but not a reboot (they come back marked `◌` ended; press enter to relaunch).
 

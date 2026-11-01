@@ -10,6 +10,16 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    version: "0.4.11",
+    date: "2026-10-31T17:00:00-07:00",
+    title: "Closing ends the session",
+    changes: [
+      "Closing a pane (Ctrl+Space X) or a tab ends its sessions instead of hiding them, so nothing keeps running out of sight. Plain terminals close at once; if a running agent would stop, Hive asks first. Detach to leave everything running.",
+      "Terminating a session sends SIGHUP like closing a terminal window, so shells exit right away instead of after a 3-second timeout.",
+      "The key of an integration that is off (e.g. Ctrl+Space U) now says how to turn it on instead of doing nothing.",
+    ],
+  },
+  {
     version: "0.4.10",
     date: "2026-10-31T21:54:01-07:00",
     title: "Maintenance",

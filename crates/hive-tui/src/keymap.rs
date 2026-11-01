@@ -160,11 +160,11 @@ impl Command {
             Command::SplitDown => "Split: terminal below",
             Command::FocusNextPane => "Focus the next pane",
             Command::Zoom => "Zoom the pane (toggle)",
-            Command::ClosePane => "Close the pane (session keeps running)",
+            Command::ClosePane => "Close the pane (terminates its session)",
             Command::NewTab => "New tab (a terminal)",
             Command::NextTab => "Next tab",
             Command::PrevTab => "Previous tab",
-            Command::CloseTab => "Close the tab (sessions keep running)",
+            Command::CloseTab => "Close the tab (terminates its sessions)",
             Command::Notes => "Open the workspace's notes (Obsidian vault)",
             Command::Review => "Review changes in the session's directory",
             Command::PullRequest => "Pull request checks for the session's branch",
@@ -403,6 +403,9 @@ pub struct Keymap {
     pub leader: KeySpec,
     bindings: Vec<(KeySpec, Command)>,
     globals: Vec<(KeySpec, Command)>,
+    /// Leader keys of hidden (disabled) commands, so pressing one can say
+    /// how to turn it on.
+    disabled: Vec<(KeySpec, Command)>,
     /// Modifiers that turn 1-9 into global session jumps; empty when off.
     jump: KeyModifiers,
 }
@@ -488,12 +491,33 @@ impl Keymap {
                 bindings.push((spec, cmd));
             }
         }
+        let mut disabled = Vec::new();
+        for &cmd in hidden {
+            let keys: Vec<&str> = match cfg.bind.get(cmd.name()) {
+                Some(list) => list.keys(),
+                None => cmd.default_keys().to_vec(),
+            };
+            for spec in keys.into_iter().filter_map(|k| KeySpec::parse(k).ok()) {
+                if !bindings.iter().any(|(s, _)| *s == spec) {
+                    disabled.push((spec, cmd));
+                }
+            }
+        }
         Ok(Keymap {
             leader,
             bindings,
             globals,
+            disabled,
             jump,
         })
+    }
+
+    /// The disabled command whose leader key `key` would be.
+    pub fn disabled(&self, key: &KeyEvent) -> Option<Command> {
+        self.disabled
+            .iter()
+            .find(|(spec, _)| spec.matches(key))
+            .map(|(_, c)| *c)
     }
 
     /// The global chord `key` triggers, if any.

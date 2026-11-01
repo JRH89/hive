@@ -722,16 +722,24 @@ fn hive_bin() -> Option<PathBuf> {
     bin.is_file().then_some(bin)
 }
 
-/// SIGTERM (or with `force`, SIGKILL) to the process group led by `pid`.
+/// SIGHUP and SIGTERM (or with `force`, SIGKILL) to the process group led
+/// by `pid`. SIGHUP is what closing a terminal sends: interactive shells
+/// ignore SIGTERM but exit on it.
 #[cfg(unix)]
 fn signal_group(pid: u32, force: bool) {
     use rustix::process::{Pid, Signal};
     let Some(pid) = Pid::from_raw(pid as i32) else {
         return;
     };
-    let sig = if force { Signal::KILL } else { Signal::TERM };
-    if rustix::process::kill_process_group(pid, sig).is_err() {
-        let _ = rustix::process::kill_process(pid, sig);
+    let sigs: &[Signal] = if force {
+        &[Signal::KILL]
+    } else {
+        &[Signal::HUP, Signal::TERM]
+    };
+    for &sig in sigs {
+        if rustix::process::kill_process_group(pid, sig).is_err() {
+            let _ = rustix::process::kill_process(pid, sig);
+        }
     }
 }
 

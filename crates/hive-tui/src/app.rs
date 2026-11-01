@@ -103,6 +103,8 @@ pub enum Mode {
     },
     /// Close a space: terminate its sessions (asks first).
     ConfirmCloseSpace(WorkspaceId),
+    /// Closing tab `n` would terminate a running agent.
+    ConfirmCloseTab(usize),
     /// Searchable list of commands, sessions and workspaces. `selected`
     /// indexes `App::palette_items()`.
     Palette {
@@ -335,8 +337,6 @@ pub struct App {
     space_tab: BTreeMap<WorkspaceId, usize>,
     /// A space this client asked for: open a terminal in it once created.
     pending_space: Option<PathBuf>,
-    /// Sessions whose tab was closed here: not given a tab again.
-    dismissed: BTreeSet<SessionId>,
 }
 
 /// Result of a key in a one-line text prompt.
@@ -466,6 +466,23 @@ fn default_review_command() -> Vec<String> {
 
 /// Commands of integrations that are switched off: no keys, no palette
 /// entries, no help lines.
+/// How to turn on a command `hidden_commands` hides.
+fn enable_hint(cmd: Command) -> String {
+    let section = match cmd {
+        Command::Notes => "[integrations.obsidian]",
+        Command::Review => "[integrations.review]",
+        Command::PullRequest => "[integrations.github]",
+        Command::RunTask => "[integrations.tasks]",
+        Command::Usage => "[integrations.usage]",
+        Command::Layout => return "No layouts yet: add a [layouts.<name>] to config.toml".into(),
+        _ => return format!("{} is turned off", cmd.name()),
+    };
+    format!(
+        "{} is off. Turn it on with {section} enabled = true in config.toml",
+        cmd.title()
+    )
+}
+
 pub fn hidden_commands(config: &Config) -> Vec<Command> {
     let mut hidden = Vec::new();
     let i = &config.integrations;
@@ -528,7 +545,6 @@ impl App {
             space: None,
             space_tab: BTreeMap::new(),
             pending_space: None,
-            dismissed: BTreeSet::new(),
         };
         app.set_terminal_size(terminal);
         if let Some(e) = key_error {
@@ -1282,7 +1298,6 @@ impl App {
             }
             ServerMessage::SessionRemoved(id) => {
                 self.sessions.remove(&id);
-                self.dismissed.remove(&id);
                 self.done.remove(&id);
                 out.extend(self.drop_pane(id));
                 if matches!(&self.status, Some((Tone::Info, m)) if *m == terminating(id)) {
@@ -1360,7 +1375,7 @@ impl App {
         let mut ids: Vec<SessionId> = self
             .sessions
             .values()
-            .filter(|s| s.state.is_alive() && !self.dismissed.contains(&s.id))
+            .filter(|s| s.state.is_alive())
             .map(|s| s.id)
             .collect();
         ids.sort_unstable();
@@ -1584,6 +1599,15 @@ impl App {
             Mode::Rename { .. } => self.on_rename_key(key),
             Mode::Menu { .. } => self.on_menu_key(key),
             Mode::RenameTab { .. } => self.on_rename_tab_key(key),
+            Mode::ConfirmCloseTab(i) => {
+                self.mode = Mode::Normal;
+                if !matches!(key.code, KeyCode::Char('y' | 'Y')) {
+                    self.status = None;
+                    return Vec::new();
+                }
+                let ids = self.tabs.get(i).map(|t| t.root.panes()).unwrap_or_default();
+                self.terminate(ids)
+            }
             Mode::ConfirmCloseSpace(w) => {
                 self.mode = Mode::Normal;
                 if !matches!(key.code, KeyCode::Char('y' | 'Y')) {
@@ -1686,10 +1710,13 @@ impl App {
         if let Some(n) = digit(&key) {
             return self.switch_nth(n);
         }
-        match self.keymap.command(&key) {
-            Some(cmd) => self.run(cmd),
-            None => Vec::new(),
+        if let Some(cmd) = self.keymap.command(&key) {
+            return self.run(cmd);
         }
+        if let Some(cmd) = self.keymap.disabled(&key) {
+            self.set_status(Tone::Info, enable_hint(cmd));
+        }
+        Vec::new()
     }
 
     /// Runs a command from a leader key or the palette.
@@ -2014,40 +2041,44 @@ impl App {
         out
     }
 
-    /// Takes the focused pane out of its tab; the session keeps running.
-    /// The last pane of a tab closes the tab, unless it is the only one.
+    /// Closes the focused pane by terminating its session. Its pane (and
+    /// an emptied tab) goes when the daemon removes the session.
     fn close_pane(&mut self) -> Vec<ClientMessage> {
         let Some(id) = self.focused() else {
             return Vec::new();
         };
-        let before = self.tab_sessions();
-        if before.len() > 1 {
-            let Some(i) = self.tab_index() else {
-                return Vec::new();
-            };
-            self.dismissed.insert(id);
-            self.tabs[i].remove(id);
-            self.cursor = self.focused();
-            return self.sync_panes(before);
-        }
-        self.close_tab()
+        self.close_sessions(vec![id], Mode::ConfirmKill(id))
     }
 
-    /// Closes the active tab; its sessions keep running.
+    /// Closes the active tab by terminating its sessions.
     fn close_tab(&mut self) -> Vec<ClientMessage> {
-        if self.tabs.len() < 2 || self.tab_index().is_none() {
-            self.set_status(
-                Tone::Info,
-                "This is the only tab. Sessions keep running; detach to leave.",
-            );
+        let Some(i) = self.tab_index() else {
+            return Vec::new();
+        };
+        let ids = self.tab_sessions();
+        self.close_sessions(ids, Mode::ConfirmCloseTab(i))
+    }
+
+    /// Terminates `ids` at once, or asks with `confirm` first if that would
+    /// end a running agent.
+    fn close_sessions(&mut self, ids: Vec<SessionId>, confirm: Mode) -> Vec<ClientMessage> {
+        let agent = ids.iter().any(|id| {
+            self.sessions
+                .get(id)
+                .is_some_and(|s| s.state.is_alive() && is_agent(s))
+        });
+        if agent {
+            self.mode = confirm;
             return Vec::new();
         }
-        let before = self.tab_sessions();
-        self.dismissed.extend(before.iter().copied());
-        self.tabs.remove(self.tab);
-        self.tab = self.tab.min(self.tabs.len() - 1);
-        self.cursor = self.focused();
-        self.sync_panes(before)
+        self.terminate(ids)
+    }
+
+    fn terminate(&mut self, ids: Vec<SessionId>) -> Vec<ClientMessage> {
+        if let [id] = ids[..] {
+            self.set_status(Tone::Info, terminating(id));
+        }
+        ids.into_iter().map(ClientMessage::KillSession).collect()
     }
 
     /// Selects a space: shows its focused-last agent, or just lists it
@@ -3378,13 +3409,16 @@ mod tests {
             size: right,
         });
 
-        // Closing a pane detaches it (the session keeps running) and the
-        // other pane takes the whole panel.
+        // Closing an agent's pane asks, then terminates it; once it's gone
+        // the other pane takes the whole panel.
         app.on_terminal_event(leader());
-        let out = app.on_terminal_event(ch('X'));
-        assert_eq!(out[0], ClientMessage::Detach { session: Some(4) });
+        assert!(app.on_terminal_event(ch('X')).is_empty());
+        assert_eq!(
+            app.on_terminal_event(ch('y')),
+            [ClientMessage::KillSession(4)]
+        );
+        let out = app.on_server(ServerMessage::SessionRemoved(4));
         assert_eq!(sizes(&out), vec![(1, full)]);
-        assert!(app.sessions.contains_key(&4));
     }
 
     #[test]
@@ -3440,18 +3474,33 @@ mod tests {
         assert_eq!(app.tabs.len(), 3);
         assert!(app.tabs.iter().all(|t| !t.root.contains(5)));
 
-        // A closed tab stays closed while its session keeps running.
-        app.run(Command::CloseTab);
-        let n = app.tabs.len();
-        app.on_server(ServerMessage::SessionUpdated(info(
-            2,
-            SessionState::Running,
-        )));
-        app.on_server(ServerMessage::SessionUpdated(info(
-            3,
-            SessionState::Running,
-        )));
-        assert_eq!(app.tabs.len(), n);
+        // Closing a tab terminates its sessions; a running agent asks first.
+        let tab = app.tab;
+        let ids = app.tab_sessions();
+        assert!(app.run(Command::CloseTab).is_empty());
+        assert_eq!(app.mode, Mode::ConfirmCloseTab(tab));
+        let out = app.on_terminal_event(ch('y'));
+        let kills: Vec<_> = ids
+            .iter()
+            .map(|&id| ClientMessage::KillSession(id))
+            .collect();
+        assert_eq!(out, kills);
+    }
+
+    #[test]
+    fn closing_a_terminal_pane_terminates_it_at_once() {
+        let mut app = app();
+        let mut shell = info(1, SessionState::Running);
+        shell.agent = "shell".into();
+        app.on_server(ServerMessage::SessionUpdated(shell));
+        assert_eq!(app.run(Command::ClosePane), [ClientMessage::KillSession(1)]);
+        assert_eq!(app.mode, Mode::Normal);
+        // An agent asks first.
+        let out = app.show(2);
+        drop(out);
+        attached(&mut app, 2);
+        assert!(app.run(Command::ClosePane).is_empty());
+        assert_eq!(app.mode, Mode::ConfirmKill(2));
     }
 
     #[test]
@@ -3491,7 +3540,9 @@ mod tests {
         assert!(!palette_has(&mut app, Command::Notes));
         app.on_terminal_event(leader());
         assert!(app.on_terminal_event(ch('N')).is_empty());
-        assert_eq!(app.status, None);
+        assert!(
+            matches!(&app.status, Some((Tone::Info, m)) if m.contains("[integrations.obsidian]"))
+        );
         // A user binding N to something else doesn't clash with the default.
         let mut config = Config::default();
         config.keys.bind.insert(
@@ -3602,6 +3653,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut off = App::new(Config::default(), Start::Attach(1), (100, 26));
         assert!(!palette_has(&mut off, Command::Usage));
+
+        // Its key explains how to turn it on.
+        off.on_terminal_event(leader());
+        assert!(off.on_terminal_event(ch('U')).is_empty());
+        assert!(
+            matches!(&off.status, Some((Tone::Info, m)) if m.contains("[integrations.usage] enabled = true"))
+        );
 
         let mut app = integrated(dir.path());
         app.config.integrations.usage.enabled = true;

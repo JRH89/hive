@@ -756,6 +756,16 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             Span::styled(theme.glyphs.caret, key),
             Span::styled("  enter save · esc cancel · empty clears", muted),
         ],
+        Mode::ConfirmCloseTab(i) => {
+            let n = app.tabs.get(*i).map_or(0, |t| t.root.panes().len());
+            vec![Span::styled(
+                format!(
+                    " Close tab {} and terminate its {n} session(s)? y to confirm, any other key cancels ",
+                    i + 1
+                ),
+                bar.fg(theme.warning).add_modifier(Modifier::BOLD),
+            )]
+        }
         Mode::ConfirmCloseSpace(w) => {
             let alive = app
                 .sessions
