@@ -10,7 +10,7 @@ export type Release = {
 
 export const releases: Release[] = [
   {
-    version: "0.4.11",
+    version: "0.4.12",
     date: "2026-10-31T17:00:00-07:00",
     title: "Closing ends the session",
     changes: [
