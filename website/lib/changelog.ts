@@ -11,7 +11,7 @@ export type Release = {
 export const releases: Release[] = [
   {
     version: "0.4.10",
-    date: "2026-10-31T17:00:00-07:00",
+    date: "2026-10-31T21:54:01-07:00",
     title: "Maintenance",
     changes: [
       "The unused [general] restore_workspace setting is now ignored explicitly; configs that set it still load.",
