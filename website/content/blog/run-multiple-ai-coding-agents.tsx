@@ -56,7 +56,8 @@ cd ../shop-login-fix && claude`}</code>
         sidebar for every agent in every project, even agents you started by typing{" "}
         <code>claude</code> in a plain terminal. Agents it has no rules for show as unknown rather
         than a guess. Your own scripts can report their state with <code>hive report-agent</code>
-        , and the optional desktop notifications call you back when something needs you.
+        , and the optional desktop notifications call you back when something needs you. (More on{" "}
+        <a href="/blog/get-notified-when-claude-code-needs-input/">notifications for Claude Code and Codex</a>.)
       </p>
 
       <h2 id="sessions-survive">3. Keep sessions alive when the terminal goes away</h2>
@@ -69,7 +70,8 @@ cd ../shop-login-fix && claude`}</code>
         <code>hived</code>, owns the agents&apos; terminals. Detach with <kbd>Ctrl+Space</kbd>{" "}
         <kbd>d</kbd> or just close the window, and the agents keep working. Run <code>hive</code>{" "}
         again to pick up exactly where you were. (A reboot or a sleeping laptop still stops them;
-        for agents that run overnight, use an always-on machine and connect over SSH.)
+        for agents that run overnight, use an always-on machine and connect over SSH; see{" "}
+        <a href="/blog/keep-claude-code-running-after-closing-terminal/">keeping agents running</a>.)
       </p>
 
       <h2 id="one-place-per-project">4. One place per project</h2>
@@ -108,7 +110,10 @@ cd ../shop-login-fix && claude`}</code>
           shows <em>done</em>, review the diff (<kbd>Ctrl+Space</kbd> <kbd>G</kbd> opens lazygit
           beside the agent if you enable review).
         </li>
-        <li>Merge the branches you want. Remove worktrees you don&apos;t need.</li>
+        <li>
+          <a href="/blog/review-ai-agent-changes-before-commit/">Review</a> and merge the branches
+          you want. Remove worktrees you don&apos;t need.
+        </li>
       </ol>
       <p>
         None of this needs a cloud service or an account: it all runs locally, and the agents run

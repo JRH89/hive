@@ -4,7 +4,7 @@
 <p align="center"><b>One terminal. Many agents.</b><br>A lightweight, Rust-powered terminal multiplexer for AI coding agents.</p>
 <p align="center"><a href="https://hive.codefrontlabs.com">Website</a> · <a href="https://hive.codefrontlabs.com/changelog">Changelog</a> · <a href="docs/user-guide.md">User guide</a> · <a href="https://github.com/jrh89/hive/releases/latest">Download</a></p>
 
-<p align="center"><img src="assets/screenshots/main.png" alt="Hive with a shop space: Claude working in one pane, git log in a split beside it, Codex waiting for input in another tab"></p>
+<p align="center"><img src="assets/demo.gif" alt="Hive demo: Claude working with live status, Codex in its own worktree waiting for approval, a terminal moving to another space on cd, the command palette, detach and reattach" width="880"></p>
 
 Run Claude Code, Codex, Gemini CLI, OpenCode or any shell side by side, see at a glance which one is working, which one needs you and which one is done, and close the window without stopping any of them. Binaries for Linux, macOS and Windows.
 

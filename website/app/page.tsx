@@ -113,6 +113,18 @@ const faqs = [
   ],
 ];
 
+const demoVideo = {
+  "@type": "VideoObject",
+  "@id": `${siteUrl}#demo`,
+  name: "Hive demo: several AI coding agents in one terminal",
+  description:
+    "Hive running Claude Code and Codex side by side: live status in the sidebar, Codex in its own git worktree waiting for approval, a terminal moving to another space on cd, the command palette, and detaching and reattaching without losing the agents.",
+  thumbnailUrl: `${siteUrl}demo/hive-demo.png`,
+  contentUrl: `${siteUrl}demo/hive-demo.mp4`,
+  uploadDate: "2026-11-01T11:20:00-07:00",
+  duration: "PT35S",
+};
+
 const structuredData = [
   {
     "@context": "https://schema.org",
@@ -135,6 +147,7 @@ const structuredData = [
     isAccessibleForFree: true,
     offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
     screenshot: `${siteUrl}screenshots/main.png`,
+    subjectOf: { "@id": `${siteUrl}#demo` },
     featureList: [
       "Live status for 20+ AI coding agents: working, needs input, done",
       "Sessions owned by a background daemon that survive closing the terminal",
@@ -146,6 +159,7 @@ const structuredData = [
     author: { "@type": "Person", "@id": `${siteUrl}#author`, name: "Jared Hooker", url: "https://github.com/jrh89" },
     publisher: { "@id": `${siteUrl}#organization` },
   },
+  { "@context": "https://schema.org", ...demoVideo },
   {
     "@context": "https://schema.org",
     "@type": "FAQPage",
@@ -338,8 +352,25 @@ journal = true        # log agent activity to today's note`}</code>
             </p>
           </div>
           <div className="screens">
+            <figure>
+              <video
+                src="/demo/hive-demo.mp4"
+                poster="/demo/hive-demo.png"
+                width={1040}
+                height={636}
+                autoPlay
+                muted
+                loop
+                playsInline
+                preload="metadata"
+                aria-label={demoVideo.description}
+              />
+              <figcaption>
+                Spaces, a worktree agent waiting for approval, detach and reattach. Recorded in a
+                real Hive; the agents&apos; output is scripted for the demo.
+              </figcaption>
+            </figure>
             {[
-              ["main", "Claude working beside a git log split, in the shop space"],
               ["worktree", "Codex in its own worktree, waiting for approval"],
               ["palette", "The command palette: Ctrl+Space :"],
             ].map(([name, caption]) => (

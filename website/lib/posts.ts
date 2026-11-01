@@ -14,6 +14,42 @@ export type Post = {
 
 export const posts: Post[] = [
   {
+    slug: "get-notified-when-claude-code-needs-input",
+    title: "How to get notified when Claude Code or Codex needs input",
+    description:
+      "Get a desktop notification when Claude Code or Codex stops at a permission prompt or finishes: Claude Code hooks, Codex settings, and one setup for all agents.",
+    date: "2026-11-01T12:40:00-07:00",
+    tags: ["Guide", "Claude Code", "Codex"],
+    minutes: 5,
+  },
+  {
+    slug: "keep-claude-code-running-after-closing-terminal",
+    title: "How to keep Claude Code running after you close the terminal",
+    description:
+      "Why closing the terminal or SSH kills Claude Code and Codex, and four fixes: tmux, headless mode, Hive, and an always-on machine. Plus how to resume.",
+    date: "2026-11-01T12:30:00-07:00",
+    tags: ["Guide", "Claude Code"],
+    minutes: 5,
+  },
+  {
+    slug: "review-ai-agent-changes-before-commit",
+    title: "How to review an AI coding agent's changes before you commit",
+    description:
+      "A five-step review routine for code written by Claude Code, Codex and other agents: isolate, overview, read by hunk, what to watch for, and run it yourself.",
+    date: "2026-11-01T12:20:00-07:00",
+    tags: ["Guide", "Git", "Workflow"],
+    minutes: 6,
+  },
+  {
+    slug: "zellij-vs-hive-for-ai-coding-agents",
+    title: "Zellij or Hive for AI coding agents?",
+    description:
+      "Zellij and Hive compared for running Claude Code, Codex and other agents: what Zellij does well, what agents need, and which to use when.",
+    date: "2026-11-01T12:10:00-07:00",
+    tags: ["Comparison"],
+    minutes: 5,
+  },
+  {
     slug: "hive-0-4-spaces-layouts-integrations",
     title: "Hive 0.4: spaces, layouts and integrations",
     description:
