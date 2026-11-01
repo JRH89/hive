@@ -502,7 +502,9 @@ async fn kill_hangs_up_on_a_shell_that_ignores_sigterm() {
     let dir = tempfile::tempdir().unwrap();
     let marker = dir.path().join("hup");
     let script = format!(
-        "trap '' TERM; trap 'touch {}; exit' HUP; echo armed; while :; do sleep 1; done",
+        // Builtins only (`read`, a redirect): nothing to fork, so the trap
+        // finishes long before the SIGKILL fallback even on a slow machine.
+        "trap '' TERM; trap ': > {}; exit' HUP; echo armed; while :; do read x; done",
         marker.display()
     );
     let id = create(&mut c, sh(&script, TermSize::DEFAULT)).await;
