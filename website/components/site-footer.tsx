@@ -10,6 +10,7 @@ export function SiteFooter() {
       <span>A Codefront Labs product. Built with Rust.</span>
       <nav aria-label="Footer navigation">
         <a href="/install/">Install</a>
+        <a href="/features/">Features</a>
         <a href="/integrations/">Integrations</a>
         <a href="/why/">Why Hive</a>
         <a href="/blog/">Blog</a>

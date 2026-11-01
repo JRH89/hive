@@ -38,7 +38,7 @@ export function SiteHeader() {
         <nav id="main-navigation" aria-label="Main navigation" className={`main-navigation ${open ? "is-open" : ""}`} onClick={() => setOpen(false)} onBlur={(event) => {
           if (!event.currentTarget.contains(event.relatedTarget) && event.relatedTarget !== toggle.current) setOpen(false);
         }}>
-          <a className="nav-link" href="/#features">Features</a>
+          <a className="nav-link" href="/features/">Features</a>
           <a className="nav-link" href="/integrations/">Integrations</a>
           <a className="nav-link" href="/why/">Why Hive</a>
           <a className="nav-link" href="/blog/">Blog</a>

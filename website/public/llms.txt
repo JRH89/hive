@@ -1,0 +1,23 @@
+# Hive
+
+> Hive is an open-source (MIT) terminal multiplexer for AI coding agents, written in Rust. It runs Claude Code, Codex, Gemini CLI, OpenCode and other agent CLIs side by side in real terminals on Linux, macOS and Windows, shows which agent is working, needs input or is done, and keeps sessions running in a local daemon (hived) when the terminal closes.
+
+Install on Linux or macOS: `curl -fsSL https://github.com/jrh89/hive/releases/latest/download/install.sh | sh`
+Install on Windows (PowerShell): `irm 'https://github.com/jrh89/hive/releases/latest/download/install.ps1' | iex`
+Source: https://github.com/jrh89/hive
+
+## Docs
+
+- [Features](https://hive.codefrontlabs.com/features/): live agent status, persistent sessions, spaces, git worktrees, panes, tabs, palette, keys, themes, platforms
+- [Install](https://hive.codefrontlabs.com/install/): installers for Linux, macOS and Windows, upgrading and uninstalling
+- [Integrations](https://hive.codefrontlabs.com/integrations/): Obsidian, lazygit review, GitHub PR checks, tasks, notifications, git status, usage, layouts, with config.toml snippets
+- [Why Hive](https://hive.codefrontlabs.com/why/): comparison with tmux, Zellij and herdr
+- [Changelog](https://hive.codefrontlabs.com/changelog/): every release
+- [User guide](https://github.com/jrh89/hive/blob/master/docs/user-guide.md): full reference for keys, commands and configuration
+
+## Articles
+
+- [How to run several AI coding agents at once](https://hive.codefrontlabs.com/blog/run-multiple-ai-coding-agents/)
+- [Git worktrees for AI coding agents: a practical guide](https://hive.codefrontlabs.com/blog/git-worktrees-for-ai-coding-agents/)
+- [tmux or Hive for Claude Code and Codex?](https://hive.codefrontlabs.com/blog/tmux-vs-hive-for-ai-coding-agents/)
+- [Hive 0.4: spaces, layouts and integrations](https://hive.codefrontlabs.com/blog/hive-0-4-spaces-layouts-integrations/)

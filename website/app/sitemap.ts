@@ -18,6 +18,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
   return [
     page("/", latest, 1),
     page("/install/", updated, 0.9),
+    page("/features/", "2026-11-01T12:00:00-07:00", 0.9),
     page("/integrations/", updated, 0.8),
     page("/why/", updated, 0.8),
     page("/blog/", posts[0].date, 0.7),
