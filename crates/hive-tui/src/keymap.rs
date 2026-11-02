@@ -50,11 +50,12 @@ pub enum Command {
     Help,
     Integrations,
     RestoreSessions,
+    SidebarTree,
     Settings,
 }
 
 impl Command {
-    pub const ALL: [Command; 39] = [
+    pub const ALL: [Command; 40] = [
         Command::Palette,
         Command::SearchSessions,
         Command::NewSession,
@@ -93,6 +94,7 @@ impl Command {
         Command::Help,
         Command::Integrations,
         Command::RestoreSessions,
+        Command::SidebarTree,
         Command::Settings,
     ];
 
@@ -137,6 +139,7 @@ impl Command {
             Command::Help => "help",
             Command::Integrations => "integrations",
             Command::RestoreSessions => "restore_sessions",
+            Command::SidebarTree => "sidebar_tree",
             Command::Settings => "settings",
         }
     }
@@ -182,6 +185,7 @@ impl Command {
             Command::Help => "Help",
             Command::Integrations => "Integrations: turn on and off",
             Command::RestoreSessions => "Restore ended sessions (after a restart)",
+            Command::SidebarTree => "Sidebar: one tree of spaces and agents, on or off",
             Command::Settings => "Settings (config file location)",
         }
     }
@@ -234,6 +238,7 @@ impl Command {
             Command::Layout => &["L"],
             Command::Integrations => &["I"],
             Command::RestoreSessions => &["R"],
+            Command::SidebarTree => &[],
             Command::NewWorktreeSession => &[],
             Command::AddWorkspace | Command::RenameWorkspace | Command::Settings => &[],
         }

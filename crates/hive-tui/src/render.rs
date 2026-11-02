@@ -1,7 +1,7 @@
 //! Drawing. Reads `App` only; never mutates state.
 
 use hive_core::brand;
-use hive_protocol::{SessionInfo, SessionState, WorkspaceId};
+use hive_protocol::{SessionId, SessionInfo, SessionState, WorkspaceId};
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
@@ -408,6 +408,9 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     if inner.height < 4 || inner.width < 6 {
         return;
     }
+    if app.config.general.sidebar_tree {
+        return draw_sidebar_tree(frame, inner, app, theme);
+    }
     let heading = Style::new().fg(theme.muted).add_modifier(Modifier::BOLD);
     let browsing = app.focus == Focus::Sidebar || app.sidebar_keys_active();
     let row = |y| Rect {
@@ -509,38 +512,7 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     if y + 3 > bottom {
         return;
     }
-    let half = inner.width / 2;
-    let button = Style::new().fg(theme.accent);
-    frame.render_widget(
-        Paragraph::new(Span::styled(" + new", button)),
-        Rect {
-            width: half,
-            ..row(y)
-        },
-    );
-    frame.render_widget(
-        Paragraph::new(Span::styled(
-            format!("{} menu ", theme.glyphs.running),
-            button,
-        ))
-        .alignment(Alignment::Right),
-        row(y),
-    );
-    hits.push((
-        Rect {
-            width: half,
-            ..row(y)
-        },
-        SidebarHit::New,
-    ));
-    hits.push((
-        Rect {
-            x: inner.x + half,
-            width: inner.width - half,
-            ..row(y)
-        },
-        SidebarHit::Menu,
-    ));
+    draw_sidebar_buttons(frame, row(y), &mut hits, theme);
     let rule = theme.glyphs.border.horizontal_top.repeat(width);
     frame.render_widget(
         Paragraph::new(Span::styled(rule, Style::new().fg(theme.surface))),
@@ -611,8 +583,240 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             },
             browsing && app.cursor == Some(*id),
             !app.sharing_dir(*id).is_empty(),
+            false,
             theme,
         );
+        y += 2;
+    }
+}
+
+/// "+ new" and "menu" on one row.
+fn draw_sidebar_buttons(
+    frame: &mut Frame,
+    row: Rect,
+    hits: &mut Vec<(Rect, SidebarHit)>,
+    theme: &Theme,
+) {
+    let half = row.width / 2;
+    let button = Style::new().fg(theme.accent);
+    let left = Rect { width: half, ..row };
+    let right = Rect {
+        x: row.x + half,
+        width: row.width - half,
+        ..row
+    };
+    frame.render_widget(Paragraph::new(Span::styled(" + new", button)), left);
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            format!("{} menu ", theme.glyphs.running),
+            button,
+        ))
+        .alignment(Alignment::Right),
+        right,
+    );
+    hits.push((left, SidebarHit::New));
+    hits.push((right, SidebarHit::Menu));
+}
+
+/// `[general] sidebar_tree`: each space with its agents indented under it.
+/// Space in the sidebar, or a click on the arrow, folds a space; a folded
+/// one shows the liveliest activity of its agents.
+fn draw_sidebar_tree(frame: &mut Frame, inner: Rect, app: &App, theme: &Theme) {
+    enum Item {
+        Space(WorkspaceId, usize),
+        Agent(SessionId, usize),
+    }
+    let heading = Style::new().fg(theme.muted).add_modifier(Modifier::BOLD);
+    let browsing = app.focus == Focus::Sidebar || app.sidebar_keys_active();
+    let row = |y| Rect {
+        y,
+        height: 1,
+        ..inner
+    };
+    let width = inner.width as usize;
+    let mut hits = app.sidebar_hits.borrow_mut();
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            " SPACES",
+            if browsing {
+                heading.fg(theme.accent)
+            } else {
+                heading
+            },
+        )),
+        row(inner.y),
+    );
+    let buttons = inner.y + inner.height - 1;
+    draw_sidebar_buttons(frame, row(buttons), &mut hits, theme);
+
+    let agents = app.agents();
+    let cursor_space = app
+        .cursor
+        .and_then(|id| app.sessions.get(&id))
+        .map(|s| s.workspace);
+    let mut items = Vec::new();
+    for (w, ids) in app.spaces() {
+        let mine: Vec<(usize, SessionId)> = agents
+            .iter()
+            .enumerate()
+            .filter(|(_, id)| app.sessions.get(id).is_some_and(|s| s.workspace == w))
+            .map(|(i, id)| (i, *id))
+            .collect();
+        items.push(Item::Space(
+            w,
+            if mine.is_empty() {
+                ids.len()
+            } else {
+                mine.len()
+            },
+        ));
+        if !app.collapsed.contains(&w) {
+            items.extend(mine.into_iter().map(|(i, id)| Item::Agent(id, i)));
+        }
+    }
+    let top = inner.y + 2;
+    let bottom = buttons.saturating_sub(1);
+    if items.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                "   no spaces yet",
+                Style::new().fg(theme.muted),
+            )),
+            row(top),
+        );
+        return;
+    }
+    // Every item is two rows; scroll to keep the cursor's in view.
+    let room = (bottom.saturating_sub(top) / 2).max(1) as usize;
+    let at = items
+        .iter()
+        .position(|it| match it {
+            Item::Agent(id, _) => app.cursor == Some(*id),
+            Item::Space(w, _) => app.collapsed.contains(w) && cursor_space == Some(*w),
+        })
+        .unwrap_or(0);
+    let start = (at + 1).saturating_sub(room);
+    let current = app.focused();
+    let shown = app.active_tab().map(|t| t.root.panes()).unwrap_or_default();
+    let space = app.shown_space();
+    let mut y = top;
+    for item in items.iter().skip(start) {
+        if y + 2 > bottom + 1 {
+            break;
+        }
+        match *item {
+            Item::Space(w, count) => {
+                let folded = app.collapsed.contains(&w);
+                let chosen = Some(w) == space;
+                let base = if browsing && folded && cursor_space == Some(w) {
+                    theme.cursor_row()
+                } else {
+                    Style::new()
+                };
+                let (dot, color) = match app.workspace_activity(w).filter(|a| *a != Activity::Idle)
+                {
+                    Some(a) => activity_dot(a, theme),
+                    None if chosen => (theme.glyphs.running, theme.accent),
+                    None => ("·", theme.muted),
+                };
+                let arrow = if folded {
+                    theme.glyphs.collapsed
+                } else {
+                    theme.glyphs.group
+                };
+                let name_style = if chosen {
+                    base.fg(theme.text).add_modifier(Modifier::BOLD)
+                } else {
+                    base.fg(theme.text)
+                };
+                let count = if count == 0 {
+                    String::new()
+                } else {
+                    format!("{count} ")
+                };
+                let name = truncate(
+                    theme,
+                    app.workspace_name(w),
+                    width.saturating_sub(6 + count.len()),
+                );
+                frame.render_widget(
+                    Paragraph::new(Line::from(vec![
+                        Span::styled(format!(" {arrow} "), base.fg(theme.muted)),
+                        Span::styled(format!("{dot} "), base.fg(color)),
+                        Span::styled(name, name_style),
+                    ]))
+                    .style(base),
+                    row(y),
+                );
+                frame.render_widget(
+                    Paragraph::new(Span::styled(count, base.fg(theme.muted)))
+                        .alignment(Alignment::Right),
+                    row(y),
+                );
+                let branch = space_branch(app, w).unwrap_or_default();
+                let git = app.git.get(&w).map(git_counts).unwrap_or_default();
+                let room = width.saturating_sub(5 + if git.is_empty() { 0 } else { git.len() + 1 });
+                let mut line = vec![Span::styled(
+                    format!("     {}", truncate(theme, &branch, room)),
+                    base.fg(theme.muted),
+                )];
+                if !git.is_empty() {
+                    line.push(Span::styled(format!(" {git}"), base.fg(theme.accent_dim)));
+                }
+                frame.render_widget(Paragraph::new(Line::from(line)).style(base), row(y + 1));
+                // The arrow folds; the rest of the row opens the space.
+                hits.push((
+                    Rect {
+                        width: 3,
+                        height: 2,
+                        ..row(y)
+                    },
+                    SidebarHit::Collapse(w),
+                ));
+                hits.push((
+                    Rect {
+                        height: 2,
+                        ..row(y)
+                    },
+                    SidebarHit::Workspace(w),
+                ));
+            }
+            Item::Agent(id, position) => {
+                let Some(s) = app.sessions.get(&id) else {
+                    continue;
+                };
+                let indent = |r: Rect| Rect {
+                    x: r.x + 3,
+                    width: r.width.saturating_sub(3),
+                    ..r
+                };
+                hits.push((
+                    Rect {
+                        height: 2,
+                        ..row(y)
+                    },
+                    SidebarHit::Session(id),
+                ));
+                draw_sidebar_session(
+                    frame,
+                    [indent(row(y)), indent(row(y + 1))],
+                    app,
+                    s,
+                    position,
+                    if current == Some(id) {
+                        Shown::Focused
+                    } else if shown.contains(&id) {
+                        Shown::Pane
+                    } else {
+                        Shown::No
+                    },
+                    browsing && app.cursor == Some(id),
+                    !app.sharing_dir(id).is_empty(),
+                    true,
+                    theme,
+                );
+            }
+        }
         y += 2;
     }
 }
@@ -636,6 +840,7 @@ fn draw_sidebar_session(
     shown: Shown,
     is_cursor: bool,
     shared: bool,
+    in_tree: bool,
     theme: &Theme,
 ) {
     let width = row1.width as usize;
@@ -692,7 +897,8 @@ fn draw_sidebar_session(
         .branch
         .clone()
         .unwrap_or_else(|| dir_name(&s.cwd).to_string());
-    let place = if spot == space || space.is_empty() {
+    // Under its space in the tree, the space's name would repeat.
+    let place = if spot == space || space.is_empty() || in_tree {
         spot
     } else {
         format!("{space} · {spot}")
@@ -1501,6 +1707,72 @@ mod tests {
         let mut config = Config::default();
         config.branding.show_tagline = false;
         assert!(!has_tagline(config));
+    }
+
+    #[test]
+    fn the_tree_sidebar_nests_agents_under_spaces_and_folds() {
+        let mut config = Config::default();
+        config.general.sidebar_tree = true;
+        let mut app = App::new(config, Start::Auto, (80, 20));
+        app.on_connect();
+        app.on_server(ServerMessage::WorkspaceList(vec![
+            workspace(1, "proj"),
+            workspace(2, "site"),
+        ]));
+        let mut web = session(3, "web", SessionState::Running);
+        web.workspace = 2;
+        app.on_server(ServerMessage::SessionList(vec![
+            session(1, "claude", SessionState::Running),
+            session(2, "api", SessionState::Running),
+            web,
+        ]));
+        let screen = rendered(&app, 80, 20);
+        let at = |text: &str| {
+            screen
+                .iter()
+                .position(|l| l[..l.char_indices().nth(26).unwrap().0].contains(text))
+                .unwrap_or_else(|| panic!("{text} missing:\n{}", screen.join("\n")))
+        };
+        assert!(!screen.join("\n").contains("AGENTS"));
+        // proj, its two agents indented, then site and its agent.
+        assert!(at("proj") < at("claude") && at("claude") < at("api"));
+        assert!(at("api") < at("site") && at("site") < at("web"));
+        assert!(screen[at("proj")].contains('▾'));
+        assert!(screen[at("api")].starts_with("    "), "indented");
+        assert!(screen.iter().any(|l| l.contains("+ new")));
+
+        app.toggle_collapsed(1);
+        let sidebar: Vec<String> = rendered(&app, 80, 20)
+            .iter()
+            .map(|l| l.chars().take(26).collect())
+            .collect();
+        let text = sidebar.join("\n");
+        assert!(text.contains("▸") && text.contains("proj"), "{text}");
+        // Only web's row is left (its detail line names the agent).
+        assert!(!text.contains(" api"), "{text}");
+        let dots = text
+            .lines()
+            .filter(|l| !l.contains("menu"))
+            .map(|l| l.matches('●').count());
+        assert_eq!(dots.sum::<usize>(), 2, "site and web only:\n{text}");
+        assert!(text.contains("web"));
+        // Clicking the arrow unfolds it.
+        let arrow = app
+            .sidebar_hits
+            .borrow()
+            .iter()
+            .find(|(_, h)| *h == SidebarHit::Collapse(1))
+            .map(|(r, _)| *r)
+            .unwrap();
+        app.on_terminal_event(crossterm::event::Event::Mouse(
+            crossterm::event::MouseEvent {
+                kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                column: arrow.x + 1,
+                row: arrow.y,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
+        ));
+        assert!(app.collapsed.is_empty());
     }
 
     #[test]

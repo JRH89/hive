@@ -29,6 +29,7 @@ export const keyGroups: KeyGroup[] = [
       { name: "workspaces", keys: ["w"], title: "Switch workspace (space)" },
       { name: "sidebar", keys: ["s", "tab"], title: "Focus the sidebar" },
       { name: "toggle_sidebar", keys: ["b"], title: "Show or hide the sidebar" },
+      { name: "sidebar_tree", keys: [], title: "Sidebar as one tree: agents under their space, foldable (on or off)" },
     ],
   },
   {
