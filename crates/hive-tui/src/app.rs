@@ -466,17 +466,11 @@ pub enum Effect {
     },
 }
 
-/// Whether an ended session goes away by itself: an agent or terminal that
-/// exited cleanly. Integration panes keep their output.
+/// Whether an ended session goes away by itself: an agent, terminal or
+/// interactive tool (notes, review) that exited cleanly. Panes whose output
+/// is the point (checks, tasks, usage, layout commands) stay.
 fn removed_on_exit(s: &SessionInfo) -> bool {
-    let kept = [
-        NOTES_AGENT,
-        REVIEW_AGENT,
-        GITHUB_AGENT,
-        TASK_AGENT,
-        USAGE_AGENT,
-        LAYOUT_AGENT,
-    ];
+    let kept = [GITHUB_AGENT, TASK_AGENT, USAGE_AGENT, LAYOUT_AGENT];
     matches!(s.state, SessionState::Exited { code: Some(0), .. })
         && !kept.contains(&s.agent.as_str())
 }
@@ -5059,6 +5053,18 @@ mod tests {
             app.on_server(ServerMessage::SessionUpdated(task))
                 .is_empty()
         );
+        // Quitting the notes app (q) or lazygit closes its pane.
+        for (id, tool) in [(7, NOTES_AGENT), (8, REVIEW_AGENT)] {
+            app.on_server(ServerMessage::SessionUpdated(SessionInfo {
+                agent: tool.into(),
+                ..info(id, SessionState::Running)
+            }));
+            let out = app.on_server(ServerMessage::SessionUpdated(SessionInfo {
+                agent: tool.into(),
+                ..info(id, quit.clone())
+            }));
+            assert_eq!(out, vec![ClientMessage::KillSession(id)], "{tool}");
+        }
         // Agents that quit while no window was open go on start.
         let mut fresh = App::new(Config::default(), Start::Auto, (100, 30));
         let out = fresh.on_server(ServerMessage::SessionList(vec![

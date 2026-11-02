@@ -10,6 +10,14 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    version: "0.5.1",
+    date: "2026-11-02T22:00:00-08:00",
+    title: "q closes the notes pane",
+    changes: [
+      "Quitting the notes app (q) or lazygit in the review pane now closes its pane, instead of leaving it behind to be terminated by hand. Pull request checks, tasks and usage still keep their output after they finish.",
+    ],
+  },
+  {
     version: "0.5.0",
     date: "2026-11-02T15:00:00-08:00",
     title: "Notes and context for your agents",
