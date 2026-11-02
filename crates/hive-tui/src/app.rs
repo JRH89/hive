@@ -4118,17 +4118,18 @@ mod tests {
         assert_eq!(req.cwd, vault.display().to_string());
         assert_eq!(req.workspace, Some(1));
 
-        // Opens in a new tab by default.
+        // In a split beside the session (the default).
         let mut notes = info(2, SessionState::Running);
         notes.agent = NOTES_AGENT.into();
         notes.cwd = req.cwd.clone();
         notes.command = req.command.clone();
         app.on_server(ServerMessage::SessionCreated(notes));
-        assert_eq!(app.tabs.len(), 2);
+        assert_eq!(app.tabs.len(), 1);
+        assert_eq!(app.tab_sessions().len(), 2);
         assert_eq!(app.focused(), Some(2));
 
-        // Asking again from the first tab goes back to that pane.
-        app.run(Command::PrevTab);
+        // Asking again from the other pane goes back to it.
+        app.run(Command::FocusNextPane);
         assert_eq!(app.focused(), Some(1));
         app.on_terminal_event(leader());
         let out = app.on_terminal_event(ch('N'));
@@ -4136,7 +4137,7 @@ mod tests {
             !out.iter()
                 .any(|m| matches!(m, ClientMessage::CreateSession(_)))
         );
-        assert_eq!((app.tab, app.focused()), (1, Some(2)));
+        assert_eq!(app.focused(), Some(2));
     }
 
     #[test]

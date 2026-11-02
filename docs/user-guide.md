@@ -118,16 +118,27 @@ Split the panel to watch several agents at once. Each pane is its own terminal a
 
 ### Notes (Obsidian, optional)
 
-If your repository holds an [Obsidian](https://obsidian.md) vault, Hive can open it beside your agents. It is off by default and adds nothing to the interface until you turn it on:
+If your repository holds a markdown or [Obsidian](https://obsidian.md) vault, Hive can open it beside your agents in its own notes app. It is off by default and adds nothing to the interface until you turn it on:
 
 ```toml
 [integrations.obsidian]
 enabled = true
-agent = ""          # "" opens $VISUAL/$EDITOR; or any agent name, e.g. "claude"
-open_in = "tab"     # or "split"
+agent = ""          # "" = Hive's notes app; or an [agents.*] name to use instead
+open_in = "split"   # or "tab"
 ```
 
-`Ctrl+Space N` (or "notes" in the palette) then opens the vault (the nearest folder with `.obsidian/` at or above the session's directory, or one level below the repository root) as a session labelled `notes · <vault>`. Asking again goes back to it.
+`Ctrl+Space N` (or "notes" in the palette) then opens `hive notes` on the vault (the nearest folder with `.obsidian/` at or above the session's directory, or one level below the repository root) as a session labelled `notes · <vault>`. Asking again goes back to it. You can also run `hive notes` in any terminal.
+
+| Key | In the notes app |
+|---|---|
+| `j` `k` `↑` `↓` | Move in the tree, or scroll the note (the note under the cursor shows on the right) |
+| `Enter` `→` / `Esc` `←` | Open a note or fold a folder / back to the tree |
+| `Tab` `Shift+Tab`, `Enter` | Pick a link (including "Linked from"), follow it; a missing note is created |
+| `Backspace` | Previous note |
+| `/` `n` `t` | Search, new note (`Folder/Name`), today's daily note |
+| `e` `o` | Edit in `$EDITOR`, open in the Obsidian app |
+
+Notes changed elsewhere reload on their own. Agents can use the same vault: `hive context search <words>`, `hive context get <note>`, `hive context add <note> "<text>"` (appends a dated entry). Sessions in a space with a vault get `HIVE_VAULT`.
 
 ### More integrations (optional)
 
@@ -322,7 +333,7 @@ Ended sessions keep their command, directory, label and space. `Ctrl+Space R` re
 | Logs, `sessions.json` | `~/.local/state/hive/` | `HIVE_STATE_DIR` |
 | Worktrees | `~/.local/share/hive/worktrees/` | `[worktrees] dir` |
 
-`hive doctor` prints the actual paths on any OS. Also read: `HIVE_LOG` (log level), `HIVE_DAEMON_BIN` (the `hived` to start). Every session gets `HIVE=1`, `HIVE_SESSION_ID`, `HIVE_BIN_PATH`, `TERM=xterm-256color` and `COLORTERM=truecolor`, on top of the environment of the `hive` command that created it. `sessions.json` and the logs never contain environment variables.
+`hive doctor` prints the actual paths on any OS. Also read: `HIVE_LOG` (log level), `HIVE_DAEMON_BIN` (the `hived` to start). Every session gets `HIVE=1`, `HIVE_SESSION_ID`, `HIVE_BIN_PATH`, `HIVE_VAULT` (in a space with a notes vault), `TERM=xterm-256color` and `COLORTERM=truecolor`, on top of the environment of the `hive` command that created it. `sessions.json` and the logs never contain environment variables.
 
 ## Upgrading
 

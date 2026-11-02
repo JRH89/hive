@@ -60,6 +60,13 @@ export const docs: Doc[] = [
       "How Hive groups sessions into spaces by repository, and gives an agent its own git worktree and branch, with the rules that keep your work safe.",
   },
   {
+    slug: "notes",
+    nav: "Notes and context",
+    title: "Notes and agent context in Hive",
+    description:
+      "Hive's notes app for a markdown or Obsidian vault: a tree, rendered notes, links and search in a pane. And hive context, so agents can look up and record project knowledge.",
+  },
+  {
     slug: "daemon",
     nav: "Daemon, files and environment",
     title: "The Hive daemon, files and environment variables",
@@ -78,4 +85,4 @@ export const docs: Doc[] = [
 export const docBySlug = (slug: string) => docs.find((d) => d.slug === slug);
 
 /** When the docs last changed; bump with real edits. */
-export const docsUpdated = "2026-11-02T02:00:00-08:00";
+export const docsUpdated = "2026-11-02T14:00:00-08:00";

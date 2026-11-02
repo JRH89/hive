@@ -349,7 +349,8 @@ pub struct GitStatus {
 #[serde(default, deny_unknown_fields)]
 pub struct Obsidian {
     pub enabled: bool,
-    /// Agent to open the vault with; empty means `$VISUAL`, `$EDITOR`, `vi`.
+    /// Agent to open the vault with; empty means Hive's own notes app
+    /// (`hive notes`).
     pub agent: String,
     pub open_in: OpenIn,
     /// Append a line to today's note in the vault when an agent finishes.
@@ -358,13 +359,13 @@ pub struct Obsidian {
     pub journal_dir: String,
 }
 
-/// Where the notes pane opens.
+/// Where an integration's pane opens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum OpenIn {
-    #[default]
     Tab,
     /// Split to the right of the focused pane.
+    #[default]
     Split,
 }
 
@@ -374,16 +375,11 @@ impl Obsidian {
         if !self.agent.is_empty() {
             return config.agent(&self.agent);
         }
-        let editor = ["VISUAL", "EDITOR"]
-            .iter()
-            .filter_map(|k| std::env::var(k).ok())
-            .find(|v| !v.trim().is_empty())
-            .unwrap_or_else(|| "vi".into());
-        // `EDITOR="code -w"` is common; split on whitespace, no shell.
-        let mut words = editor.split_whitespace().map(str::to_string);
+        // `hive notes` from this very binary, so it matches the version.
+        let hive = std::env::current_exe().ok()?;
         Some(AgentDef {
-            command: words.next()?,
-            args: words.collect(),
+            command: hive.display().to_string(),
+            args: vec!["notes".into(), ".".into()],
             env: BTreeMap::new(),
         })
     }
@@ -604,13 +600,17 @@ mod tests {
     fn obsidian_is_off_by_default_and_validated() {
         let off = Config::default().integrations.obsidian;
         assert!(!off.enabled);
-        assert_eq!(off.open_in, OpenIn::Tab);
+        assert_eq!(off.open_in, OpenIn::Split);
+        assert_eq!(
+            off.notes_agent(&Config::default()).unwrap().args,
+            ["notes", "."]
+        );
         let on = Config::parse(
-            "[integrations.obsidian]\nenabled = true\nagent = \"shell\"\nopen_in = \"split\"\n",
+            "[integrations.obsidian]\nenabled = true\nagent = \"shell\"\nopen_in = \"tab\"\n",
         )
         .unwrap();
         let o = &on.integrations.obsidian;
-        assert_eq!(o.open_in, OpenIn::Split);
+        assert_eq!(o.open_in, OpenIn::Tab);
         assert_eq!(
             o.notes_agent(&on).unwrap().command,
             on.agent("shell").unwrap().command

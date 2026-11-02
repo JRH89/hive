@@ -880,6 +880,25 @@ Implement:
 
 Investigate Windows and macOS support after the Linux implementation is stable.
 
+Phases 7 to 10 (herdr parity, ease of use, macOS, Windows) are recorded in `vault/Roadmap/`.
+
+## Phase 11 — Notes and Context
+
+**Goal:** Hive's own notes and context layer over a markdown vault. It works alongside Obsidian and does not depend on it. Agents can retrieve and record project knowledge through it. Moved from §18 ("Shared context") at the owner's request on 2026-11-02.
+
+Implement:
+
+- A `hive-notes` library: scan a vault (plain `.md` files), parse titles, frontmatter tags, `#tags` and `[[wikilinks]]`, resolve links the way Obsidian does, list backlinks, ranked full-text search. No daemon state; the files are the source of truth.
+- `hive notes [DIR]`: a lazygit-style terminal app for a vault. A note tree and a rendered note; follow links and go back; backlinks; search; new note; today's daily note; open the note in Obsidian (`obsidian://`); edit it in `$EDITOR`.
+- The Obsidian integration (Leader `N`) opens `hive notes` in a split by default. Every integration opens in a split by default.
+- `hive context search|get|list|add`: plain-text (or `--json`) retrieval for agents from the space's vault, and appending dated notes to it.
+- Sessions in a space with a vault get `HIVE_VAULT`, so agents and scripts can find it.
+
+Constraints:
+
+- The vault stays plain markdown that Obsidian reads unchanged. Hive only writes notes on an explicit action (new note, daily note, `context add`) and only appends to existing files.
+- No network and no embeddings in this phase. Retrieval must be fast enough to run on every query without an index file.
+
 ---
 
 # 17. README and Public Presentation
@@ -952,7 +971,6 @@ Design for future extensibility, but do not implement these in the initial relea
 - Shared task queues
 - Agent coordination
 - Dependency-aware task scheduling
-- Shared context
 - Agent activity detection
 - Approval dashboards
 - Git conflict detection

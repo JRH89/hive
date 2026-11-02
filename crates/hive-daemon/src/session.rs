@@ -16,7 +16,7 @@
 use std::collections::BTreeSet;
 use std::io::{Read, Write};
 use std::num::NonZeroU16;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -196,6 +196,13 @@ impl Session {
         cmd.env("HIVE_SESSION_ID", id.to_string());
         if let Some(bin) = hive_bin() {
             cmd.env("HIVE_BIN_PATH", bin);
+        }
+        // The space's notes vault, for `hive context` and agents; a
+        // HIVE_VAULT the user set wins.
+        if !req.env.iter().any(|(k, _)| k == "HIVE_VAULT")
+            && let Some(vault) = hive_notes::find_vault(Path::new(&req.cwd))
+        {
+            cmd.env("HIVE_VAULT", vault);
         }
 
         let mut child = pair

@@ -11,6 +11,7 @@ Knowledge base for building **Hive**, a terminal multiplexer for AI coding agent
 - [[Phase 4 - Workspaces and Git]]: workspaces, branches, worktrees
 - [[Phase 5 - Product Experience and Branding]]: themes, palette, keymap, brand
 - [[Phase 6 - Testing and Distribution]]: tests, CI, release binaries, docs
+- [[Phase 11 - Notes and Context]]: notes app, `hive context` for agents
 
 ## Architecture
 - [[Overview]]: processes, crates, data flow
@@ -44,6 +45,7 @@ Knowledge base for building **Hive**, a terminal multiplexer for AI coding agent
 - [[ADR-0024 Integrations toggle from the TUI]]
 - [[ADR-0025 Keep sessions across daemon restarts]]
 - [[ADR-0026 Optional tree sidebar]]
+- [[ADR-0027 Notes and context layer]]
 
 ## Ongoing
 - [[Website Design]]: approved website direction, branding, scope and acceptance

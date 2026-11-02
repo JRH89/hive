@@ -5,6 +5,7 @@ mod app;
 mod keymap;
 mod keys;
 mod layout;
+pub mod notes;
 mod render;
 mod theme;
 
@@ -199,7 +200,7 @@ pub fn describe_terminal(config: &Config) -> anyhow::Result<String> {
     ))
 }
 
-fn theme_for(config: &Config) -> anyhow::Result<Theme> {
+pub(crate) fn theme_for(config: &Config) -> anyhow::Result<Theme> {
     Ok(Theme::from_config(
         &config.general.theme,
         &config.theme,

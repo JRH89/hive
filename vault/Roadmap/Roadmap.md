@@ -75,3 +75,11 @@ Full detail is in `AGENTS.md` §16. **Don't start a phase until the previous one
 - [x] Named-pipe transport with token auth ([[ADR-0021 Windows named pipe with token auth]])
 - [x] ConPTY sessions, process control, daemon spawn
 - [x] Windows CI, release zip, `install.ps1`
+
+## Phase 11 — Notes and Context (done)
+[[Phase 11 - Notes and Context]] · [[ADR-0027 Notes and context layer]]
+- [x] `hive-notes` crate: vault scan, links, tags, backlinks, search
+- [x] `hive notes`: lazygit-style notes app (tree, rendered markdown, links, search, new/daily notes, edit, open in Obsidian)
+- [x] Leader `N` opens it in a split; every integration splits by default
+- [x] `hive context search|get|list|add|path` for agents
+- [x] `HIVE_VAULT` in sessions

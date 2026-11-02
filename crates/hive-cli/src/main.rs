@@ -1,5 +1,7 @@
 //! `hive` — the command-line entry point and TUI launcher.
 
+mod context;
+
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -144,6 +146,31 @@ enum Command {
         source: Option<String>,
         #[arg(long, hide = true)]
         seq: Option<u64>,
+    },
+    /// Browse and edit the notes vault: a tree, rendered notes, links, search
+    #[command(
+        after_help = "Opens the vault for the current directory (a folder with \
+        .obsidian/ in this repository), or DIR. In the interface, Ctrl+Space N opens it beside \
+        the focused pane when [integrations.obsidian] is on. Press ? inside for keys."
+    )]
+    Notes {
+        /// Folder of markdown notes (defaults to the vault found from here)
+        dir: Option<PathBuf>,
+    },
+    /// Search, read and add to the space's notes (for agents and scripts)
+    #[command(
+        after_help = "The vault is a folder with .obsidian/ in the current repository \
+        (or $HIVE_VAULT, or --vault). Agents can run these to find project knowledge:\n  \
+        hive context search how are worktrees cleaned up\n  \
+        hive context get \"ADR-0012\"\n  \
+        hive context add Hive/Decisions \"Chose X because Y\""
+    )]
+    Context {
+        /// The vault to use instead of finding one from here
+        #[arg(long, global = true)]
+        vault: Option<PathBuf>,
+        #[command(subcommand)]
+        action: context::ContextAction,
     },
     /// Check the installation: paths, config, daemon, terminal and agents
     Doctor,
@@ -341,6 +368,10 @@ async fn run(cli: Cli, paths: Paths) -> anyhow::Result<()> {
     if let Some(Command::Update { tag }) = &cli.command {
         return update(tag.as_deref());
     }
+    if let Some(Command::Context { vault, action }) = cli.command {
+        // Reads files only: no daemon, no config.
+        return context::run(action, vault);
+    }
     let connect = |auto_start: bool| {
         let paths = paths.clone();
         async move { Client::connect_or_start(&paths, "hive", auto_start).await }
@@ -399,6 +430,7 @@ async fn run(cli: Cli, paths: Paths) -> anyhow::Result<()> {
                 tui(&paths, client, config, Start::Create(req)).await
             }
         }
+        Some(Command::Notes { dir }) => hive_tui::notes::run(dir, &config),
         Some(Command::List) => {
             let mut client = connect(false).await.or_else(not_running)?;
             let sessions = list(&mut client).await?;
@@ -483,7 +515,12 @@ async fn run(cli: Cli, paths: Paths) -> anyhow::Result<()> {
             let mut client = connect(false).await.or_else(not_running)?;
             request(&mut client, ClientMessage::ReleaseAgent { session, agent }).await
         }
-        Some(Command::Doctor | Command::Update { .. } | Command::Daemon { .. }) => {
+        Some(
+            Command::Doctor
+            | Command::Update { .. }
+            | Command::Daemon { .. }
+            | Command::Context { .. },
+        ) => {
             unreachable!("handled before loading the config")
         }
     }

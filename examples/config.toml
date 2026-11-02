@@ -36,12 +36,12 @@ bell = true
 
 # Optional integrations. Off by default and invisible until enabled.
 [integrations.obsidian]
-# Leader N opens the workspace's Obsidian vault (a folder with .obsidian/,
-# at or above the session's directory or one level below the repository
-# root) in a pane. Asking again focuses the open one.
+# Leader N opens Hive's notes app (hive notes) on the workspace's vault (a
+# folder with .obsidian/, at or above the session's directory or one level
+# below the repository root) in a pane. Asking again focuses the open one.
 enabled = false
-agent = ""          # agent to open it with; "" = $VISUAL, $EDITOR, else vi
-open_in = "tab"     # or "split"
+agent = ""          # an [agents.*] entry to use instead; "" = hive notes
+open_in = "split"   # or "tab"
 journal = false     # append a line to today's note when an agent finishes
 journal_dir = ""    # folder of daily notes in the vault; "" = vault root
 
