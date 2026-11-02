@@ -68,7 +68,7 @@ export default function Interface() {
         <tbody>
           <tr><td>○</td><td><code>o</code></td><td>exited</td></tr>
           <tr><td>✕</td><td><code>x</code></td><td>failed to start, or crashed</td></tr>
-          <tr><td>◌</td><td><code>?</code></td><td>lost: it was running when the daemon stopped unexpectedly. Enter relaunches it</td></tr>
+          <tr><td>◌</td><td><code>?</code></td><td>ended: it was running when the daemon stopped. Enter relaunches it; Ctrl+Space R restores them all</td></tr>
           <tr><td>▌</td><td><code>&gt;</code></td><td>the session you are looking at</td></tr>
           <tr><td><code>wt</code></td><td><code>wt</code></td><td>runs in its own git worktree</td></tr>
           <tr><td><code>!</code></td><td><code>!</code></td><td>shares its directory with another running agent: they may edit the same files</td></tr>

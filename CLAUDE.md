@@ -58,7 +58,7 @@ Invariants that span files:
 - Control is per session: only the controller's `Input`/`Resize` (both name their session) are honoured. `Attach` takes control only if it's free or `force` is set (TUI Leader `a`); otherwise the client observes (ADR-0010). Take-over sends `ControlLost`; a controller leaving sends observers `ControlReleased`.
 - Workspaces are daemon-owned. Every session gets one, resolved from its cwd's repository main root (ADR-0011). The daemon runs `git worktree add/remove`; dirty or in-use worktrees are never removed without force, and branches are never deleted (ADR-0012).
 - `SessionCreated` (reply) can arrive after a `SessionUpdated` (broadcast) for the same session. Clients must not overwrite newer info with it.
-- `sessions.json` (state dir) holds metadata only, never env. Sessions alive at a crash return as `SessionState::Lost`; graceful shutdown forgets them. Ids never repeat (ADR-0009).
+- `sessions.json` (state dir) holds metadata only, never env. Sessions alive when the daemon stops (crash or graceful) return as `SessionState::Lost`, with the agent that was running; the TUI restores them (ADR-0009, ADR-0025). Ids never repeat.
 - The reader thread must never block on the writer (`try_send` for query replies).
 - `hive-protocol::read_frame` is not cancel-safe. Keep it in its own task, never in `select!`.
 

@@ -133,8 +133,9 @@ export default function Install() {
             <code>{"hive update\nhive daemon stop   # restart the daemon on the new version"}</code>
           </pre>
           <p>
-            Stopping the daemon ends running sessions, so pick a quiet moment. The next{" "}
-            <code>hive</code> starts the new daemon.
+            Stopping the daemon ends running sessions (it lists them and asks first). The next{" "}
+            <code>hive</code> starts the new daemon, and <kbd>Ctrl+Space</kbd> <kbd>R</kbd> restores
+            the sessions, with agents resuming their conversations.
           </p>
 
           <h2 id="source">Build from source</h2>

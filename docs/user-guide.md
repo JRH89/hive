@@ -61,7 +61,7 @@ The sidebar lists your **spaces** (one per repository, with its branch and agent
 | `●` / `*` | running |
 | `○` / `o` | exited |
 | `✕` / `x` | failed to start or crashed |
-| `◌` / `?` | lost: it was running when the daemon stopped unexpectedly. Press enter on it to relaunch |
+| `◌` / `?` | ended: it was running when the daemon stopped. Press enter on it to relaunch, or `Ctrl+Space R` for all |
 | `▌` / `>` | the session you are attached to |
 | `wt` | runs in its own worktree |
 | `!` | shares its directory with another running agent |
@@ -297,7 +297,7 @@ Nerd Fonts are never required. Individual colours can be overridden with `#rrggb
 | `hive report-agent` / `hive release-agent` | Set or clear an agent's status (see [Agent status](#agent-status)) |
 | `hive doctor` | Check the installation; changes nothing |
 | `hive update [--tag vX.Y.Z]` | Install a release over this one (Linux, macOS) |
-| `hive daemon start\|stop\|status` | Manage the daemon (`stop` ends every session) |
+| `hive daemon start\|stop\|status` | Manage the daemon (`stop` ends every session after asking; `-y` skips; `Ctrl+Space R` restores them) |
 
 Every command takes `--help`.
 
@@ -308,8 +308,10 @@ The daemon keeps sessions running when every window is closed. What survives wha
 | Event | Agents | Afterwards |
 |---|---|---|
 | Close the window, detach, SSH drops | Keep running | Everything as you left it next time you run `hive` |
-| `hive daemon stop` | Terminated | A clean start |
-| Daemon crash, `kill -9`, reboot | Gone | Sessions listed as lost (`◌`): Enter relaunches one in the same directory, `x` forgets it |
+| `hive daemon stop` (asks first), upgrade | Terminated | Sessions listed as ended (`◌`) |
+| Daemon crash, `kill -9`, reboot | Gone | Sessions listed as ended (`◌`) |
+
+Ended sessions keep their command, directory, label and space. `Ctrl+Space R` restores them all, enter relaunches one, `x` forgets it. The agent that was running resumes its last conversation in that directory (Claude Code `--continue`, Codex `resume --last`); one started from a terminal runs in that terminal again, which stays afterwards. Other agents start fresh.
 
 | What | Linux default | Override |
 |---|---|---|
@@ -325,7 +327,7 @@ The daemon keeps sessions running when every window is closed. What survives wha
 ```bash
 hive update         # installs the latest release next to the running hive
 hive daemon stop    # the old daemon keeps running until stopped; this ends running sessions
-hive                # starts the new daemon
+hive                # starts the new daemon; Ctrl+Space R restores the sessions
 ```
 
 If the client and a running daemon speak different protocol versions, `hive` says so instead of misbehaving.

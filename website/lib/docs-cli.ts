@@ -106,8 +106,9 @@ hive new claude -- --model opus   # arguments after -- go to the agent`,
     summary: "Start the daemon if it isn't running.",
   },
   {
-    usage: "hive daemon stop",
-    summary: "Stop the daemon. This terminates every session.",
+    usage: "hive daemon stop [-y]",
+    summary:
+      "Stop the daemon. This terminates every session, so it lists them and asks first (-y skips the question). They come back as ended sessions: Ctrl+Space R in hive restores them all, and agents resume their last conversation.",
   },
   {
     usage: "hive daemon status",

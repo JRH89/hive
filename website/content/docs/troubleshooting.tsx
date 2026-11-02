@@ -33,7 +33,7 @@ const problems: [string, React.ReactNode][] = [
   ],
   [
     "Closing tabs or panes takes seconds",
-    <>The daemon is older than <code>hive</code> (Hive warns at startup: <em>hived X is running</em>). Daemons before 0.4.12 waited 3 seconds for shells. <code>hive daemon stop</code> (ends running sessions) then <code>hive</code> starts the current one.</>,
+    <>The daemon is older than <code>hive</code> (Hive warns at startup: <em>hived X is running</em>). Daemons before 0.4.12 waited 3 seconds for shells. <code>hive daemon stop</code> then <code>hive</code> starts the current one; <kbd>Ctrl+Space</kbd> <kbd>R</kbd> restores the sessions it ended.</>,
   ],
   [
     "Hive asks before every close and I want it to stop",
@@ -41,7 +41,7 @@ const problems: [string, React.ReactNode][] = [
   ],
   [
     "daemon speaks protocol vN, this client speaks vM",
-    <>A daemon from an older version is still running. <code>hive daemon stop</code> (ends its sessions), then <code>hive</code>.</>,
+    <>A daemon from an older version is still running. <code>hive daemon stop</code>, then <code>hive</code>, then <kbd>Ctrl+Space</kbd> <kbd>R</kbd> to restore the sessions.</>,
   ],
   [
     "`claude` was not found on PATH",
@@ -65,7 +65,7 @@ const problems: [string, React.ReactNode][] = [
   ],
   [
     "Sessions show ◌ lost",
-    <>The daemon stopped unexpectedly (crash, <code>kill -9</code>, reboot). The processes are gone; Enter relaunches one in the same directory, <kbd>x</kbd> forgets it. See <a href="/docs/daemon/#survives">what survives what</a>.</>,
+    <>The daemon stopped (<code>hive daemon stop</code>, an upgrade, a crash or a reboot). The processes are gone, but <kbd>Ctrl+Space</kbd> <kbd>R</kbd> restores them all and agents resume their last conversation; Enter relaunches one, <kbd>x</kbd> forgets it. See <a href="/docs/daemon/#survives">what survives what</a>.</>,
   ],
   [
     "Typing does nothing; the status bar says observing",

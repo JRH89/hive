@@ -27,6 +27,23 @@ use tokio::task::JoinHandle;
 use session::{ClientId, Placement, Session};
 use store::{Store, StoredSession, StoredWorkspace};
 
+/// Saves `sessions` (the live ones) to `restore.json` in `state_dir`, for
+/// the next daemon to offer them for relaunch. `hive daemon stop` calls this
+/// before stopping a daemon, which may be one that forgets its sessions.
+pub fn save_for_restore(state_dir: &Path, sessions: &[SessionInfo]) -> std::io::Result<()> {
+    let keep: Vec<StoredSession> = sessions
+        .iter()
+        .filter(|s| s.state.is_alive() || s.state == hive_protocol::SessionState::Lost)
+        .map(StoredSession::from_info)
+        .collect();
+    if keep.is_empty() {
+        return Ok(());
+    }
+    let mut bytes = serde_json::to_vec_pretty(&keep).map_err(std::io::Error::other)?;
+    bytes.push(b'\n');
+    Store::write_bytes(&state_dir.join("restore.json"), &bytes)
+}
+
 /// How often running sessions' branches are re-read (a small file read each).
 const BRANCH_REFRESH: Duration = Duration::from_secs(2);
 
@@ -73,7 +90,14 @@ struct Saved {
 
 impl Daemon {
     fn new(config: Config, store_path: PathBuf) -> Daemon {
-        let store = Store::load(&store_path);
+        let mut store = Store::load(&store_path);
+        // Saved by `hive daemon stop` from a daemon that may not have kept
+        // them itself.
+        for s in Store::take_restore(&store_path.with_file_name("restore.json")) {
+            if !store.sessions.iter().any(|k| k.id == s.id) {
+                store.sessions.push(s);
+            }
+        }
         let next = store
             .sessions
             .iter()
@@ -99,9 +123,9 @@ impl Daemon {
             .map(|s| (s.id, s.into_lost_info()))
             .collect();
         if !lost.is_empty() {
-            tracing::warn!(
+            tracing::info!(
                 count = lost.len(),
-                "previous daemon stopped unexpectedly; its sessions are marked lost"
+                "sessions of the previous daemon can be relaunched"
             );
         }
         let daemon = Daemon {
@@ -523,8 +547,8 @@ impl Daemon {
     }
 
     /// Writes the session store if its contents changed. `include_live` is
-    /// false on graceful shutdown: sessions we terminated on purpose are not
-    /// "lost".
+    /// false for the final write on shutdown, after `keep_for_restart` has
+    /// saved the live sessions.
     ///
     /// The persist task can be mid-write when shutdown aborts it, so the lock
     /// is taken before reading any state: a live snapshot taken before
@@ -695,9 +719,12 @@ pub async fn run(paths: Paths, config: Config) -> anyhow::Result<()> {
 
     tracing::info!("shutting down");
     let _ = daemon.events.send(ServerMessage::ShuttingDown);
-    daemon.terminate_all().await;
+    // Running sessions come back as relaunchable after a restart, like after
+    // a crash (ADR-0025). Saved before terminating, while presence is known.
     drop(persister);
-    daemon.persist(false);
+    daemon.persist(true);
+    daemon.saved.lock().unwrap().closed = true;
+    daemon.terminate_all().await;
     listener.cleanup(&paths);
     // Give client writer tasks a moment to flush ShuttingDown.
     tokio::time::sleep(Duration::from_millis(50)).await;

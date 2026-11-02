@@ -333,6 +333,8 @@ pub struct App {
     pub done: BTreeSet<SessionId>,
     /// Ring the terminal bell after this update.
     pub bell: bool,
+    /// The ended-sessions notice was shown (once per run).
+    told_ended: bool,
     /// Tasks the palette is offering (`run_task`).
     pub tasks: Option<TaskList>,
     /// Side effects for the frontend loop to carry out.
@@ -456,6 +458,28 @@ pub enum Effect {
         key: &'static str,
         value: bool,
     },
+}
+
+/// A shell that takes `-c "…; exec shell"`: sh, bash, zsh, fish and kin.
+fn is_posix_shell(command: &[String]) -> bool {
+    let Some(first) = command.first() else {
+        return false;
+    };
+    let name = std::path::Path::new(first)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default();
+    command.len() == 1 && matches!(name, "sh" | "bash" | "zsh" | "fish" | "dash" | "ksh")
+}
+
+/// Quotes a word for `sh -c` (and fish) when it needs it.
+fn sh_quote(word: &str) -> String {
+    let safe = |c: char| c.is_ascii_alphanumeric() || "-_./=:@%+,".contains(c);
+    if !word.is_empty() && word.chars().all(safe) {
+        word.to_string()
+    } else {
+        format!("'{}'", word.replace('\'', "'\\''"))
+    }
 }
 
 /// Title, description and command of an `[integrations.<name>]` section,
@@ -604,6 +628,7 @@ impl App {
             remove_worktree_after: BTreeMap::new(),
             done: BTreeSet::new(),
             bell: false,
+            told_ended: false,
             tasks: None,
             effects: Vec::new(),
             layout_queue: Default::default(),
@@ -1206,6 +1231,24 @@ impl App {
             }
             ServerMessage::SessionList(list) => {
                 self.sessions = list.into_iter().map(|s| (s.id, s)).collect();
+                let ended = self
+                    .sessions
+                    .values()
+                    .filter(|s| s.state == SessionState::Lost)
+                    .count();
+                if ended > 0 && !std::mem::replace(&mut self.told_ended, true) {
+                    let key = self
+                        .keymap
+                        .hint(Command::RestoreSessions)
+                        .map(|k| format!("{} {k}", self.keymap.leader))
+                        .unwrap_or_else(|| "\"restore\" in the palette".into());
+                    self.set_status(
+                        Tone::Info,
+                        format!(
+                            "{ended} session(s) ended when hived stopped. {key} restores them all; Enter on one relaunches it, x forgets it"
+                        ),
+                    );
+                }
                 if matches!(self.start, Some(Start::Auto)) {
                     self.start = None;
                     // After a reconnect the daemon has forgotten our
@@ -1868,6 +1911,7 @@ impl App {
             }
             Command::Detach => return self.detach(),
             Command::Help => self.mode = Mode::Help,
+            Command::RestoreSessions => return self.restore_sessions(),
             Command::Integrations => {
                 self.mode = Mode::Palette {
                     query: String::new(),
@@ -2331,31 +2375,93 @@ impl App {
     /// directory, then forgets the lost record. The environment comes from
     /// this client because environments are never persisted.
     fn relaunch(&mut self, id: SessionId) -> Vec<ClientMessage> {
-        let Some(info) = self.sessions.get(&id) else {
+        let Some(req) = self.relaunch_request(id) else {
             return Vec::new();
         };
+        self.awaiting_create = true;
+        self.set_status(Tone::Info, format!("Relaunching {}…", req.label));
+        vec![
+            ClientMessage::CreateSession(req),
+            ClientMessage::KillSession(id),
+        ]
+    }
+
+    /// Relaunches every ended session in the background; they appear in the
+    /// sidebar as they start.
+    fn restore_sessions(&mut self) -> Vec<ClientMessage> {
+        let lost: Vec<SessionId> = self
+            .sessions
+            .values()
+            .filter(|s| s.state == SessionState::Lost)
+            .map(|s| s.id)
+            .collect();
+        if lost.is_empty() {
+            self.set_status(Tone::Info, "No ended sessions to restore.");
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for id in &lost {
+            if let Some(req) = self.relaunch_request(*id) {
+                out.push(ClientMessage::CreateSession(req));
+                out.push(ClientMessage::KillSession(*id));
+            }
+        }
+        self.set_status(Tone::Info, format!("Restoring {} session(s)…", lost.len()));
+        out
+    }
+
+    /// The request that starts an ended session again: same command, place
+    /// and label. The agent that was running in it resumes its conversation
+    /// where it can (`claude --continue`, `codex resume --last`); one typed
+    /// into a shell runs in that shell, which stays when the agent exits.
+    fn relaunch_request(&self, id: SessionId) -> Option<CreateSession> {
+        let info = self.sessions.get(&id)?;
         let mut env: Vec<(String, String)> = std::env::vars().collect();
         if let Some(def) = self.config.agent(&info.agent) {
             env.retain(|(k, _)| !def.env.contains_key(k));
             env.extend(def.env);
         }
-        let req = CreateSession {
+        let running = info
+            .presence
+            .as_ref()
+            .and_then(|p| hive_agents::catalog::by_id(&p.agent));
+        let resume = running
+            .and_then(|k| hive_agents::catalog::resume_args(k.id))
+            .unwrap_or(&[]);
+        let mut command = info.command.clone();
+        match running {
+            Some(k) if k.id == info.agent => {
+                if !resume.iter().all(|a| command.contains(&a.to_string())) {
+                    command.extend(resume.iter().map(|a| a.to_string()));
+                }
+            }
+            Some(k) if is_posix_shell(&info.command) => {
+                let mut argv: Vec<String> = match self.config.agent(k.id) {
+                    Some(def) => std::iter::once(def.command).chain(def.args).collect(),
+                    None => vec![k.command.to_string()],
+                };
+                argv.extend(resume.iter().map(|a| a.to_string()));
+                let shell = &info.command[0];
+                let line: Vec<String> = argv.iter().map(|a| sh_quote(a)).collect();
+                command = vec![
+                    shell.clone(),
+                    "-c".into(),
+                    format!("{}; exec {}", line.join(" "), sh_quote(shell)),
+                ];
+            }
+            _ => {}
+        }
+        Some(CreateSession {
             agent: info.agent.clone(),
             label: info.label.clone(),
-            command: info.command.clone(),
+            command,
             cwd: info.cwd.clone(),
             env,
             size: self.panel,
             workspace: Some(info.workspace).filter(|w| self.workspaces.contains_key(w)),
             worktree: None,
             new_space: false,
-        };
-        self.awaiting_create = true;
-        self.set_status(Tone::Info, format!("Relaunching {}…", info.label));
-        vec![
-            ClientMessage::CreateSession(req),
-            ClientMessage::KillSession(id),
-        ]
+        })
     }
 
     /// The daemon connection dropped. The last screen stays visible.
@@ -4889,6 +4995,84 @@ mod tests {
             SessionState::Running,
         )));
         assert_eq!(attaches(out), attach_msg(&app, 9));
+    }
+
+    fn running(info: SessionInfo, agent: &str) -> SessionInfo {
+        SessionInfo {
+            presence: Some(hive_protocol::AgentPresence {
+                agent: agent.into(),
+                label: agent.into(),
+                status: AgentStatus::Unknown,
+                message: None,
+                source: hive_protocol::PresenceSource::Process,
+            }),
+            ..info
+        }
+    }
+
+    #[test]
+    fn relaunching_resumes_the_agent_that_was_running() {
+        let mut app = app();
+        // Launched as claude directly: --continue is appended once.
+        app.on_server(ServerMessage::SessionUpdated(running(
+            lost(2, "api"),
+            "claude",
+        )));
+        let req = app.relaunch_request(2).unwrap();
+        assert_eq!(req.command, vec!["claude", "--verbose", "--continue"]);
+        // Typed into a shell: the shell runs it and stays afterwards.
+        let shell = SessionInfo {
+            agent: "shell".into(),
+            command: vec!["/bin/bash".into()],
+            ..running(lost(4, "web"), "codex")
+        };
+        app.on_server(ServerMessage::SessionUpdated(shell));
+        let req = app.relaunch_request(4).unwrap();
+        assert_eq!(
+            req.command,
+            vec!["/bin/bash", "-c", "codex resume --last; exec /bin/bash"]
+        );
+        // Nothing known to be running: the same command as before.
+        app.on_server(ServerMessage::SessionUpdated(lost(5, "plain")));
+        assert_eq!(
+            app.relaunch_request(5).unwrap().command,
+            vec!["claude", "--verbose"]
+        );
+        assert_eq!(sh_quote("it's"), "'it'\\''s'");
+        assert_eq!(sh_quote("--model=opus"), "--model=opus");
+    }
+
+    #[test]
+    fn restore_relaunches_every_ended_session_and_says_so_at_start() {
+        let mut app = App::new(Config::default(), Start::Auto, (100, 30));
+        app.on_server(ServerMessage::SessionList(vec![
+            lost(1, "a"),
+            lost(2, "b"),
+            info(3, SessionState::Running),
+        ]));
+        assert!(
+            matches!(&app.status, Some((Tone::Info, m)) if m.contains("2 session(s) ended") && m.contains("R")),
+            "{:?}",
+            app.status
+        );
+        let out = app.run(Command::RestoreSessions);
+        let kills: Vec<SessionId> = out
+            .iter()
+            .filter_map(|m| match m {
+                ClientMessage::KillSession(id) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        let creates = out
+            .iter()
+            .filter(|m| matches!(m, ClientMessage::CreateSession(_)))
+            .count();
+        assert_eq!((creates, kills.len()), (2, 2));
+        assert!(kills.contains(&1) && kills.contains(&2));
+        // A second list doesn't repeat the notice.
+        app.set_status(Tone::Info, "other");
+        app.on_server(ServerMessage::SessionList(vec![lost(1, "a")]));
+        assert!(matches!(&app.status, Some((_, m)) if m == "other"));
     }
 
     fn ws(id: WorkspaceId, name: &str, is_repo: bool) -> WorkspaceInfo {

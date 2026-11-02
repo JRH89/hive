@@ -13,7 +13,7 @@ export default function Daemon() {
       <pre className="code">
         <code>{`hive daemon status   # running? version, pid, socket
 hive daemon start
-hive daemon stop     # ends every session`}</code>
+hive daemon stop     # ends every session (asks first); Ctrl+Space R restores them`}</code>
       </pre>
 
       <h2 id="survives">What survives what</h2>
@@ -28,14 +28,18 @@ hive daemon stop     # ends every session`}</code>
         <tbody>
           <tr><td>Close the window, detach, SSH drops</td><td>Keep running</td><td>Everything, as you left it, next time you run <code>hive</code></td></tr>
           <tr><td>The daemon goes away while a window is open</td><td>Depends on why (below)</td><td>The window keeps the last screen and reconnects on its own</td></tr>
-          <tr><td><code>hive daemon stop</code></td><td>Terminated</td><td>A clean start; the sessions are forgotten</td></tr>
-          <tr><td>Daemon crash, <code>kill -9</code>, reboot, sleep</td><td>Gone (a reboot ends all processes)</td><td>The sessions listed as <strong>lost</strong> (◌), with their label, agent and directory</td></tr>
+          <tr><td><code>hive daemon stop</code>, upgrade</td><td>Terminated (it lists them and asks first)</td><td>The sessions listed as <strong>ended</strong> (◌), ready to restore</td></tr>
+          <tr><td>Daemon crash, <code>kill -9</code>, reboot</td><td>Gone (a reboot ends all processes)</td><td>The same: the sessions listed as ended (◌), with their label, agent and directory</td></tr>
         </tbody>
       </table>
       <p>
-        A lost session&apos;s process is gone, but you can press Enter on it to relaunch the same
-        command in the same directory, or <kbd>x</kbd> to forget it. Many agents can pick up their
-        conversation: <code>claude --continue</code>, <code>codex resume</code>. Sleep pauses
+        An ended session&apos;s process is gone, but Hive kept its command, directory, label and
+        space. When you open <code>hive</code> it says how many ended;{" "}
+        <kbd>Ctrl+Space</kbd> <kbd>R</kbd> restores them all, Enter on one relaunches just that one,
+        and <kbd>x</kbd> forgets it. The agent that was running picks up its last conversation in
+        that directory: Claude Code with <code>--continue</code>, Codex with{" "}
+        <code>resume --last</code>. An agent you started from a terminal is run in that terminal
+        again, which stays when the agent exits. Other agents start fresh. Sleep pauses
         agents rather than ending them; they carry on when the machine wakes. For agents that run
         overnight, use a machine that stays on and connect over SSH.
       </p>

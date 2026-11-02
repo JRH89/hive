@@ -945,7 +945,7 @@ async fn crash_marks_running_sessions_lost_and_ids_keep_increasing() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn graceful_shutdown_forgets_sessions_but_ids_keep_increasing() {
+async fn graceful_shutdown_keeps_sessions_to_relaunch_and_ids_keep_increasing() {
     let mut h = Harness::start().await;
     let mut c = h.client().await;
     let first = create(&mut c, sh("sleep 60", TermSize::DEFAULT)).await;
@@ -953,13 +953,46 @@ async fn graceful_shutdown_forgets_sessions_but_ids_keep_increasing() {
     h.shutdown().await;
     h.restart().await;
 
+    // Stopping the daemon on purpose doesn't lose your sessions' places:
+    // they come back to relaunch, like after a crash (ADR-0025).
     let mut c = h.client().await;
-    assert!(
-        list(&mut c).await.is_empty(),
-        "deliberately stopped sessions are not 'lost'"
-    );
+    let sessions = list(&mut c).await;
+    assert_eq!(sessions.len(), 1, "{sessions:?}");
+    assert_eq!(sessions[0].id, first);
+    assert_eq!(sessions[0].state, SessionState::Lost);
     let next = create(&mut c, sh("sleep 60", TermSize::DEFAULT)).await;
     assert!(next > first);
+}
+
+#[tokio::test]
+async fn sessions_saved_by_the_cli_before_a_stop_are_restored() {
+    let mut h = Harness::start().await;
+    h.shutdown().await;
+    // What `hive daemon stop` writes for a daemon that forgets on shutdown.
+    let saved = serde_json::json!([{
+        "id": 40, "agent": "shell", "label": "api", "command": ["/bin/sh"],
+        "cwd": "/tmp", "created_at": 1, "workspace": 0, "worktree": null,
+        "running": "claude"
+    }]);
+    let restore = h.paths.state_dir.join("restore.json");
+    std::fs::write(&restore, saved.to_string()).unwrap();
+    h.restart().await;
+
+    let mut c = h.client().await;
+    let s = list(&mut c)
+        .await
+        .into_iter()
+        .find(|s| s.id == 40)
+        .expect("restored");
+    assert_eq!(s.state, SessionState::Lost);
+    assert_eq!(s.label, "api");
+    assert_eq!(
+        s.presence.as_ref().map(|p| p.agent.as_str()),
+        Some("claude")
+    );
+    assert!(!restore.exists(), "read once");
+    let next = create(&mut c, sh("sleep 60", TermSize::DEFAULT)).await;
+    assert!(next > 40, "ids stay unique");
 }
 
 #[tokio::test]
@@ -1304,10 +1337,24 @@ async fn workspaces_persist_and_are_removed_only_when_empty() {
         .find(|w| w.id == ws.id)
         .expect("workspace remembered");
     assert_eq!(kept.name, "backend");
+    // Its session came back to relaunch; dismissing it empties the workspace.
+    let lost = list(&mut c).await;
     assert!(
-        list(&mut c).await.is_empty(),
-        "sessions were stopped on purpose"
+        lost.iter().all(|s| s.state == SessionState::Lost),
+        "{lost:?}"
     );
+    for s in lost {
+        c.send(&ClientMessage::KillSession(s.id)).await.unwrap();
+        timeout(
+            T,
+            c.recv_until(|m| {
+                matches!(m, ServerMessage::SessionRemoved(id) if id == s.id).then_some(())
+            }),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    }
 
     c.send(&ClientMessage::RemoveWorkspace(ws.id))
         .await

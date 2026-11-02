@@ -78,4 +78,4 @@ export const docs: Doc[] = [
 export const docBySlug = (slug: string) => docs.find((d) => d.slug === slug);
 
 /** When the docs last changed; bump with real edits. */
-export const docsUpdated = "2026-11-01T19:00:00-08:00";
+export const docsUpdated = "2026-11-01T23:00:00-08:00";

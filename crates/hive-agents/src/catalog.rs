@@ -172,6 +172,17 @@ pub static CATALOG: &[AgentKind] = &[
     kind!("goose", "Goose", "goose", [], [], None),
 ];
 
+/// Arguments that make an agent pick up its most recent conversation in the
+/// current directory, for relaunching after a restart. `None`: it starts
+/// fresh.
+pub fn resume_args(id: &str) -> Option<&'static [&'static str]> {
+    match id {
+        "claude" => Some(&["--continue"]),
+        "codex" => Some(&["resume", "--last"]),
+        _ => None,
+    }
+}
+
 pub fn by_id(id: &str) -> Option<&'static AgentKind> {
     CATALOG.iter().find(|k| k.id == id)
 }
