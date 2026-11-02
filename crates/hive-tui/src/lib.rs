@@ -108,14 +108,15 @@ fn run_effect(config: &Config, effect: app::Effect) -> Option<String> {
                 tracing::warn!("journal {}: {e}", path.display());
             }
         }
-        app::Effect::SaveIntegration {
+        app::Effect::SaveSetting {
             path,
-            name,
-            enabled,
+            table,
+            key,
+            value,
         } => {
-            if let Err(e) = save_integration(&path, name, enabled) {
+            if let Err(e) = save_setting(&path, &table, key, value) {
                 return Some(format!(
-                    "Couldn't save [integrations.{name}] to {}: {e}. It applies until hive exits.",
+                    "Couldn't save [{table}] {key} to {}: {e}. It applies until hive exits.",
                     path.display()
                 ));
             }
@@ -124,16 +125,15 @@ fn run_effect(config: &Config, effect: app::Effect) -> Option<String> {
     None
 }
 
-/// Rewrites `[integrations.<name>] enabled` in the config file, through a
-/// temporary file so a failure never leaves it half written.
-fn save_integration(path: &std::path::Path, name: &str, enabled: bool) -> anyhow::Result<()> {
+/// Rewrites `key` in `[table]` of the config file, through a temporary file
+/// so a failure never leaves it half written.
+fn save_setting(path: &std::path::Path, table: &str, key: &str, value: bool) -> anyhow::Result<()> {
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e.into()),
     };
-    let text = hive_core::config::set_integration_enabled(&text, name, enabled)
-        .map_err(anyhow::Error::msg)?;
+    let text = hive_core::config::set_bool(&text, table, key, value).map_err(anyhow::Error::msg)?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -141,6 +141,17 @@ fn save_integration(path: &std::path::Path, name: &str, enabled: bool) -> anyhow
     std::fs::write(&tmp, text)?;
     std::fs::rename(&tmp, path)?;
     Ok(())
+}
+
+/// A warning when the running daemon is older than this `hive`: it keeps
+/// its version (and its fixes) until restarted.
+fn daemon_outdated(daemon: &str) -> Option<String> {
+    let mine = env!("CARGO_PKG_VERSION");
+    (daemon != mine).then(|| {
+        format!(
+            "hived {daemon} is running; this is hive {mine}. `hive daemon stop` then `hive` updates it (ends running sessions)"
+        )
+    })
 }
 
 /// Validates the frontend parts of the config (theme, keys), so mistakes are
@@ -216,6 +227,9 @@ pub async fn run(
     let mut app = App::new(config, start, (size.width, size.height));
     app.config_path = Some(paths.config_file.display().to_string());
     app.daemon_pid = Some(client.daemon.pid);
+    if let Some(msg) = daemon_outdated(&client.daemon.version) {
+        app.set_status(app::Tone::Warning, msg);
+    }
     let mut events = EventStream::new();
 
     let mut client = client;
@@ -309,7 +323,7 @@ async fn connected(
         }
         for effect in std::mem::take(&mut app.effects) {
             if let Some(msg) = run_effect(&app.config, effect) {
-                app.effect_failed(msg);
+                app.set_status(app::Tone::Error, msg);
             }
         }
 
@@ -439,6 +453,13 @@ async fn reconnect(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_older_daemon_is_pointed_out() {
+        assert_eq!(daemon_outdated(env!("CARGO_PKG_VERSION")), None);
+        let msg = daemon_outdated("0.4.10").unwrap();
+        assert!(msg.contains("hived 0.4.10") && msg.contains("hive daemon stop"));
+    }
 
     #[test]
     fn example_config_is_valid() {

@@ -72,6 +72,9 @@ pub enum SplitDir {
 pub struct General {
     pub theme: String,
     pub default_agent: String,
+    /// Ask before terminating a session, or closing a pane, tab or space
+    /// that would stop a running agent.
+    pub confirm_terminate: bool,
     /// Ignored: from early versions of the spec, accepted so configs that
     /// set it still load.
     #[serde(rename = "restore_workspace")]
@@ -83,6 +86,7 @@ impl Default for General {
         General {
             theme: "hive-dark".into(),
             default_agent: "claude".into(),
+            confirm_terminate: true,
             _restore_workspace: None,
         }
     }
@@ -198,12 +202,19 @@ impl Integrations {
     }
 }
 
-/// Sets `enabled` in `[integrations.<name>]` of a config file's text,
-/// keeping everything else (comments included) as it is. Adds the line or
-/// the section if missing. Fails, changing nothing, if the result would not
-/// parse to the intended setting (e.g. the section is written inline).
+/// Sets `enabled` in `[integrations.<name>]` of a config file's text; see
+/// [`set_bool`].
 pub fn set_integration_enabled(text: &str, name: &str, on: bool) -> Result<String, String> {
-    let header = format!("[integrations.{name}]");
+    set_bool(text, &format!("integrations.{name}"), "enabled", on)
+}
+
+/// Sets `key = on` in `[table]` of a config file's text, keeping everything
+/// else (comments included) as it is. Adds the line or the section if
+/// missing. Fails, changing nothing, if the result would not be a valid
+/// config with that setting (e.g. the section is written inline).
+pub fn set_bool(text: &str, table: &str, key: &str, on: bool) -> Result<String, String> {
+    let header = format!("[{table}]");
+    let assign = format!("{key}=");
     let is_table = |line: &str| line.trim_start().starts_with('[');
     let code = |line: &str| -> String {
         let line = line.split('#').next().unwrap_or("");
@@ -217,10 +228,7 @@ pub fn set_integration_enabled(text: &str, name: &str, on: bool) -> Result<Strin
                 .iter()
                 .position(|l| is_table(l))
                 .map_or(lines.len(), |n| at + 1 + n);
-            let existing = (at + 1..end).find(|&i| {
-                let c = code(lines[i]);
-                c.starts_with("enabled=")
-            });
+            let existing = (at + 1..end).find(|&i| code(lines[i]).starts_with(&assign));
             for (i, line) in lines.iter().enumerate() {
                 if Some(i) == existing {
                     let (key, value) = line.split_once('=').unwrap_or((line, ""));
@@ -237,7 +245,7 @@ pub fn set_integration_enabled(text: &str, name: &str, on: bool) -> Result<Strin
                     if !line.ends_with('\n') {
                         out.push('\n');
                     }
-                    out.push_str(&format!("enabled = {on}\n"));
+                    out.push_str(&format!("{key} = {on}\n"));
                 }
             }
         }
@@ -249,13 +257,20 @@ pub fn set_integration_enabled(text: &str, name: &str, on: bool) -> Result<Strin
             if !out.is_empty() {
                 out.push('\n');
             }
-            out.push_str(&format!("{header}\nenabled = {on}\n"));
+            out.push_str(&format!("{header}\n{key} = {on}\n"));
         }
     }
-    match Config::parse(&out) {
-        Ok(c) if c.integrations.enabled(name) == Some(on) => Ok(out),
-        Ok(_) => Err(format!("couldn't find where to set {header} enabled")),
-        Err(e) => Err(e.message().to_string()),
+    if let Err(e) = Config::parse(&out) {
+        return Err(e.message().to_string());
+    }
+    let parsed: toml::Table = toml::from_str(&out).map_err(|e| e.message().to_string())?;
+    let mut value = Some(&toml::Value::Table(parsed));
+    for part in table.split('.').chain([key]) {
+        value = value.and_then(|v| v.get(part));
+    }
+    match value {
+        Some(toml::Value::Boolean(b)) if *b == on => Ok(out),
+        _ => Err(format!("couldn't find where to set {header} {key}")),
     }
 }
 
@@ -633,6 +648,21 @@ mod tests {
             set_integration_enabled("", "obsidian", true).unwrap(),
             "[integrations.obsidian]\nenabled = true\n"
         );
+
+        // Any table and key.
+        let general = set_bool(
+            "[general]\ntheme = \"hive-dark\"\n",
+            "general",
+            "confirm_terminate",
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            general,
+            "[general]\nconfirm_terminate = false\ntheme = \"hive-dark\"\n"
+        );
+        assert!(!Config::parse(&general).unwrap().general.confirm_terminate);
+        assert!(Config::default().general.confirm_terminate);
 
         // Forms it doesn't edit are refused rather than broken.
         let inline = "[integrations]\nreview = { enabled = false }\n";

@@ -95,8 +95,10 @@ export default function Interface() {
         switches space and its tabs together.
       </p>
       <p>
-        Closing a pane or tab ends its sessions, so nothing keeps running out of sight; Hive asks
-        first if that would stop a running agent. To leave everything running, detach instead. The
+        Closing a pane or tab ends its sessions, so nothing keeps running out of sight. If that
+        would stop a running agent, Hive asks in a dialog in the middle of the screen:{" "}
+        <kbd>y</kbd> (or <kbd>Enter</kbd>) goes ahead, <kbd>a</kbd> goes ahead and stops asking
+        (saved as <code>[general] confirm_terminate = false</code>), any other key cancels. To leave everything running, detach instead. The
         arrangement of panes lasts until you quit <code>hive</code>; the sessions keep running
         either way. Tabs you aren&apos;t looking at cost nothing: Hive only mirrors what is on
         screen.

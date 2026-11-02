@@ -180,8 +180,51 @@ fn draw_overlay(frame: &mut Frame, body: Rect, app: &App, theme: &Theme) {
         Mode::Menu {
             target, selected, ..
         } => draw_menu(frame, app, target, selected, theme),
+        Mode::ConfirmKill(_) | Mode::ConfirmCloseTab(_) | Mode::ConfirmCloseSpace(_) => {
+            draw_confirm(frame, body, app, theme)
+        }
         _ => {}
     }
+}
+
+/// A confirmation in the middle of the screen, so it can't be missed.
+fn draw_confirm(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
+    let Some(d) = app.confirm_dialog() else {
+        return;
+    };
+    let key = Style::new().fg(theme.accent).add_modifier(Modifier::BOLD);
+    let text = Style::new().fg(theme.text);
+    let muted = Style::new().fg(theme.muted);
+    let mut choices = vec![("y", d.action.as_str())];
+    if d.worktree {
+        choices.push(("w", "Terminate and remove its worktree"));
+    }
+    choices.extend([("a", "Always: don't ask again"), ("esc", "Cancel")]);
+    let mut lines = vec![
+        Line::raw(""),
+        Line::from(Span::styled(
+            format!("  {}", d.question),
+            text.add_modifier(Modifier::BOLD),
+        )),
+    ];
+    if !d.detail.is_empty() {
+        lines.push(Line::from(Span::styled(format!("  {}", d.detail), muted)));
+    }
+    lines.push(Line::raw(""));
+    for (k, label) in &choices {
+        lines.push(Line::from(vec![
+            Span::styled(format!("  {k:>3}  "), key),
+            Span::styled(label.to_string(), text),
+        ]));
+    }
+    let width = lines
+        .iter()
+        .map(|l| l.width() as u16 + 4)
+        .max()
+        .unwrap_or(40)
+        .max(44);
+    let inner = popup(frame, area, width, lines.len() as u16 + 3, &d.title, theme);
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 /// A right-click menu where the click was.
@@ -764,42 +807,13 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             Span::styled(theme.glyphs.caret, key),
             Span::styled("  enter save · esc cancel · empty clears", muted),
         ],
-        Mode::ConfirmCloseTab(i) => {
-            let n = app.tabs.get(*i).map_or(0, |t| t.root.panes().len());
-            vec![Span::styled(
-                format!(
-                    " Close tab {} and terminate its {n} session(s)? y to confirm, any other key cancels ",
-                    i + 1
-                ),
-                bar.fg(theme.warning).add_modifier(Modifier::BOLD),
-            )]
-        }
-        Mode::ConfirmCloseSpace(w) => {
-            let alive = app
-                .sessions
-                .values()
-                .filter(|s| s.workspace == *w && s.state.is_alive())
-                .count();
-            vec![Span::styled(
-                format!(
-                    " Close {} and terminate its {alive} session(s)? y to confirm, any other key cancels ",
-                    app.workspace_name(*w)
-                ),
-                bar.fg(theme.warning).add_modifier(Modifier::BOLD),
-            )]
-        }
-        Mode::ConfirmKill(id) => {
-            let session = app.sessions.get(id);
-            let name = session.map(|s| s.label.as_str()).unwrap_or("session");
-            let choices = if session.is_some_and(|s| s.worktree.is_some()) {
-                "y terminate · w terminate and remove its worktree · any other key cancels"
-            } else {
-                "y to confirm, any other key cancels"
-            };
-            vec![Span::styled(
-                format!(" Terminate {name} (session {id})? {choices} "),
-                bar.fg(theme.warning).add_modifier(Modifier::BOLD),
-            )]
+        Mode::ConfirmKill(_) | Mode::ConfirmCloseTab(_) | Mode::ConfirmCloseSpace(_) => {
+            let mut keys = vec![("y", "confirm")];
+            if app.confirm_dialog().is_some_and(|d| d.worktree) {
+                keys.push(("w", "and remove worktree"));
+            }
+            keys.extend([("a", "always, don't ask again"), ("esc", "cancel")]);
+            hints(&keys)
         }
         Mode::AddWorkspace { input } => vec![
             Span::styled(" New space (folder): ", bar.fg(theme.accent)),
@@ -1438,6 +1452,39 @@ mod tests {
         (0..h)
             .map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect::<String>())
             .collect()
+    }
+
+    #[test]
+    fn confirmations_show_centred_with_their_choices() {
+        let mut app = App::new(Config::default(), Start::Attach(1), (100, 30));
+        app.on_connect();
+        let mut s = hive_protocol::SessionInfo {
+            id: 1,
+            agent: "claude".into(),
+            label: "api".into(),
+            command: vec!["claude".into()],
+            cwd: "/".into(),
+            state: SessionState::Running,
+            size: TermSize::DEFAULT,
+            created_at: 0,
+            attached_clients: 0,
+            workspace: 1,
+            branch: None,
+            worktree: None,
+            presence: None,
+        };
+        s.worktree = None;
+        app.on_server(ServerMessage::SessionList(vec![s]));
+        app.run(crate::keymap::Command::Kill);
+        let screen = rendered(&app, 100, 30);
+        let row = screen
+            .iter()
+            .position(|l| l.contains("Terminate api (session 1)?"))
+            .expect("dialog shown");
+        assert!((8..22).contains(&row), "not centred: row {row}");
+        let text = screen.join("\n");
+        assert!(text.contains("Always: don't ask again"));
+        assert!(text.contains("Cancel"));
     }
 
     #[test]
