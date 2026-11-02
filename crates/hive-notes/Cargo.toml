@@ -1,0 +1,13 @@
+[package]
+name = "hive-notes"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+hive-workspace = { version = "0.5.0", path = "../hive-workspace" }
+
+[dev-dependencies]
+tempfile = "3.27.0"

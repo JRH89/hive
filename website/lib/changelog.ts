@@ -10,6 +10,18 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    version: "0.5.0",
+    date: "2026-11-02T15:00:00-08:00",
+    title: "Notes and context for your agents",
+    changes: [
+      "hive notes: Hive's own notes app for a markdown or Obsidian vault, in a pane. A note tree, rendered notes (headings, lists, checkboxes, code, tables, callouts), wikilinks you follow with Tab and Enter, backlinks, search, new and daily notes, e to edit and o to open the note in Obsidian. Notes changed elsewhere reload on their own.",
+      "Ctrl+Space N now opens it beside the focused pane, instead of running $EDITOR (which could open a desktop editor and leave an empty tab). [integrations.obsidian] agent still picks something else.",
+      "hive context search, get, list and add: agents can look up project knowledge in the vault and record decisions in it. Output is path:line, or --json.",
+      "Sessions in a space with a vault get HIVE_VAULT.",
+      "Every integration opens in a split by default.",
+    ],
+  },
+  {
     version: "0.4.18",
     date: "2026-11-02T02:00:00-08:00",
     title: "A tree sidebar, if you want one",

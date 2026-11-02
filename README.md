@@ -31,7 +31,7 @@ Optional and off by default: hidden from the palette until enabled. Turn them on
 
 | Integration | Key | What it does |
 |---|---|---|
-| **Obsidian** | `Ctrl+Space N` | Opens the repository's Obsidian vault beside your agents. With `journal = true`, appends "claude finished in #3 api (main)" to today's daily note: a log of what your agents did |
+| **Notes** | `Ctrl+Space N` | Hive's own notes app on the repository's markdown or Obsidian vault, beside your agents: tree, rendered notes, wikilinks, backlinks, search, `o` to open in Obsidian. Agents read and add to it with `hive context`. With `journal = true`, appends "claude finished in #3 api (main)" to today's daily note |
 | **Review** | `Ctrl+Space G` | lazygit, tig or `git diff` in a split, in the agent's directory or worktree |
 | **GitHub** | `Ctrl+Space H` | `gh pr checks --watch` for the session's branch |
 | **Tasks** | `Ctrl+Space T` | Pick a just/npm/make/cargo task and run it beside the agent |
@@ -75,7 +75,7 @@ curl -fsSL https://github.com/jrh89/hive/releases/latest/download/install.sh | s
 irm https://github.com/jrh89/hive/releases/latest/download/install.ps1 | iex
 ```
 
-The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.4.18` to pin a version. Later, `hive update` upgrades in place (then `hive daemon stop` to restart the daemon on the new version; this ends running sessions, and `Ctrl+Space R` restores them).
+The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.5.0` to pin a version. Later, `hive update` upgrades in place (then `hive daemon stop` to restart the daemon on the new version; this ends running sessions, and `Ctrl+Space R` restores them).
 
 **From source** (Rust ≥ 1.89):
 

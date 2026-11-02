@@ -70,9 +70,9 @@ export const configSections: ConfigSection[] = [
     intro:
       "Optional tools, all off by default. Turn them on with Ctrl+Space I, which saves enabled here, or edit the file. Details and examples are on the integrations page.",
     options: [
-      { key: "integrations.obsidian.enabled", type: "bool", default: "false", meaning: "Ctrl+Space N opens the workspace's Obsidian vault." },
-      { key: "integrations.obsidian.agent", type: "string", default: '""', meaning: "Agent that opens the vault; empty uses $VISUAL, then $EDITOR, then vi." },
-      { key: "integrations.obsidian.open_in", type: '"tab" | "split"', default: '"tab"', meaning: "Where the notes pane opens." },
+      { key: "integrations.obsidian.enabled", type: "bool", default: "false", meaning: "Ctrl+Space N opens Hive's notes app on the workspace's vault." },
+      { key: "integrations.obsidian.agent", type: "string", default: '""', meaning: "An [agents.*] entry to open the vault with instead; empty uses Hive's notes app (hive notes)." },
+      { key: "integrations.obsidian.open_in", type: '"tab" | "split"', default: '"split"', meaning: "Where the notes pane opens." },
       { key: "integrations.obsidian.journal", type: "bool", default: "false", meaning: "Append a line to today's daily note when an agent finishes." },
       { key: "integrations.obsidian.journal_dir", type: "string", default: '""', meaning: "Folder of daily notes inside the vault; empty is the vault root." },
       { key: "integrations.review.enabled", type: "bool", default: "false", meaning: "Ctrl+Space G reviews changes in the session's directory." },

@@ -78,7 +78,8 @@ hive daemon stop     # ends every session (asks first); Ctrl+Space R restores th
           <tr><td><code>HIVE_LOG</code></td><td>Log level, e.g. <code>debug</code></td></tr>
           <tr><td><code>HIVE_DAEMON_BIN</code></td><td>The <code>hived</code> binary to start (default: next to <code>hive</code>, then <code>PATH</code>)</td></tr>
           <tr><td><code>NO_COLOR</code>, <code>COLORTERM</code>, <code>TERM</code></td><td>Colour detection, unless <code>[theme] colors</code> is set</td></tr>
-          <tr><td><code>VISUAL</code>, <code>EDITOR</code></td><td>The editor the Obsidian integration opens</td></tr>
+          <tr><td><code>VISUAL</code>, <code>EDITOR</code></td><td>The editor <kbd>e</kbd> opens in the notes app</td></tr>
+          <tr><td><code>HIVE_VAULT</code></td><td>The notes vault for <code>hive notes</code> and <code>hive context</code>. Hive sets it in sessions started in a space with a vault</td></tr>
           <tr><td><code>HIVE_INSTALL_DIR</code>, <code>HIVE_VERSION</code></td><td>For the install script and <code>hive update</code>: where to install, and which version</td></tr>
         </tbody>
       </table>
@@ -87,6 +88,7 @@ hive daemon stop     # ends every session (asks first); Ctrl+Space R restores th
         <tbody>
           <tr><td><code>HIVE=1</code></td><td>The program runs inside Hive</td></tr>
           <tr><td><code>HIVE_SESSION_ID</code></td><td>The session&apos;s id</td></tr>
+          <tr><td><code>HIVE_VAULT</code></td><td>The space&apos;s notes vault, when it has one</td></tr>
           <tr><td><code>HIVE_BIN_PATH</code></td><td>The <code>hive</code> binary, for <a href="/docs/agent-status/#report-agent">report-agent</a></td></tr>
           <tr><td><code>TERM=xterm-256color</code>, <code>COLORTERM=truecolor</code></td><td>What the session&apos;s terminal supports</td></tr>
         </tbody>

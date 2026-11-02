@@ -18,17 +18,18 @@ export const integrations: Integration[] = [
     id: "obsidian",
     name: "Obsidian notes",
     key: "Ctrl+Space N",
-    text: "Open your repository's Obsidian vault beside your agents, in an editor or an agent of your choice. With journaling on, Hive appends “claude finished in #3 api (main)” to today's daily note, so your vault keeps a log of what your agents did.",
+    text: "Open your repository's vault beside your agents in Hive's own notes app: a note tree, rendered markdown, wikilinks, backlinks and search, with o to jump to the note in Obsidian. With journaling on, Hive appends “claude finished in #3 api (main)” to today's daily note, so your vault keeps a log of what your agents did.",
     config: "[integrations.obsidian]",
     snippet: `[integrations.obsidian]
 enabled = true
 journal = true        # log agent activity
 journal_dir = "Daily" # daily notes folder
-agent = ""            # "" = $EDITOR
-open_in = "tab"       # or "split"`,
+agent = ""            # "" = Hive's notes app
+open_in = "split"     # or "tab"`,
     details: [
       "The vault is the nearest folder with .obsidian/ at or above the session's directory, or one level below the repository root.",
       "Asking again goes back to the notes session that is already open.",
+      "Agents can search and add to the same vault with hive context; see the notes docs.",
     ],
   },
   {

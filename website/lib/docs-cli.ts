@@ -92,6 +92,35 @@ hive new claude -- --model opus   # arguments after -- go to the agent`,
     summary: "Clear an agent's status report; screen detection takes over again.",
   },
   {
+    usage: "hive notes [DIR]",
+    summary:
+      "Open the notes app on the vault for the current directory (a folder with .obsidian/ in this repository), or DIR: a note tree, rendered notes, links, backlinks, search, new and daily notes. Press ? inside for keys.",
+  },
+  {
+    usage: "hive context search <QUERY...> [-n N] [--json]",
+    summary: "Find notes about something, best first, as path:line with the matching line. For agents and scripts.",
+    examples: `hive context search how are dirty worktrees handled`,
+  },
+  {
+    usage: "hive context get <NOTE> [--json]",
+    summary: "Print a note (by link name, path, or the start of its name), then what it links to and what links to it.",
+  },
+  {
+    usage: "hive context list [-n N] [--json]",
+    summary: "List notes, most recently changed first, with their tags.",
+  },
+  {
+    usage: "hive context add <NOTE> [TEXT...] [--by NAME]",
+    summary:
+      "Append a dated entry to a note (created if missing), signed with the session. The text is the remaining arguments or standard input. Never rewrites a note.",
+    examples: `hive context add Hive/Decisions "Tokens expire after 1h"`,
+  },
+  {
+    usage: "hive context path",
+    summary: "Print the vault's path.",
+    notes: "Every context command takes --vault DIR; otherwise it uses $HIVE_VAULT (set in Hive sessions), else the vault found from the current directory.",
+  },
+  {
     usage: "hive doctor",
     summary:
       "Check the installation: config file and whether it is valid, socket path, daemon, logs, detected colours and glyphs, and which agents are on PATH. Changes nothing, never starts the daemon, and exits non-zero on a problem.",
