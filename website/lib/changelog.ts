@@ -10,6 +10,15 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    version: "0.4.13",
+    date: "2026-11-01T17:54:36-08:00",
+    title: "Turn integrations on from the menu",
+    changes: [
+      "Ctrl+Space I (or \"integrations\" in the palette) lists every integration with a checkbox. Enter switches one on or off at once, no restart, and saves it to config.toml, keeping your comments.",
+      "The key of an integration that is off now points to the Integrations list.",
+    ],
+  },
+  {
     version: "0.4.12",
     date: "2026-10-31T22:31:24-07:00",
     title: "Closing ends the session",

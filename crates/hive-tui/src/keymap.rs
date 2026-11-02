@@ -48,11 +48,12 @@ pub enum Command {
     TakeControl,
     Detach,
     Help,
+    Integrations,
     Settings,
 }
 
 impl Command {
-    pub const ALL: [Command; 37] = [
+    pub const ALL: [Command; 38] = [
         Command::Palette,
         Command::SearchSessions,
         Command::NewSession,
@@ -89,6 +90,7 @@ impl Command {
         Command::TakeControl,
         Command::Detach,
         Command::Help,
+        Command::Integrations,
         Command::Settings,
     ];
 
@@ -131,6 +133,7 @@ impl Command {
             Command::TakeControl => "take_control",
             Command::Detach => "detach",
             Command::Help => "help",
+            Command::Integrations => "integrations",
             Command::Settings => "settings",
         }
     }
@@ -174,6 +177,7 @@ impl Command {
             Command::TakeControl => "Take input control",
             Command::Detach => "Detach (agents keep running)",
             Command::Help => "Help",
+            Command::Integrations => "Integrations: turn on and off",
             Command::Settings => "Settings (config file location)",
         }
     }
@@ -224,6 +228,7 @@ impl Command {
             Command::NewSpace => &["S"],
             Command::Usage => &["U"],
             Command::Layout => &["L"],
+            Command::Integrations => &["I"],
             Command::NewWorktreeSession => &[],
             Command::AddWorkspace | Command::RenameWorkspace | Command::Settings => &[],
         }

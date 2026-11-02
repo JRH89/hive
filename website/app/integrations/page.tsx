@@ -45,7 +45,9 @@ export default function Integrations() {
         <p className="eyebrow">YOUR TOOLS, BESIDE YOUR AGENTS</p>
         <h1 className="page-title">Integrations</h1>
         <p className="page-lede">
-          Every integration is off by default and hidden from the palette until you turn it on in{" "}
+          Every integration is off by default and hidden from the palette until you turn it on.
+          Press <kbd>Ctrl+Space</kbd> <kbd>I</kbd> (or type &ldquo;integrations&rdquo; in the
+          palette) for a checklist: Enter switches one on or off at once and saves it to{" "}
           <code>~/.config/hive/config.toml</code>. Each opens as an ordinary session beside your
           agents, so it can be split, moved and closed like any other.
         </p>

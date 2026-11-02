@@ -167,6 +167,98 @@ pub struct Integrations {
     pub usage: ToolPane,
 }
 
+impl Integrations {
+    /// Section names under `[integrations]`.
+    pub const NAMES: [&'static str; 7] = [
+        "review",
+        "github",
+        "tasks",
+        "obsidian",
+        "usage",
+        "desktop_notify",
+        "git_status",
+    ];
+
+    /// The `enabled` switch of `[integrations.<name>]`.
+    pub fn enabled_mut(&mut self, name: &str) -> Option<&mut bool> {
+        Some(match name {
+            "review" => &mut self.review.enabled,
+            "github" => &mut self.github.enabled,
+            "tasks" => &mut self.tasks.enabled,
+            "obsidian" => &mut self.obsidian.enabled,
+            "usage" => &mut self.usage.enabled,
+            "desktop_notify" => &mut self.desktop_notify.enabled,
+            "git_status" => &mut self.git_status.enabled,
+            _ => return None,
+        })
+    }
+
+    pub fn enabled(&self, name: &str) -> Option<bool> {
+        self.clone().enabled_mut(name).map(|on| *on)
+    }
+}
+
+/// Sets `enabled` in `[integrations.<name>]` of a config file's text,
+/// keeping everything else (comments included) as it is. Adds the line or
+/// the section if missing. Fails, changing nothing, if the result would not
+/// parse to the intended setting (e.g. the section is written inline).
+pub fn set_integration_enabled(text: &str, name: &str, on: bool) -> Result<String, String> {
+    let header = format!("[integrations.{name}]");
+    let is_table = |line: &str| line.trim_start().starts_with('[');
+    let code = |line: &str| -> String {
+        let line = line.split('#').next().unwrap_or("");
+        line.chars().filter(|c| !c.is_whitespace()).collect()
+    };
+    let lines: Vec<&str> = text.split_inclusive('\n').collect();
+    let mut out = String::with_capacity(text.len() + 40);
+    match lines.iter().position(|l| code(l) == header) {
+        Some(at) => {
+            let end = lines[at + 1..]
+                .iter()
+                .position(|l| is_table(l))
+                .map_or(lines.len(), |n| at + 1 + n);
+            let existing = (at + 1..end).find(|&i| {
+                let c = code(lines[i]);
+                c.starts_with("enabled=")
+            });
+            for (i, line) in lines.iter().enumerate() {
+                if Some(i) == existing {
+                    let (key, value) = line.split_once('=').unwrap_or((line, ""));
+                    let rest = value.trim_start();
+                    let rest = rest
+                        .strip_prefix("true")
+                        .or_else(|| rest.strip_prefix("false"))
+                        .unwrap_or(rest);
+                    out.push_str(&format!("{} = {on}{rest}", key.trim_end()));
+                } else {
+                    out.push_str(line);
+                }
+                if i == at && existing.is_none() {
+                    if !line.ends_with('\n') {
+                        out.push('\n');
+                    }
+                    out.push_str(&format!("enabled = {on}\n"));
+                }
+            }
+        }
+        None => {
+            out.push_str(text);
+            if !out.is_empty() && !out.ends_with('\n') {
+                out.push('\n');
+            }
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            out.push_str(&format!("{header}\nenabled = {on}\n"));
+        }
+    }
+    match Config::parse(&out) {
+        Ok(c) if c.integrations.enabled(name) == Some(on) => Ok(out),
+        Ok(_) => Err(format!("couldn't find where to set {header} enabled")),
+        Err(e) => Err(e.message().to_string()),
+    }
+}
+
 /// `[integrations.review]` / `[integrations.github]`: a tool opened in the
 /// focused session's directory.
 #[derive(Debug, Clone, Deserialize)]
@@ -509,6 +601,46 @@ mod tests {
         assert!(!i.review.enabled && !i.github.enabled && !i.tasks.enabled);
         assert!(!i.desktop_notify.enabled && !i.obsidian.journal);
         assert_eq!(i.review.open_in, OpenIn::Split);
+    }
+
+    #[test]
+    fn integration_switches_are_edited_in_place() {
+        let text = "# mine\n[integrations.review]\n# lazygit\nenabled = false # keep\ncommand = [\"tig\"]\n\n[integrations.usage]\nenabled = true\n";
+        let on = set_integration_enabled(text, "review", true).unwrap();
+        assert_eq!(
+            on,
+            text.replace("enabled = false # keep", "enabled = true # keep")
+        );
+        let off = set_integration_enabled(&on, "usage", false).unwrap();
+        assert!(off.ends_with("[integrations.usage]\nenabled = false\n"));
+        assert!(off.contains("enabled = true # keep"));
+
+        // A section without the line gets it; a missing section is added.
+        let added =
+            set_integration_enabled("[integrations.tasks]\nopen_in = \"tab\"", "tasks", true)
+                .unwrap();
+        assert_eq!(
+            added,
+            "[integrations.tasks]\nenabled = true\nopen_in = \"tab\""
+        );
+        let new =
+            set_integration_enabled("[general]\ntheme = \"hive\"", "git_status", true).unwrap();
+        assert_eq!(
+            new,
+            "[general]\ntheme = \"hive\"\n\n[integrations.git_status]\nenabled = true\n"
+        );
+        assert_eq!(
+            set_integration_enabled("", "obsidian", true).unwrap(),
+            "[integrations.obsidian]\nenabled = true\n"
+        );
+
+        // Forms it doesn't edit are refused rather than broken.
+        let inline = "[integrations]\nreview = { enabled = false }\n";
+        assert!(set_integration_enabled(inline, "review", true).is_err());
+        for name in Integrations::NAMES {
+            let c = Config::parse(&set_integration_enabled("", name, true).unwrap()).unwrap();
+            assert_eq!(c.integrations.enabled(name), Some(true));
+        }
     }
 
     #[test]

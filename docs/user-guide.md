@@ -86,6 +86,7 @@ Everything you type goes to the agent, except the **leader** key (`Ctrl+Space`) 
 | `t` | New tab with a terminal in this space (or click `+` in the tab bar) |
 | `S` | New space: a terminal in your home folder, in a space of its own (or click **+ new** in the sidebar) |
 | `L` | Open a layout (only with `[layouts]` defined, see below) |
+| `I` | Integrations: a checklist to turn each one on or off (saved to `config.toml`) |
 | `]` / `[` | Next / previous tab |
 | `w` | Workspaces |
 | `r` | Rename session |
@@ -126,7 +127,7 @@ open_in = "tab"     # or "split"
 
 ### More integrations (optional)
 
-All off by default; each adds one command (and key) when enabled:
+All off by default; each adds one command (and key) when enabled. The quickest way to switch them is **Integrations** in the palette (`Ctrl+Space I`): a checklist where Enter turns the selected one on or off. The change applies at once and is written to `[integrations.<name>] enabled` in `config.toml`, keeping your comments and other settings. Or edit the file:
 
 ```toml
 [integrations.review]         # Ctrl+Space G: lazygit, tig or git diff beside the agent

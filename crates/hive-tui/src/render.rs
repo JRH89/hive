@@ -741,13 +741,21 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                     Scope::Sessions => " Search sessions: ",
                     Scope::Tasks => " Run task: ",
                     Scope::Layouts => " Open layout: ",
+                    Scope::Integrations => " Integrations: ",
                     Scope::All => " Command: ",
                 },
                 bar.fg(theme.accent),
             ),
             Span::styled(query.clone(), bar.add_modifier(Modifier::BOLD)),
             Span::styled(theme.glyphs.caret, key),
-            Span::styled("  ↑↓ choose · enter run · esc close", muted),
+            Span::styled(
+                if *scope == Scope::Integrations {
+                    "  ↑↓ choose · enter turn on/off · esc close"
+                } else {
+                    "  ↑↓ choose · enter run · esc close"
+                },
+                muted,
+            ),
         ],
         Mode::Menu { .. } => hints(&[("↑↓", "choose"), ("enter", "run"), ("esc", "close")]),
         Mode::RenameTab { input, .. } => vec![
@@ -1304,7 +1312,7 @@ fn draw_palette(frame: &mut Frame, area: Rect, app: &App, selected: usize, theme
             };
             let fg = |c: Color| if chosen { theme.on_accent } else { c };
             let marker = match item.target {
-                Target::Command(_) => " ",
+                Target::Command(_) | Target::Integration(_) => " ",
                 Target::Session(id) => app
                     .sessions
                     .get(&id)

@@ -70,15 +70,15 @@ enum Phase {
 
 type Term = ratatui::DefaultTerminal;
 
-/// Carries out an [`app::Effect`]. Failures are logged, never shown: these
-/// are conveniences, and the bell and sidebar already carry the news.
-fn run_effect(config: &Config, effect: app::Effect) {
+/// Carries out an [`app::Effect`]. Failures of notifications and the journal
+/// are logged, never shown: these are conveniences, and the bell and sidebar
+/// already carry the news. A config file that can't be saved is returned,
+/// to show.
+fn run_effect(config: &Config, effect: app::Effect) -> Option<String> {
     match effect {
         app::Effect::Notify { title, body } => {
             let cmd = &config.integrations.desktop_notify.command;
-            let Some((program, args)) = cmd.split_first() else {
-                return;
-            };
+            let (program, args) = cmd.split_first()?;
             let spawned = std::process::Command::new(program)
                 .args(args)
                 .args([title, body])
@@ -108,7 +108,39 @@ fn run_effect(config: &Config, effect: app::Effect) {
                 tracing::warn!("journal {}: {e}", path.display());
             }
         }
+        app::Effect::SaveIntegration {
+            path,
+            name,
+            enabled,
+        } => {
+            if let Err(e) = save_integration(&path, name, enabled) {
+                return Some(format!(
+                    "Couldn't save [integrations.{name}] to {}: {e}. It applies until hive exits.",
+                    path.display()
+                ));
+            }
+        }
     }
+    None
+}
+
+/// Rewrites `[integrations.<name>] enabled` in the config file, through a
+/// temporary file so a failure never leaves it half written.
+fn save_integration(path: &std::path::Path, name: &str, enabled: bool) -> anyhow::Result<()> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e.into()),
+    };
+    let text = hive_core::config::set_integration_enabled(&text, name, enabled)
+        .map_err(anyhow::Error::msg)?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = path.with_extension("toml.tmp");
+    std::fs::write(&tmp, text)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
 }
 
 /// Validates the frontend parts of the config (theme, keys), so mistakes are
@@ -276,7 +308,9 @@ async fn connected(
             let _ = out.write_all(b"\x07").and_then(|_| out.flush());
         }
         for effect in std::mem::take(&mut app.effects) {
-            run_effect(&app.config, effect);
+            if let Some(msg) = run_effect(&app.config, effect) {
+                app.effect_failed(msg);
+            }
         }
 
         let out = tokio::select! {
