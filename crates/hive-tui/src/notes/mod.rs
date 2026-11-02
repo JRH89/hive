@@ -1374,7 +1374,7 @@ mod tests {
             app.on_key(ch(c));
         }
         let action = app.on_key(key(KeyCode::Enter));
-        let path = dir.path().canonicalize().unwrap().join("Ideas.md");
+        let path = app.vault.root.join("Ideas.md");
         assert_eq!(action, Some(Action::Edit(path.clone())));
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "# Ideas\n");
         assert_eq!(title(&app), "Ideas");
@@ -1392,8 +1392,10 @@ mod tests {
 
     #[test]
     fn edit_and_obsidian_name_the_note() {
-        let (dir, mut app) = vault();
-        let root = dir.path().canonicalize().unwrap();
+        let (_dir, mut app) = vault();
+        // A plain path, never Windows' `\\?\` form.
+        let root = app.vault.root.clone();
+        assert!(!root.display().to_string().starts_with(r"\\?\"));
         assert_eq!(
             app.on_key(ch('e')),
             Some(Action::Edit(root.join("Home.md")))
@@ -1401,8 +1403,8 @@ mod tests {
         let Some(Action::Open(url)) = app.on_key(ch('o')) else {
             panic!()
         };
-        assert!(url.starts_with("obsidian://open?path=/"));
-        assert!(url.ends_with("/Home.md"));
+        let file = root.join("Home.md").display().to_string();
+        assert_eq!(url, format!("obsidian://open?path={}", percent(&file)));
         assert_eq!(percent("a b/ü"), "a%20b/%C3%BC");
         assert_eq!(app.on_key(ch('q')), Some(Action::Quit));
     }

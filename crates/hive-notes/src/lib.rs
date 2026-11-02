@@ -57,7 +57,7 @@ pub struct Hit {
 impl Vault {
     /// Reads every `.md` file under `root`, skipping hidden directories.
     pub fn open(root: &Path) -> io::Result<Vault> {
-        let root = root.canonicalize()?;
+        let root = plain(root.canonicalize()?);
         let mut files = Vec::new();
         walk(&root, &mut files)?;
         let mut notes: Vec<Note> = files
@@ -578,6 +578,15 @@ pub fn fingerprint(root: &Path) -> (usize, Option<SystemTime>) {
     (files.len(), newest)
 }
 
+/// Windows' canonical form `\\?\C:\…` as plain `C:\…`, which editors,
+/// Obsidian and URLs understand. Network paths keep their form.
+fn plain(path: PathBuf) -> PathBuf {
+    match path.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
+        Some(rest) if !rest.starts_with("UNC") => PathBuf::from(rest),
+        _ => path,
+    }
+}
+
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> io::Result<()> {
     for entry in std::fs::read_dir(dir)? {
         let Ok(entry) = entry else { continue };
@@ -779,6 +788,14 @@ mod tests {
         // A unique start of a name is enough; an ambiguous one isn't.
         assert_eq!(v.find("adr"), Some(id("Decisions/ADR-1.md")));
         assert_eq!(v.find("Sta"), None);
+    }
+
+    #[test]
+    fn windows_verbatim_paths_are_made_plain() {
+        assert_eq!(plain(PathBuf::from(r"\\?\C:\v")), PathBuf::from(r"C:\v"));
+        let unc = PathBuf::from(r"\\?\UNC\host\share");
+        assert_eq!(plain(unc.clone()), unc);
+        assert_eq!(plain(PathBuf::from("/a/b")), PathBuf::from("/a/b"));
     }
 
     #[test]
