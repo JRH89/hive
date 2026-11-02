@@ -35,6 +35,25 @@ export default function Interface() {
         and <strong>menu</strong> for the command palette. <kbd>Ctrl+Space</kbd> <kbd>b</kbd>{" "}
         hides the sidebar; it also hides itself in narrow terminals.
       </p>
+      <h3 id="tree">The sidebar as one tree</h3>
+      <pre className="code">
+        <code>{`  SPACES
+  ▾ ● hive             2
+      master
+     ▌● api            1
+        master
+      ● docs           2
+        master
+  ▸ · site             1`}</code>
+      </pre>
+      <p>
+        Prefer one list? Set <code>sidebar_tree = true</code> under <code>[general]</code>, or run{" "}
+        <strong>sidebar_tree</strong> from the palette (<kbd>Ctrl+Space</kbd> <kbd>:</kbd>), which
+        saves it. Each space then has its agents indented under it. In the sidebar,{" "}
+        <kbd>Space</kbd> folds or unfolds the space under the cursor, <kbd>←</kbd> folds it,{" "}
+        <kbd>Enter</kbd> or <kbd>→</kbd> unfolds it, and clicking the arrow does the same. A folded
+        space still shows the status of its most urgent agent. It is off by default.
+      </p>
 
       <h3 id="status">Agent status</h3>
       <table className="table">

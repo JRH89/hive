@@ -260,6 +260,8 @@ fn agent_status(s: &SessionInfo) -> Option<AgentStatus> {
 pub enum SidebarHit {
     Session(SessionId),
     Workspace(WorkspaceId),
+    /// The arrow of a space in the tree sidebar: collapses or expands it.
+    Collapse(WorkspaceId),
     /// The "new" button: a terminal in a new tab; `cd` somewhere and its
     /// space follows.
     New,
@@ -333,6 +335,8 @@ pub struct App {
     pub done: BTreeSet<SessionId>,
     /// Ring the terminal bell after this update.
     pub bell: bool,
+    /// Spaces collapsed in the tree sidebar (`[general] sidebar_tree`).
+    pub collapsed: BTreeSet<WorkspaceId>,
     /// Exited sessions this window asked the daemon to remove.
     auto_removing: BTreeSet<SessionId>,
     /// The ended-sessions notice was shown (once per run).
@@ -645,6 +649,7 @@ impl App {
             remove_worktree_after: BTreeMap::new(),
             done: BTreeSet::new(),
             bell: false,
+            collapsed: BTreeSet::new(),
             auto_removing: BTreeSet::new(),
             told_ended: false,
             tasks: None,
@@ -1601,7 +1606,9 @@ impl App {
             .map(|(_, h)| *h);
         if matches!(m.kind, MouseEventKind::Down(MouseButton::Right)) {
             let target = match hit {
-                Some(SidebarHit::Workspace(w)) => Some(MenuTarget::Space(w)),
+                Some(SidebarHit::Workspace(w) | SidebarHit::Collapse(w)) => {
+                    Some(MenuTarget::Space(w))
+                }
                 Some(SidebarHit::Tab(i)) => Some(MenuTarget::Tab(i)),
                 Some(SidebarHit::Session(id)) => Some(MenuTarget::Session(id)),
                 _ => None,
@@ -1628,6 +1635,10 @@ impl App {
                 }
                 (MouseEventKind::Down(MouseButton::Left), Some(SidebarHit::Workspace(w))) => {
                     self.open_space(w)
+                }
+                (MouseEventKind::Down(MouseButton::Left), Some(SidebarHit::Collapse(w))) => {
+                    self.toggle_collapsed(w);
+                    Vec::new()
                 }
                 (MouseEventKind::Down(MouseButton::Left), Some(SidebarHit::New)) => {
                     self.new_space()
@@ -1772,6 +1783,27 @@ impl App {
     fn on_sidebar_key(&mut self, key: KeyEvent) -> Vec<ClientMessage> {
         if let Some(n) = digit(&key) {
             return self.switch_nth(n);
+        }
+        // The tree: Space folds the cursor's space; Enter or → on a folded
+        // one opens it again, ← folds it.
+        let fold = self
+            .cursor
+            .and_then(|id| self.sessions.get(&id))
+            .map(|s| s.workspace)
+            .filter(|_| self.config.general.sidebar_tree);
+        if let Some(w) = fold {
+            let folded = self.collapsed.contains(&w);
+            let unfold = matches!(
+                key.code,
+                KeyCode::Enter | KeyCode::Right | KeyCode::Char('l')
+            );
+            if key.code == KeyCode::Char(' ')
+                || (folded && unfold)
+                || (!folded && matches!(key.code, KeyCode::Left | KeyCode::Char('h')))
+            {
+                self.toggle_collapsed(w);
+                return Vec::new();
+            }
         }
         match key.code {
             KeyCode::Down | KeyCode::Char('j') => self.move_cursor(1),
@@ -1954,6 +1986,19 @@ impl App {
             Command::Detach => return self.detach(),
             Command::Help => self.mode = Mode::Help,
             Command::RestoreSessions => return self.restore_sessions(),
+            Command::SidebarTree => {
+                let on = !self.config.general.sidebar_tree;
+                self.config.general.sidebar_tree = on;
+                self.save_setting("general", "sidebar_tree", on);
+                self.set_status(
+                    Tone::Info,
+                    if on {
+                        "Sidebar: one tree. Space in the sidebar (or a click on the arrow) folds a space."
+                    } else {
+                        "Sidebar: SPACES, then AGENTS."
+                    },
+                );
+            }
             Command::Integrations => {
                 self.mode = Mode::Palette {
                     query: String::new(),
@@ -2146,7 +2191,11 @@ impl App {
     }
 
     fn move_cursor(&mut self, delta: isize) {
-        let order = self.order();
+        let order = if self.config.general.sidebar_tree {
+            self.tree_stops()
+        } else {
+            self.order()
+        };
         if order.is_empty() {
             return;
         }
@@ -2156,6 +2205,43 @@ impl App {
             .unwrap_or(0) as isize;
         let next = (idx + delta).clamp(0, order.len() as isize - 1);
         self.cursor = Some(order[next as usize]);
+    }
+
+    /// Where the cursor can rest in the tree sidebar: every agent of an open
+    /// space, and the first agent of a folded one (standing for the space).
+    fn tree_stops(&self) -> Vec<SessionId> {
+        let agents = self.agents();
+        let mut stops = Vec::new();
+        for (w, _) in self.spaces() {
+            let mut of_space = agents
+                .iter()
+                .copied()
+                .filter(|id| self.sessions.get(id).is_some_and(|s| s.workspace == w));
+            if self.collapsed.contains(&w) {
+                stops.extend(of_space.next());
+            } else {
+                stops.extend(of_space);
+            }
+        }
+        stops
+    }
+
+    pub fn toggle_collapsed(&mut self, w: WorkspaceId) {
+        if !self.collapsed.remove(&w) {
+            self.collapsed.insert(w);
+            // The cursor stands on the folded space's row.
+            if self
+                .cursor
+                .and_then(|id| self.sessions.get(&id))
+                .map(|s| s.workspace)
+                == Some(w)
+            {
+                self.cursor = self
+                    .tree_stops()
+                    .into_iter()
+                    .find(|id| self.sessions.get(id).is_some_and(|s| s.workspace == w));
+            }
+        }
     }
 
     /// Shows `id` in the terminal panel and focuses it. A lost session can't
@@ -4889,6 +4975,48 @@ mod tests {
             attaches(app.on_terminal_event(ch('2'))),
             attach_msg(&app, 2)
         );
+    }
+
+    #[test]
+    fn the_tree_sidebar_is_switched_on_and_folds_from_the_keyboard() {
+        let mut app = app_with_workspaces();
+        app.config_path = Some("/tmp/config.toml".into());
+        assert!(!app.config.general.sidebar_tree);
+        app.run(Command::SidebarTree);
+        assert!(app.config.general.sidebar_tree);
+        assert!(matches!(
+            app.effects.last(),
+            Some(Effect::SaveSetting { table, key: "sidebar_tree", value: true, .. })
+                if table == "general"
+        ));
+        // Sessions 1-3 are agents in space 1; one more in space 2.
+        app.on_server(ServerMessage::SessionUpdated(SessionInfo {
+            workspace: 2,
+            ..info(4, SessionState::Running)
+        }));
+        app.focus = Focus::Sidebar;
+        app.cursor = Some(2);
+        // Space folds the cursor's space; the cursor stands on its row.
+        app.on_terminal_event(ch(' '));
+        assert!(app.collapsed.contains(&1));
+        assert_eq!(app.cursor, Some(1));
+        // j steps from the folded space straight to the next space's agent.
+        app.on_terminal_event(ch('j'));
+        assert_eq!(app.cursor, Some(4));
+        app.on_terminal_event(ch('k'));
+        assert_eq!(app.cursor, Some(1));
+        // Enter on a folded space opens it rather than switching.
+        assert!(
+            app.on_terminal_event(key(KeyCode::Enter, KeyModifiers::NONE))
+                .is_empty()
+        );
+        assert!(app.collapsed.is_empty());
+        // ← folds again.
+        app.on_terminal_event(key(KeyCode::Left, KeyModifiers::NONE));
+        assert!(app.collapsed.contains(&1));
+        // Off again: the two-list sidebar, Space does nothing special.
+        app.run(Command::SidebarTree);
+        assert!(!app.config.general.sidebar_tree);
     }
 
     #[test]

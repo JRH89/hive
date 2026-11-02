@@ -10,6 +10,14 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    version: "0.4.18",
+    date: "2026-11-02T02:00:00-08:00",
+    title: "A tree sidebar, if you want one",
+    changes: [
+      "An optional sidebar layout: one tree, each space with its agents indented under it. Space in the sidebar (or a click on the arrow) folds a space, and a folded space still shows its most urgent agent's status. Turn it on with sidebar_tree in the palette, or [general] sidebar_tree = true. The two-list sidebar stays the default.",
+    ],
+  },
+  {
     version: "0.4.17",
     date: "2026-11-02T00:30:00-08:00",
     title: "Quit agents leave the list",

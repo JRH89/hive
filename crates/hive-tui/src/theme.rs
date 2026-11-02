@@ -47,6 +47,8 @@ pub struct Glyphs {
     /// Left edge of the attached session's sidebar row.
     pub current: &'static str,
     pub group: &'static str,
+    /// A collapsed space in the tree sidebar (`group` is an expanded one).
+    pub collapsed: &'static str,
     /// Text-input caret.
     pub caret: &'static str,
     pub ellipsis: &'static str,
@@ -67,6 +69,7 @@ impl Glyphs {
         done: "✓",
         current: "▌",
         group: "▾",
+        collapsed: "▸",
         caret: "▏",
         ellipsis: "…",
         ascii: false,
@@ -84,6 +87,7 @@ impl Glyphs {
         done: "+",
         current: ">",
         group: "-",
+        collapsed: "+",
         caret: "_",
         ellipsis: "~",
         ascii: true,

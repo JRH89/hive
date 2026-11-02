@@ -75,6 +75,9 @@ pub struct General {
     /// Ask before terminating a session, or closing a pane, tab or space
     /// that would stop a running agent.
     pub confirm_terminate: bool,
+    /// The sidebar as one tree: each space with its agents indented under
+    /// it, collapsible. Off: SPACES, then AGENTS.
+    pub sidebar_tree: bool,
     /// Ignored: from early versions of the spec, accepted so configs that
     /// set it still load.
     #[serde(rename = "restore_workspace")]
@@ -87,6 +90,7 @@ impl Default for General {
             theme: "hive-dark".into(),
             default_agent: "claude".into(),
             confirm_terminate: true,
+            sidebar_tree: false,
             _restore_workspace: None,
         }
     }
@@ -663,6 +667,13 @@ mod tests {
         );
         assert!(!Config::parse(&general).unwrap().general.confirm_terminate);
         assert!(Config::default().general.confirm_terminate);
+        assert!(!Config::default().general.sidebar_tree);
+        assert!(
+            Config::parse("[general]\nsidebar_tree = true\n")
+                .unwrap()
+                .general
+                .sidebar_tree
+        );
 
         // Forms it doesn't edit are refused rather than broken.
         let inline = "[integrations]\nreview = { enabled = false }\n";

@@ -7,6 +7,9 @@ default_agent = "claude"
 # Ask before terminating a session or closing a pane, tab or space with a
 # running agent. "a" in the dialog sets this to false.
 confirm_terminate = true
+# The sidebar as one tree: each space with its agents under it, foldable
+# (Space in the sidebar, or click the arrow). Off: SPACES, then AGENTS.
+sidebar_tree = false
 # hive-dark (default), hive-light, ansi (16 colours), mono (no colour)
 theme = "hive-dark"
 
@@ -126,7 +129,8 @@ jump_modifier = "alt"
 # next_session, prev_session, next_workspace, prev_workspace, sidebar,
 # toggle_sidebar, split_right, split_down, focus_next_pane, zoom, close_pane,
 # new_tab, next_tab, prev_tab, close_tab, rename_session, kill_session,
-# take_control, detach, help, integrations, restore_sessions, settings,
+# take_control, detach, help, integrations, restore_sessions, sidebar_tree,
+# settings,
 # layout (with [layouts]),
 # notes, review, pull_request, run_task, usage (with their [integrations.*])
 palette = [":", "P"]

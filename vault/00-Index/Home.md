@@ -43,6 +43,7 @@ Knowledge base for building **Hive**, a terminal multiplexer for AI coding agent
 - [[ADR-0023 Layouts are client-side]]
 - [[ADR-0024 Integrations toggle from the TUI]]
 - [[ADR-0025 Keep sessions across daemon restarts]]
+- [[ADR-0026 Optional tree sidebar]]
 
 ## Ongoing
 - [[Website Design]]: approved website direction, branding, scope and acceptance
