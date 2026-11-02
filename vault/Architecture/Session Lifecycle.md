@@ -10,7 +10,7 @@ source: crates/hive-daemon/src/session.rs
 - Today a session is `Running` as soon as `spawn_command` returns. `Starting` is reserved for adapters that will need a readiness step.
 - A spawn failure (e.g. a binary missing from PATH) is returned to the client as `Error` and is **not** registered. The CLI and TUI pre-check PATH via `launch::find_executable` for a friendlier message.
 - `Failed` is used when `child.wait()` itself errors.
-- An exited session **stays listed** (the final screen is still viewable) until it is killed or removed.
+- An exited session **stays listed** in the daemon (`hive list`; the final screen is still viewable) until it is killed or removed. The TUI removes agents and terminals that exit with code 0 (KillSession; an "unknown id" error from a race with another window is ignored), on the transition and for any found at start. Non-zero exits and integration panes (tasks, review, …) stay.
 - `Lost`: in a daemon started after a crash or a graceful stop (ADR-0025; `hive daemon stop` also writes `restore.json` for old daemons that forgot). The process is gone; the record (from `sessions.json`) can be renamed, dismissed, or relaunched from the TUI sidebar (Enter) or all at once (Leader `R`), resuming the agent recorded in `running` (claude `--continue`, codex `resume --last`; inside a shell as `shell -c "agent …; exec shell"`). Never attachable. See [[ADR-0025 Keep sessions across daemon restarts]]. See [[ADR-0009 Persist session metadata, mark lost sessions]].
 
 ## Placement
