@@ -333,6 +333,8 @@ pub struct App {
     pub done: BTreeSet<SessionId>,
     /// Ring the terminal bell after this update.
     pub bell: bool,
+    /// Exited sessions this window asked the daemon to remove.
+    auto_removing: BTreeSet<SessionId>,
     /// The ended-sessions notice was shown (once per run).
     told_ended: bool,
     /// Tasks the palette is offering (`run_task`).
@@ -458,6 +460,21 @@ pub enum Effect {
         key: &'static str,
         value: bool,
     },
+}
+
+/// Whether an ended session goes away by itself: an agent or terminal that
+/// exited cleanly. Integration panes keep their output.
+fn removed_on_exit(s: &SessionInfo) -> bool {
+    let kept = [
+        NOTES_AGENT,
+        REVIEW_AGENT,
+        GITHUB_AGENT,
+        TASK_AGENT,
+        USAGE_AGENT,
+        LAYOUT_AGENT,
+    ];
+    matches!(s.state, SessionState::Exited { code: Some(0), .. })
+        && !kept.contains(&s.agent.as_str())
 }
 
 /// A shell that takes `-c "…; exec shell"`: sh, bash, zsh, fish and kin.
@@ -628,6 +645,7 @@ impl App {
             remove_worktree_after: BTreeMap::new(),
             done: BTreeSet::new(),
             bell: false,
+            auto_removing: BTreeSet::new(),
             told_ended: false,
             tasks: None,
             effects: Vec::new(),
@@ -1217,6 +1235,12 @@ impl App {
         let mut out = Vec::new();
         match msg {
             ServerMessage::Welcome { .. } => {}
+            // Another window removed an exited session first.
+            ServerMessage::Error { message }
+                if message
+                    .strip_prefix("no session with id ")
+                    .and_then(|id| id.parse().ok())
+                    .is_some_and(|id: SessionId| self.auto_removing.contains(&id)) => {}
             ServerMessage::Error { message } => {
                 self.awaiting_create = false;
                 self.layout_queue.clear();
@@ -1231,6 +1255,16 @@ impl App {
             }
             ServerMessage::SessionList(list) => {
                 self.sessions = list.into_iter().map(|s| (s.id, s)).collect();
+                // Agents that quit while no window was open.
+                let quit: Vec<SessionInfo> = self
+                    .sessions
+                    .values()
+                    .filter(|s| removed_on_exit(s))
+                    .cloned()
+                    .collect();
+                for s in quit {
+                    out.extend(self.on_exit(&s));
+                }
                 let ended = self
                     .sessions
                     .values()
@@ -1404,11 +1438,19 @@ impl App {
                     self.space = Some(info.workspace);
                 }
                 let old = self.sessions.get(&info.id).and_then(agent_status);
+                let was_alive = self
+                    .sessions
+                    .get(&info.id)
+                    .is_some_and(|s| s.state.is_alive());
                 self.note_activity(old, &info);
+                if was_alive && !info.state.is_alive() {
+                    out.extend(self.on_exit(&info));
+                }
                 self.sessions.insert(info.id, info);
             }
             ServerMessage::SessionRemoved(id) => {
                 self.sessions.remove(&id);
+                self.auto_removing.remove(&id);
                 self.done.remove(&id);
                 out.extend(self.drop_pane(id));
                 if matches!(&self.status, Some((Tone::Info, m)) if *m == terminating(id)) {
@@ -2374,6 +2416,28 @@ impl App {
     /// Starts a new session from a lost session's agent, label, command and
     /// directory, then forgets the lost record. The environment comes from
     /// this client because environments are never persisted.
+    /// A session's process ended. An agent or terminal you quit (exit code
+    /// 0) leaves the list and its pane; a failure stays so its last screen
+    /// can be read, as do task, review and other integration panes.
+    fn on_exit(&mut self, info: &SessionInfo) -> Vec<ClientMessage> {
+        if removed_on_exit(info) {
+            self.auto_removing.insert(info.id);
+            return vec![ClientMessage::KillSession(info.id)];
+        }
+        if let SessionState::Exited {
+            code: Some(code), ..
+        } = info.state
+            && code != 0
+            && is_agent(info)
+        {
+            self.set_status(
+                Tone::Warning,
+                format!("{} exited with code {code}. x removes it.", info.label),
+            );
+        }
+        Vec::new()
+    }
+
     fn relaunch(&mut self, id: SessionId) -> Vec<ClientMessage> {
         let Some(req) = self.relaunch_request(id) else {
             return Vec::new();
@@ -4516,7 +4580,7 @@ mod tests {
             info(
                 3,
                 SessionState::Exited {
-                    code: Some(0),
+                    code: Some(2),
                     signal: None,
                 },
             ),
@@ -4815,7 +4879,7 @@ mod tests {
         app.on_server(ServerMessage::SessionUpdated(info(
             1,
             SessionState::Exited {
-                code: Some(0),
+                code: Some(1),
                 signal: None,
             },
         )));
@@ -4825,6 +4889,55 @@ mod tests {
             attaches(app.on_terminal_event(ch('2'))),
             attach_msg(&app, 2)
         );
+    }
+
+    #[test]
+    fn agents_you_quit_leave_the_list_and_failures_stay() {
+        let mut app = app();
+        let quit = SessionState::Exited {
+            code: Some(0),
+            signal: None,
+        };
+        // Quitting the agent removes the session (and so its pane).
+        assert_eq!(
+            app.on_server(ServerMessage::SessionUpdated(info(2, quit.clone()))),
+            vec![ClientMessage::KillSession(2)]
+        );
+        // Another window removed it first: no error shown.
+        app.set_status(Tone::Info, "before");
+        app.on_server(ServerMessage::Error {
+            message: "no session with id 2".into(),
+        });
+        assert!(matches!(&app.status, Some((Tone::Info, m)) if m == "before"));
+        app.on_server(ServerMessage::SessionRemoved(2));
+        assert!(!app.agents().contains(&2));
+        // A failure stays, with a hint.
+        let failed = SessionState::Exited {
+            code: Some(1),
+            signal: None,
+        };
+        assert!(
+            app.on_server(ServerMessage::SessionUpdated(info(3, failed)))
+                .is_empty()
+        );
+        assert!(matches!(&app.status, Some((Tone::Warning, m)) if m.contains("code 1")));
+        // A task's output is kept even when it succeeds.
+        let task = SessionInfo {
+            agent: TASK_AGENT.into(),
+            ..info(1, quit.clone())
+        };
+        assert!(
+            app.on_server(ServerMessage::SessionUpdated(task))
+                .is_empty()
+        );
+        // Agents that quit while no window was open go on start.
+        let mut fresh = App::new(Config::default(), Start::Auto, (100, 30));
+        let out = fresh.on_server(ServerMessage::SessionList(vec![
+            info(5, quit),
+            info(6, SessionState::Running),
+        ]));
+        assert!(out.contains(&ClientMessage::KillSession(5)));
+        assert!(!out.contains(&ClientMessage::KillSession(6)));
     }
 
     #[test]

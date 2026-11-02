@@ -10,6 +10,14 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    version: "0.4.17",
+    date: "2026-11-02T00:30:00-08:00",
+    title: "Quit agents leave the list",
+    changes: [
+      "Quitting an agent (or typing exit in a terminal) removes it from the sidebar and closes its pane, including agents that quit while no window was open. One that fails stays, marked exited with its code, so you can read what went wrong; x removes it. Task, review and other integration panes keep their output.",
+    ],
+  },
+  {
     version: "0.4.16",
     date: "2026-11-01T23:30:00-08:00",
     title: "Restarts keep your sessions",

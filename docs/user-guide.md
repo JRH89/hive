@@ -59,7 +59,7 @@ The sidebar lists your **spaces** (one per repository, with its branch and agent
 | Mark | Meaning |
 |---|---|
 | `●` / `*` | running |
-| `○` / `o` | exited |
+| `○` / `o` | exited with an error (`x` removes it). An agent or terminal you quit normally leaves the list by itself |
 | `✕` / `x` | failed to start or crashed |
 | `◌` / `?` | ended: it was running when the daemon stopped. Press enter on it to relaunch, or `Ctrl+Space R` for all |
 | `▌` / `>` | the session you are attached to |
