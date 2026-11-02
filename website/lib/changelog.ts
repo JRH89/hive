@@ -11,7 +11,7 @@ export type Release = {
 export const releases: Release[] = [
   {
     version: "0.5.1",
-    date: "2026-11-02T22:00:00-08:00",
+    date: "2026-11-02T13:49:41-08:00",
     title: "q closes the notes pane",
     changes: [
       "Quitting the notes app (q) or lazygit in the review pane now closes its pane, instead of leaving it behind to be terminated by hand. Pull request checks, tasks and usage still keep their output after they finish.",
@@ -19,7 +19,7 @@ export const releases: Release[] = [
   },
   {
     version: "0.5.0",
-    date: "2026-11-02T15:00:00-08:00",
+    date: "2026-11-02T13:26:52-08:00",
     title: "Notes and context for your agents",
     changes: [
       "hive notes: Hive's own notes app for a markdown or Obsidian vault, in a pane. A note tree, rendered notes (headings, lists, checkboxes, code, tables, callouts), wikilinks you follow with Tab and Enter, backlinks, search, new and daily notes, e to edit and o to open the note in Obsidian. Notes changed elsewhere reload on their own.",
@@ -31,7 +31,7 @@ export const releases: Release[] = [
   },
   {
     version: "0.4.18",
-    date: "2026-11-02T02:00:00-08:00",
+    date: "2026-11-02T12:26:15-08:00",
     title: "A tree sidebar, if you want one",
     changes: [
       "An optional sidebar layout: one tree, each space with its agents indented under it. Space in the sidebar (or a click on the arrow) folds a space, and a folded space still shows its most urgent agent's status. Turn it on with sidebar_tree in the palette, or [general] sidebar_tree = true. The two-list sidebar stays the default.",
@@ -39,7 +39,7 @@ export const releases: Release[] = [
   },
   {
     version: "0.4.17",
-    date: "2026-11-02T00:30:00-08:00",
+    date: "2026-11-01T22:51:18-08:00",
     title: "Quit agents leave the list",
     changes: [
       "Quitting an agent (or typing exit in a terminal) removes it from the sidebar and closes its pane, including agents that quit while no window was open. One that fails stays, marked exited with its code, so you can read what went wrong; x removes it. Task, review and other integration panes keep their output.",
@@ -47,7 +47,7 @@ export const releases: Release[] = [
   },
   {
     version: "0.4.16",
-    date: "2026-11-01T23:30:00-08:00",
+    date: "2026-11-01T22:23:55-08:00",
     title: "Restarts keep your sessions",
     changes: [
       "Stopping or upgrading the daemon no longer forgets your sessions. They come back as ended, in their spaces, and hive tells you how many when it opens.",
