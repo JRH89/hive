@@ -65,6 +65,7 @@ export const keyGroups: KeyGroup[] = [
       { name: "take_control", keys: ["a"], title: "Take input control from another window" },
       { name: "detach", keys: ["d", "q"], title: "Detach: leave Hive, agents keep running" },
       { name: "rename_workspace", keys: [], title: "Rename workspace" },
+      { name: "restore_sessions", keys: ["R"], title: "Restore ended sessions: relaunch everything from before a restart" },
     ],
   },
   {

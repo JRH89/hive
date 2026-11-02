@@ -31,14 +31,14 @@ Logs never contain environment variables or agent output.
 | An agent shows no status | Only agents with screen rules or that report their status show one. `hive agents -a` lists them |
 | Closing tabs or panes takes seconds | The daemon is older than `hive` (Hive warns at startup). Daemons before 0.4.12 waited 3 s for shells. `hive daemon stop` (ends sessions), then `hive` |
 | Hive asks before every close | Press `a` in the dialog, or set `[general] confirm_terminate = false` |
-| `daemon speaks protocol vN, this client speaks vM` | A daemon from an older version is still running. `hive daemon stop` (ends its sessions), then run `hive` again |
+| `daemon speaks protocol vN, this client speaks vM` | A daemon from an older version is still running. `hive daemon stop`, then run `hive` again and press `Ctrl+Space R` to restore the sessions |
 | `` `claude` (agent `claude`) was not found on PATH `` | The agent isn't installed or isn't on the `PATH` of the shell you ran `hive` from. Check `hive doctor`; set an absolute `command` under `[agents.<name>]` if needed |
 | `hive: invalid config: …` | The message names the key. Fix it, or check with `hive doctor`. A config error never leaves a broken screen behind |
 | `Ctrl+Space` does nothing | Your desktop or terminal uses it (input-method switching often does). Pick another leader: `[keys] leader = "ctrl+a"` |
 | Keys meant for the agent are swallowed | Only `Ctrl+Space` is intercepted. To send it to the agent, press it twice |
 | Boxes, question marks or misaligned borders | The font or locale lacks the Unicode glyphs. Set `[theme] glyphs = "ascii"`, or use a UTF-8 locale |
 | Colours look wrong or garish | Force a depth (`[theme] colors = "256"`), try `theme = "ansi"` to use your terminal's palette, or `theme = "hive-light"` on a light background |
-| Sessions show `◌ lost` | The daemon stopped unexpectedly (crash, `kill -9`, reboot). The processes are gone; only their details were kept. Press enter on one to relaunch it in the same directory, or `x` to forget it |
+| Sessions show `◌ ended` | The daemon stopped (`hive daemon stop`, an upgrade, a crash or a reboot). The processes are gone; their details were kept. `Ctrl+Space R` restores them all (Claude Code and Codex resume their last conversation); enter relaunches one, `x` forgets it |
 | "Observing" in the status bar, typing does nothing | Another window controls the session. `Ctrl+Space a` takes control |
 | Terminating something takes a few seconds | It ignored SIGHUP and SIGTERM, so Hive waited `[daemon] kill_timeout_secs` (default 3) before forcing it |
 | `Kept worktree …: it has uncommitted changes` | Working as intended. Commit or stash, or `hive worktree rm <path> --force` |

@@ -209,8 +209,13 @@ enum WorktreeAction {
 enum DaemonAction {
     /// Start the daemon if it is not running
     Start,
-    /// Stop the daemon. Terminates all sessions
-    Stop,
+    /// Stop the daemon. Ends all sessions; they are offered for relaunch
+    /// next time
+    Stop {
+        /// Don't ask, even with sessions running
+        #[arg(short, long)]
+        yes: bool,
+    },
     /// Show whether the daemon is running
     Status,
 }
@@ -508,13 +513,39 @@ where
                 daemon_pid,
             }) => println!(
                 "hived running (pid {daemon_pid}) but speaks protocol v{daemon}, \
-                 not v{client}: run `hive daemon stop` (ends its sessions)\nsocket: {}",
+                 not v{client}: run `hive daemon stop` (ends its sessions; Ctrl+Space R in hive restarts them)\nsocket: {}",
                 paths.endpoint()
             ),
             Err(e) => return Err(e.into()),
         },
-        DaemonAction::Stop => match connect(false).await {
+        DaemonAction::Stop { yes } => match connect(false).await {
             Ok(mut client) => {
+                let sessions = list(&mut client).await?;
+                let alive: Vec<&SessionInfo> =
+                    sessions.iter().filter(|s| s.state.is_alive()).collect();
+                if !alive.is_empty() {
+                    println!("Stopping hived ends {} session(s):", alive.len());
+                    for s in &alive {
+                        let agent = s.presence.as_ref().map_or(s.agent.as_str(), |p| &p.agent);
+                        println!("  #{:<4} {:<10} {}", s.id, agent, s.cwd);
+                    }
+                    println!(
+                        "They come back in hive to relaunch (Ctrl+Space R restores them all; agents resume their conversation)."
+                    );
+                    use std::io::IsTerminal as _;
+                    if !yes && std::io::stdin().is_terminal() && !confirm("Stop hived?")? {
+                        println!("Left running.");
+                        return Ok(());
+                    }
+                }
+                // Kept by daemons from 0.4.16 themselves; this covers older
+                // ones, which forget their sessions on shutdown.
+                if let Err(e) = paths
+                    .ensure_state_dir()
+                    .and_then(|_| hive_daemon::save_for_restore(&paths.state_dir, &sessions))
+                {
+                    eprintln!("warning: couldn't save sessions to restore: {e}");
+                }
                 client.send(&ClientMessage::Shutdown).await?;
                 // Wait for the connection to close, i.e. the daemon to exit.
                 let _ = tokio::time::timeout(Duration::from_secs(15), async {

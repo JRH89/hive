@@ -1,9 +1,14 @@
 //! Session metadata persisted across daemon restarts.
 //!
 //! Processes cannot survive the daemon, so this only lets a new daemon show
-//! what was running when the previous one died (as `Lost` sessions that can
-//! be relaunched) and keeps session ids unique across restarts, so a client
-//! reconnecting by id can never land on an unrelated session.
+//! what was running when the previous one stopped, whether it crashed or was
+//! stopped on purpose (as `Lost` sessions that can be relaunched; ADR-0025),
+//! and keeps session ids unique across restarts, so a client reconnecting by
+//! id can never land on an unrelated session.
+//!
+//! `restore.json` beside the store is written by `hive daemon stop` before it
+//! stops a daemon, so even a daemon that forgets its sessions on shutdown
+//! (before 0.4.16) has them restored by the next one.
 //!
 //! Workspaces are durable: they survive graceful shutdown too.
 //!
@@ -53,6 +58,10 @@ pub(crate) struct StoredSession {
     pub workspace: WorkspaceId,
     #[serde(default)]
     pub worktree: Option<String>,
+    /// Catalog id of the agent running in it when saved, e.g. `claude` in a
+    /// shell where the user typed `claude`, so a relaunch can resume it.
+    #[serde(default)]
+    pub running: Option<String>,
 }
 
 impl Default for Store {
@@ -78,10 +87,28 @@ impl StoredSession {
             created_at: info.created_at,
             workspace: info.workspace,
             worktree: info.worktree.clone(),
+            running: info
+                .presence
+                .as_ref()
+                .filter(|p| hive_agents::catalog::by_id(&p.agent).is_some())
+                .map(|p| p.agent.clone()),
         }
     }
 
+    /// As shown after a restart. The agent that was running is kept as its
+    /// presence (status unknown) so clients can resume it.
     pub fn into_lost_info(self) -> SessionInfo {
+        let presence = self
+            .running
+            .as_deref()
+            .and_then(hive_agents::catalog::by_id)
+            .map(|k| hive_protocol::AgentPresence {
+                agent: k.id.to_string(),
+                label: k.label.to_string(),
+                status: hive_protocol::AgentStatus::Unknown,
+                message: None,
+                source: hive_protocol::PresenceSource::Process,
+            });
         SessionInfo {
             id: self.id,
             agent: self.agent,
@@ -95,7 +122,7 @@ impl StoredSession {
             workspace: self.workspace,
             branch: None,
             worktree: self.worktree,
-            presence: None,
+            presence,
         }
     }
 }
@@ -154,6 +181,19 @@ impl Store {
         }
     }
 
+    /// Sessions `hive daemon stop` saved in `restore.json` before stopping
+    /// a daemon; the file is removed once read. Missing or unreadable: none.
+    pub fn take_restore(path: &Path) -> Vec<StoredSession> {
+        let Ok(bytes) = fs::read(path) else {
+            return Vec::new();
+        };
+        let _ = fs::remove_file(path);
+        serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+            tracing::warn!("ignoring {}: {e}", path.display());
+            Vec::new()
+        })
+    }
+
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = serde_json::to_vec_pretty(self).expect("store serializes");
         bytes.push(b'\n');
@@ -191,6 +231,7 @@ mod tests {
                 created_at: 1,
                 workspace: 2,
                 worktree: None,
+                running: None,
             }],
             next_workspace_id: 3,
             workspaces: vec![StoredWorkspace {

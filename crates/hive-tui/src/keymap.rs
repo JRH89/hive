@@ -49,11 +49,12 @@ pub enum Command {
     Detach,
     Help,
     Integrations,
+    RestoreSessions,
     Settings,
 }
 
 impl Command {
-    pub const ALL: [Command; 38] = [
+    pub const ALL: [Command; 39] = [
         Command::Palette,
         Command::SearchSessions,
         Command::NewSession,
@@ -91,6 +92,7 @@ impl Command {
         Command::Detach,
         Command::Help,
         Command::Integrations,
+        Command::RestoreSessions,
         Command::Settings,
     ];
 
@@ -134,6 +136,7 @@ impl Command {
             Command::Detach => "detach",
             Command::Help => "help",
             Command::Integrations => "integrations",
+            Command::RestoreSessions => "restore_sessions",
             Command::Settings => "settings",
         }
     }
@@ -178,6 +181,7 @@ impl Command {
             Command::Detach => "Detach (agents keep running)",
             Command::Help => "Help",
             Command::Integrations => "Integrations: turn on and off",
+            Command::RestoreSessions => "Restore ended sessions (after a restart)",
             Command::Settings => "Settings (config file location)",
         }
     }
@@ -229,6 +233,7 @@ impl Command {
             Command::Usage => &["U"],
             Command::Layout => &["L"],
             Command::Integrations => &["I"],
+            Command::RestoreSessions => &["R"],
             Command::NewWorktreeSession => &[],
             Command::AddWorkspace | Command::RenameWorkspace | Command::Settings => &[],
         }

@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: amended by ADR-0025
 date: 2026-10-30
 ---
 # ADR-0009: Persist session metadata, mark lost sessions

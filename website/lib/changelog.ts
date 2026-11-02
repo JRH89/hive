@@ -10,6 +10,16 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    version: "0.4.16",
+    date: "2026-11-01T23:30:00-08:00",
+    title: "Restarts keep your sessions",
+    changes: [
+      "Stopping or upgrading the daemon no longer forgets your sessions. They come back as ended, in their spaces, and hive tells you how many when it opens.",
+      "Ctrl+Space R restores every ended session at once (Enter on one restores just that one). Claude Code resumes with --continue and Codex with resume --last, so each picks up its last conversation in that directory. An agent you started from a terminal runs in that terminal again.",
+      "hive daemon stop lists the sessions it would end and asks first; -y skips the question. It also saves them, so stopping a daemon from 0.4.15 or older with the new hive keeps them too.",
+    ],
+  },
+  {
     version: "0.4.15",
     date: "2026-11-01T21:09:53-08:00",
     title: "Confirmations you can't miss",

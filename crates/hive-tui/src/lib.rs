@@ -149,7 +149,7 @@ fn daemon_outdated(daemon: &str) -> Option<String> {
     let mine = env!("CARGO_PKG_VERSION");
     (daemon != mine).then(|| {
         format!(
-            "hived {daemon} is running; this is hive {mine}. `hive daemon stop` then `hive` updates it (ends running sessions)"
+            "hived {daemon} is running; this is hive {mine}. `hive daemon stop` then `hive` updates it (sessions end; Ctrl+Space R restarts them)"
         )
     })
 }
