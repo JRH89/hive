@@ -644,6 +644,52 @@ mod tests {
     }
 
     #[test]
+    fn website_config_docs_cover_the_example() {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../");
+        let (Ok(example), Ok(docs)) = (
+            std::fs::read_to_string(format!("{root}examples/config.toml")),
+            std::fs::read_to_string(format!("{root}website/lib/docs-config.ts")),
+        ) else {
+            return; // not a checkout
+        };
+        // Every key the example sets, as a dotted path; a user's own names
+        // (agents, bindings) become `<name>` or stop at their table.
+        fn walk(path: &str, value: &toml::Value, out: &mut Vec<String>) {
+            let toml::Value::Table(t) = value else {
+                out.push(path.to_string());
+                return;
+            };
+            if matches!(path, "keys.bind" | "keys.global" | "agents.<name>.env") {
+                out.push(path.to_string());
+                return;
+            }
+            for (k, v) in t {
+                let key = if path == "agents" {
+                    "<name>"
+                } else {
+                    k.as_str()
+                };
+                let next = if path.is_empty() {
+                    key.to_string()
+                } else {
+                    format!("{path}.{key}")
+                };
+                walk(&next, v, out);
+            }
+        }
+        let mut keys = Vec::new();
+        let table: toml::Table = toml::from_str(&example).unwrap();
+        walk("", &toml::Value::Table(table), &mut keys);
+        assert!(keys.len() > 30, "{keys:?}");
+        for key in keys {
+            assert!(
+                docs.contains(&format!("key: \"{key}\"")),
+                "website/lib/docs-config.ts lacks {key}"
+            );
+        }
+    }
+
+    #[test]
     fn known_agents_are_built_in() {
         let c = Config::default();
         assert_eq!(c.agent("truss").unwrap().command, "truss-tui");

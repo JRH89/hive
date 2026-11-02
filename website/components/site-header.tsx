@@ -39,6 +39,7 @@ export function SiteHeader() {
           if (!event.currentTarget.contains(event.relatedTarget) && event.relatedTarget !== toggle.current) setOpen(false);
         }}>
           <a className="nav-link" href="/features/">Features</a>
+          <a className="nav-link" href="/docs/">Docs</a>
           <a className="nav-link" href="/integrations/">Integrations</a>
           <a className="nav-link" href="/why/">Why Hive</a>
           <a className="nav-link" href="/blog/">Blog</a>

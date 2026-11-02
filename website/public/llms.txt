@@ -13,7 +13,16 @@ Source: https://github.com/jrh89/hive
 - [Integrations](https://hive.codefrontlabs.com/integrations/): Obsidian, lazygit review, GitHub PR checks, tasks, notifications, git status, usage, layouts, with config.toml snippets
 - [Why Hive](https://hive.codefrontlabs.com/why/): comparison with tmux, Zellij and herdr
 - [Changelog](https://hive.codefrontlabs.com/changelog/): every release
-- [User guide](https://github.com/jrh89/hive/blob/master/docs/user-guide.md): full reference for keys, commands and configuration
+- [Documentation](https://hive.codefrontlabs.com/docs/): the full docs, also as a single file: [user guide](https://github.com/jrh89/hive/blob/master/docs/user-guide.md)
+  - [Getting started](https://hive.codefrontlabs.com/docs/getting-started/): Install Hive, open it, start your first AI coding agents, detach and come back. The concepts you need: daemon, sessions, spaces, worktrees.
+  - [The interface](https://hive.codefrontlabs.com/docs/interface/): What the sidebar, tab bar, status symbols and marks mean, how panes, tabs and spaces work, the mouse, and using Hive from several windows.
+  - [Keys](https://hive.codefrontlabs.com/docs/keys/): Every Hive command with its default key after Ctrl+Space, the prefix-free Alt chords, and how to rebind or unbind any of them in config.toml.
+  - [Configuration](https://hive.codefrontlabs.com/docs/configuration/): Every config.toml option with its type and default: general, terminal, daemon, notifications, integrations, worktrees, theme, keys, agents and layouts.
+  - [Command line](https://hive.codefrontlabs.com/docs/cli/): Every hive command and option: new, list, attach, kill, agents, workspace, worktree, report-agent, doctor, update and daemon, with examples.
+  - [Agent status](https://hive.codefrontlabs.com/docs/agent-status/): How Hive knows an agent is working, needs input or is done, which agents it recognises, the bell and notifications, and how scripts report their own status.
+  - [Workspaces and worktrees](https://hive.codefrontlabs.com/docs/worktrees/): How Hive groups sessions into spaces by repository, and gives an agent its own git worktree and branch, with the rules that keep your work safe.
+  - [Daemon, files and environment](https://hive.codefrontlabs.com/docs/daemon/): What hived does, what survives a crash or reboot, where Hive keeps its files, the environment variables it reads and sets, upgrading and uninstalling.
+  - [Troubleshooting](https://hive.codefrontlabs.com/docs/troubleshooting/): Fixes for common Hive problems: keys that do nothing, agents not found, protocol mismatches, odd glyphs or colours, lost sessions, and how to report a bug.
 
 ## Articles
 

@@ -193,3 +193,44 @@ fn agents_are_listed_and_can_report_their_status() {
     let err = env.fails(&["report-agent", "1", "--agent", "x", "--state", "busy"]);
     assert!(err.contains("expected idle, working"), "{err}");
 }
+
+/// Subcommand names from `hive [CMD] --help`.
+fn subcommands(args: &[&str]) -> Vec<String> {
+    let out = Command::new(env!("CARGO_BIN_EXE_hive"))
+        .args(args)
+        .arg("--help")
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .skip_while(|l| !l.starts_with("Commands:"))
+        .skip(1)
+        .take_while(|l| l.starts_with("  "))
+        .filter_map(|l| l.split_whitespace().next())
+        .filter(|c| *c != "help")
+        .map(String::from)
+        .collect()
+}
+
+#[test]
+fn website_cli_docs_list_every_command() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../website/lib/docs-cli.ts");
+    let Ok(docs) = std::fs::read_to_string(path) else {
+        return; // not a checkout
+    };
+    let top = subcommands(&[]);
+    assert!(top.len() > 10, "{top:?}");
+    for cmd in &top {
+        let nested = subcommands(&[cmd]);
+        let usages: Vec<String> = if nested.is_empty() {
+            vec![format!("hive {cmd}")]
+        } else {
+            nested.iter().map(|s| format!("hive {cmd} {s}")).collect()
+        };
+        for usage in usages {
+            let documented = docs.contains(&format!("usage: \"{usage}\""))
+                || docs.contains(&format!("usage: \"{usage} "));
+            assert!(documented, "website/lib/docs-cli.ts lacks `{usage}`");
+        }
+    }
+}

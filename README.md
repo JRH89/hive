@@ -2,7 +2,7 @@
 
 <h1 align="center">Hive</h1>
 <p align="center"><b>One terminal. Many agents.</b><br>A lightweight, Rust-powered terminal multiplexer for AI coding agents.</p>
-<p align="center"><a href="https://hive.codefrontlabs.com">Website</a> · <a href="https://hive.codefrontlabs.com/changelog">Changelog</a> · <a href="docs/user-guide.md">User guide</a> · <a href="https://github.com/jrh89/hive/releases/latest">Download</a></p>
+<p align="center"><a href="https://hive.codefrontlabs.com">Website</a> · <a href="https://hive.codefrontlabs.com/docs/">Docs</a> · <a href="https://hive.codefrontlabs.com/changelog">Changelog</a> · <a href="https://github.com/jrh89/hive/releases/latest">Download</a></p>
 
 <p align="center"><img src="assets/demo.gif" alt="Hive demo: Claude working with live status, Codex in its own worktree waiting for approval, a terminal moving to another space on cd, the command palette, detach and reattach" width="880"></p>
 
@@ -75,7 +75,7 @@ curl -fsSL https://github.com/jrh89/hive/releases/latest/download/install.sh | s
 irm https://github.com/jrh89/hive/releases/latest/download/install.ps1 | iex
 ```
 
-The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.4.13` to pin a version. Later, `hive update` upgrades in place (then `hive daemon stop` to restart the daemon on the new version; this ends running sessions).
+The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.4.14` to pin a version. Later, `hive update` upgrades in place (then `hive daemon stop` to restart the daemon on the new version; this ends running sessions).
 
 **From source** (Rust ≥ 1.89):
 
@@ -207,9 +207,15 @@ args = ["--dark-mode"]
 ```
 
 ## Documentation
-- [User guide](docs/user-guide.md): concepts, interface, workspaces and worktrees, configuration, upgrading
-- [Troubleshooting](docs/troubleshooting.md): `hive doctor`, logs, common problems
-- [`examples/config.toml`](examples/config.toml): every configuration key
+The full documentation is at **[hive.codefrontlabs.com/docs](https://hive.codefrontlabs.com/docs/)**:
+
+- [Getting started](https://hive.codefrontlabs.com/docs/getting-started/) · [The interface](https://hive.codefrontlabs.com/docs/interface/) · [Keys](https://hive.codefrontlabs.com/docs/keys/)
+- [Configuration reference](https://hive.codefrontlabs.com/docs/configuration/): every option with its type and default
+- [Command line](https://hive.codefrontlabs.com/docs/cli/): every `hive` command and option
+- [Agent status and `report-agent`](https://hive.codefrontlabs.com/docs/agent-status/) · [Workspaces and worktrees](https://hive.codefrontlabs.com/docs/worktrees/)
+- [Daemon, files and environment variables](https://hive.codefrontlabs.com/docs/daemon/) · [Troubleshooting](https://hive.codefrontlabs.com/docs/troubleshooting/)
+
+The same material in the repository: [user guide](docs/user-guide.md), [troubleshooting](docs/troubleshooting.md) and [`examples/config.toml`](examples/config.toml). Tests check the website's key, command-line and configuration pages against the code.
 
 ## Architecture
 `hived` owns every agent process, PTY and the authoritative terminal state. `hive` is a client that talks to it over a per-user Unix socket. See `vault/Architecture/Overview.md`.
