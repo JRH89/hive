@@ -11,6 +11,7 @@ export function SiteFooter() {
       <nav aria-label="Footer navigation">
         <a href="/install/">Install</a>
         <a href="/features/">Features</a>
+        <a href="/docs/">Docs</a>
         <a href="/integrations/">Integrations</a>
         <a href="/why/">Why Hive</a>
         <a href="/blog/">Blog</a>

@@ -2,6 +2,8 @@
 
 Hive runs several interactive AI coding agents (Claude Code, Codex, Gemini CLI, OpenCode, a shell, or anything you configure) in one terminal, and keeps them running when you close it.
 
+This guide is also on the website, split into pages with full references: [keys](https://hive.codefrontlabs.com/docs/keys/), [configuration](https://hive.codefrontlabs.com/docs/configuration/) (every option and default), [command line](https://hive.codefrontlabs.com/docs/cli/) and [more](https://hive.codefrontlabs.com/docs/).
+
 ## Concepts
 
 | Term | Meaning |
@@ -204,6 +206,14 @@ A workspace header shows its most urgent session. The terminal bell rings when a
 
 Agents can report their own status: inside a session, `"$HIVE_BIN_PATH" report-agent --agent NAME --state idle|working|blocked [--message TEXT]`, and `release-agent --agent NAME` when done.
 
+| Rule | Detail |
+|---|---|
+| Precedence | A report overrides screen detection for that session until `release-agent` |
+| Lifetime | It lapses when the foreground program changes, so an agent that exits without releasing leaves no stale status |
+| Ordering | `--seq N` numbers reports; one not above the last is ignored (default: the time in milliseconds) |
+| Limits | Agent name up to 64 characters, message up to 200 |
+| Session | Defaults to `$HIVE_SESSION_ID`; pass an id to report for another session |
+
 ## Several windows
 
 You can open the same session in two terminals. The first one controls it; the second watches, and the status bar says so. `Ctrl+Space a` in the watching window takes control. The terminal size always follows the controlling window.
@@ -272,6 +282,43 @@ Hive detects what your terminal supports:
 | Glyphs | ASCII on the Linux console or a non-UTF-8 locale | `[theme] glyphs = "unicode" \| "ascii"` |
 
 Nerd Fonts are never required. Individual colours can be overridden with `#rrggbb` values (`accent`, `text`, `muted`, …). An agent's own colours are shown unchanged.
+
+## Command line
+
+| Command | What it does |
+|---|---|
+| `hive` | Open the interface; reattaches to the newest session |
+| `hive new [AGENT] [-l LABEL] [-C DIR] [-W WORKSPACE] [-w] [-b BRANCH] [-d] [-- ARGS]` | Start a session (`-w`/`-b`: own worktree, `-d`: don't attach) |
+| `hive list` / `hive status` | Sessions with state, workspace, branch and directory / a one-line summary |
+| `hive attach ID` / `hive kill ID` | Open / terminate a session |
+| `hive agents [-a]` | Agents Hive can launch, and which are installed (`-a`: all known) |
+| `hive workspace list\|add PATH [-n NAME]\|rename W NAME\|rm W` | Manage workspaces |
+| `hive worktree list [-W W]\|rm PATH [--force] [-y]` | List or remove worktrees |
+| `hive report-agent` / `hive release-agent` | Set or clear an agent's status (see [Agent status](#agent-status)) |
+| `hive doctor` | Check the installation; changes nothing |
+| `hive update [--tag vX.Y.Z]` | Install a release over this one (Linux, macOS) |
+| `hive daemon start\|stop\|status` | Manage the daemon (`stop` ends every session) |
+
+Every command takes `--help`.
+
+## Daemon, files and environment
+
+The daemon keeps sessions running when every window is closed. What survives what:
+
+| Event | Agents | Afterwards |
+|---|---|---|
+| Close the window, detach, SSH drops | Keep running | Everything as you left it next time you run `hive` |
+| `hive daemon stop` | Terminated | A clean start |
+| Daemon crash, `kill -9`, reboot | Gone | Sessions listed as lost (`◌`): Enter relaunches one in the same directory, `x` forgets it |
+
+| What | Linux default | Override |
+|---|---|---|
+| Config | `~/.config/hive/config.toml` | `HIVE_CONFIG` |
+| Socket and lock | `$XDG_RUNTIME_DIR/hive/` | `HIVE_RUNTIME_DIR` (keep it short: socket paths must fit ~107 bytes) |
+| Logs, `sessions.json` | `~/.local/state/hive/` | `HIVE_STATE_DIR` |
+| Worktrees | `~/.local/share/hive/worktrees/` | `[worktrees] dir` |
+
+`hive doctor` prints the actual paths on any OS. Also read: `HIVE_LOG` (log level), `HIVE_DAEMON_BIN` (the `hived` to start). Every session gets `HIVE=1`, `HIVE_SESSION_ID`, `HIVE_BIN_PATH`, `TERM=xterm-256color` and `COLORTERM=truecolor`, on top of the environment of the `hive` command that created it. `sessions.json` and the logs never contain environment variables.
 
 ## Upgrading
 

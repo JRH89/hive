@@ -971,9 +971,13 @@ fn draw_empty(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             key.add_modifier(Modifier::BOLD),
         )),
         Line::raw(""),
-        Line::from(Span::styled(brand::TAGLINE, Style::new().fg(theme.text))),
-        Line::raw(""),
     ]);
+    if app.config.branding.show_tagline {
+        lines.extend([
+            Line::from(Span::styled(brand::TAGLINE, Style::new().fg(theme.text))),
+            Line::raw(""),
+        ]);
+    }
     if app.sessions.is_empty() {
         lines.push(Line::from(Span::styled("No active sessions.", muted)));
         lines.push(Line::raw(""));
@@ -1434,6 +1438,22 @@ mod tests {
         (0..h)
             .map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect::<String>())
             .collect()
+    }
+
+    #[test]
+    fn the_tagline_can_be_turned_off() {
+        let has_tagline = |config: Config| {
+            let mut app = App::new(config, Start::Auto, (80, 24));
+            app.on_connect();
+            app.on_server(ServerMessage::SessionList(Vec::new()));
+            rendered(&app, 80, 24)
+                .iter()
+                .any(|l| l.contains(brand::TAGLINE))
+        };
+        assert!(has_tagline(Config::default()));
+        let mut config = Config::default();
+        config.branding.show_tagline = false;
+        assert!(!has_tagline(config));
     }
 
     #[test]

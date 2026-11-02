@@ -117,12 +117,14 @@ jump_modifier = "alt"
 [keys.bind]
 # Command = key or list of keys, pressed after the leader. Setting a command
 # replaces its default keys; [] unbinds it. 1-9 always jump to sessions.
-# Commands: palette, search_sessions, new_session, new_worktree_session,
-# workspaces, add_workspace, rename_workspace, next_session, prev_session,
-# next_workspace, prev_workspace, sidebar, toggle_sidebar, rename_session,
-# kill_session, take_control, detach, help, integrations, settings, split_right, split_down,
-# focus_next_pane, zoom, close_pane, new_tab, next_tab, prev_tab, close_tab,
-# notes, review, pull_request, run_task (only with their [integrations.*] enabled)
+# Commands (all listed at https://hive.codefrontlabs.com/docs/keys/):
+# palette, search_sessions, new_session, new_agent, new_worktree_terminal,
+# new_worktree_session, new_space, workspaces, add_workspace, rename_workspace,
+# next_session, prev_session, next_workspace, prev_workspace, sidebar,
+# toggle_sidebar, split_right, split_down, focus_next_pane, zoom, close_pane,
+# new_tab, next_tab, prev_tab, close_tab, rename_session, kill_session,
+# take_control, detach, help, integrations, settings, layout (with [layouts]),
+# notes, review, pull_request, run_task, usage (with their [integrations.*])
 palette = [":", "P"]
 new_session = "c"
 next_session = ["n", "j", "down"]

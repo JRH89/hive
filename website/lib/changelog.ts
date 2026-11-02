@@ -10,6 +10,16 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    version: "0.4.14",
+    date: "2026-11-01T18:17:53-08:00",
+    title: "Documentation",
+    changes: [
+      "Full documentation at hive.codefrontlabs.com/docs: getting started, the interface, every key, a configuration reference with every option and default, every command, agent status and report-agent, worktrees, the daemon and its files, and troubleshooting.",
+      "[branding] show_tagline = false now hides the tagline on the start screen; it was accepted but ignored.",
+      "examples/config.toml lists every command name for [keys.bind].",
+    ],
+  },
+  {
     version: "0.4.13",
     date: "2026-11-01T17:54:36-08:00",
     title: "Turn integrations on from the menu",

@@ -750,4 +750,61 @@ mod tests {
             .insert("explode".into(), KeyList::One("e".into()));
         assert!(matches!(err(unknown), KeymapError::UnknownCommand(_)));
     }
+
+    /// A docs file in the repository, or `None` outside a checkout (e.g. a
+    /// packaged crate).
+    fn repo_file(path: &str) -> Option<String> {
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../").to_string() + path)
+            .ok()
+    }
+
+    fn quoted(keys: &[&str]) -> String {
+        let q: Vec<String> = keys.iter().map(|k| format!("{k:?}")).collect();
+        format!("[{}]", q.join(", "))
+    }
+
+    #[test]
+    fn website_key_docs_match_the_defaults() {
+        let Some(docs) = repo_file("website/lib/docs-keys.ts") else {
+            return;
+        };
+        for cmd in Command::ALL {
+            let entry = format!(
+                r#"name: "{}", keys: {}"#,
+                cmd.name(),
+                quoted(cmd.default_keys())
+            );
+            assert!(
+                docs.contains(&entry),
+                "website/lib/docs-keys.ts lacks `{entry}`"
+            );
+            let global = cmd.default_global_keys();
+            if !global.is_empty() {
+                let g = format!("global: {}", quoted(global));
+                let line = docs.lines().find(|l| l.contains(&entry)).unwrap();
+                assert!(line.contains(&g), "`{}` should have `{g}`", cmd.name());
+            }
+        }
+        assert_eq!(docs.matches("name: \"").count(), Command::ALL.len());
+    }
+
+    #[test]
+    fn example_config_lists_every_command_name() {
+        let Some(example) = repo_file("examples/config.toml") else {
+            return;
+        };
+        let listed: String = example
+            .lines()
+            .skip_while(|l| !l.starts_with("# Commands"))
+            .take_while(|l| l.starts_with('#'))
+            .collect::<Vec<_>>()
+            .join(" ");
+        for cmd in Command::ALL {
+            let name = cmd.name();
+            let found = listed
+                .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .any(|w| w == name);
+            assert!(found, "examples/config.toml's command list lacks {name}");
+        }
+    }
 }

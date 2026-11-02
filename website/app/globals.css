@@ -3473,3 +3473,130 @@ body { padding-top: 92px; }
 .feature h3 a:hover {
   color: var(--amber);
 }
+
+/* Docs: navigation beside the page. */
+.docs-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 56px;
+  align-items: start;
+}
+.docs-nav {
+  position: sticky;
+  top: 96px;
+  font-size: 0.92rem;
+}
+.docs-nav-title {
+  margin: 0 0 10px;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.docs-nav ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-left: 1px solid var(--line);
+}
+.docs-nav li a {
+  display: block;
+  margin-left: -1px;
+  padding: 6px 0 6px 14px;
+  border-left: 2px solid transparent;
+  color: var(--muted);
+}
+.docs-nav li a:hover {
+  color: var(--text);
+}
+.docs-nav li a[aria-current="page"] {
+  border-left-color: var(--amber);
+  color: var(--text);
+}
+.doc {
+  min-width: 0;
+}
+.doc .prose {
+  max-width: 80ch;
+}
+.doc .prose h2 {
+  scroll-margin-top: 90px;
+}
+@media (min-width: 761px) {
+  .doc .prose .table {
+    display: table;
+  }
+}
+.doc .prose h2 code {
+  font-size: 0.8em;
+}
+.prose .muted,
+.doc .muted {
+  color: var(--muted);
+}
+.doc-pager {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  max-width: 80ch;
+  margin-top: 56px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+.doc-pager a {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text);
+}
+.doc-pager a:hover {
+  color: var(--amber);
+}
+.doc-pager span {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.doc-pager .doc-pager-next {
+  margin-left: auto;
+  text-align: right;
+}
+.prose .toc a {
+  color: var(--muted);
+  text-decoration: none;
+}
+.prose .toc a:hover {
+  color: var(--text);
+}
+.doc-edit {
+  margin-top: 24px;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.doc-edit a {
+  color: var(--amber);
+}
+@media (max-width: 900px) {
+  .docs-layout {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+  .docs-nav {
+    position: static;
+  }
+  .docs-nav ol {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    border-left: 0;
+  }
+  .docs-nav li a {
+    margin: 0;
+    padding: 5px 11px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: 0.82rem;
+  }
+  .docs-nav li a[aria-current="page"] {
+    border-color: var(--amber);
+  }
+}
