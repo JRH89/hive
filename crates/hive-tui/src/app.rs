@@ -161,6 +161,8 @@ pub enum Scope {
     Tasks,
     /// `[layouts]` entries.
     Layouts,
+    /// `[integrations.*]` switches; choosing one toggles it.
+    Integrations,
 }
 
 /// What a palette entry does when chosen.
@@ -173,6 +175,8 @@ pub enum Target {
     Task(usize),
     /// Index into `Config::layouts` (in name order).
     Layout(usize),
+    /// An `[integrations.<name>]` section.
+    Integration(&'static str),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -432,6 +436,55 @@ pub enum Effect {
     /// Append `line` to today's daily note in `dir` (the frontend adds the
     /// date and time).
     Journal { dir: PathBuf, line: String },
+    /// Write `[integrations.<name>] enabled` to the config file at `path`.
+    SaveIntegration {
+        path: PathBuf,
+        name: &'static str,
+        enabled: bool,
+    },
+}
+
+/// Title, description and command of an `[integrations.<name>]` section,
+/// for the integrations list.
+fn integration_info(name: &str) -> (&'static str, &'static str, Option<Command>) {
+    match name {
+        "review" => (
+            "Review",
+            "lazygit, tig or git diff beside the agent",
+            Some(Command::Review),
+        ),
+        "github" => (
+            "GitHub checks",
+            "gh pr checks for the agent's branch",
+            Some(Command::PullRequest),
+        ),
+        "tasks" => (
+            "Tasks",
+            "run just, npm, make or cargo tasks",
+            Some(Command::RunTask),
+        ),
+        "obsidian" => (
+            "Obsidian notes",
+            "open the project's vault in your editor",
+            Some(Command::Notes),
+        ),
+        "usage" => (
+            "Usage",
+            "token usage and cost (ccusage)",
+            Some(Command::Usage),
+        ),
+        "desktop_notify" => (
+            "Desktop notifications",
+            "when an agent needs input or finishes",
+            None,
+        ),
+        "git_status" => (
+            "Git status",
+            "changed files and ahead/behind in the sidebar",
+            None,
+        ),
+        _ => ("", "", None),
+    }
 }
 
 /// Tasks offered by the palette after `run_task`.
@@ -468,19 +521,20 @@ fn default_review_command() -> Vec<String> {
 /// entries, no help lines.
 /// How to turn on a command `hidden_commands` hides.
 fn enable_hint(cmd: Command) -> String {
-    let section = match cmd {
-        Command::Notes => "[integrations.obsidian]",
-        Command::Review => "[integrations.review]",
-        Command::PullRequest => "[integrations.github]",
-        Command::RunTask => "[integrations.tasks]",
-        Command::Usage => "[integrations.usage]",
-        Command::Layout => return "No layouts yet: add a [layouts.<name>] to config.toml".into(),
-        _ => return format!("{} is turned off", cmd.name()),
-    };
-    format!(
-        "{} is off. Turn it on with {section} enabled = true in config.toml",
-        cmd.title()
-    )
+    match cmd {
+        Command::Notes
+        | Command::Review
+        | Command::PullRequest
+        | Command::RunTask
+        | Command::Usage => {
+            format!(
+                "{} is off. Turn it on in the menu, under Integrations",
+                cmd.title()
+            )
+        }
+        Command::Layout => "No layouts yet: add a [layouts.<name>] to config.toml".into(),
+        _ => format!("{} is turned off", cmd.name()),
+    }
 }
 
 pub fn hidden_commands(config: &Config) -> Vec<Command> {
@@ -1840,6 +1894,13 @@ impl App {
             }
             Command::Detach => return self.detach(),
             Command::Help => self.mode = Mode::Help,
+            Command::Integrations => {
+                self.mode = Mode::Palette {
+                    query: String::new(),
+                    selected: 0,
+                    scope: Scope::Integrations,
+                };
+            }
             Command::Settings => {
                 let path = self
                     .config_path
@@ -1847,7 +1908,9 @@ impl App {
                     .unwrap_or("~/.config/hive/config.toml");
                 self.set_status(
                     Tone::Info,
-                    format!("Settings live in {path}. Changes apply the next time hive starts."),
+                    format!(
+                        "Settings live in {path}. Changes apply the next time hive starts; integrations switch on and off in Integrations."
+                    ),
                 );
             }
         }
@@ -1893,6 +1956,19 @@ impl App {
                     key: None,
                 };
                 items.push((item, name.clone()));
+            }
+        }
+        if *scope == Scope::Integrations {
+            for name in hive_core::config::Integrations::NAMES {
+                let (title, detail, cmd) = integration_info(name);
+                let on = self.config.integrations.enabled(name) == Some(true);
+                let item = PaletteItem {
+                    target: Target::Integration(name),
+                    title: format!("[{}] {title}", if on { "x" } else { " " }),
+                    detail: detail.to_string(),
+                    key: cmd.and_then(|c| self.keymap.hint(c)),
+                };
+                items.push((item, format!("{title} {name} {detail}")));
             }
         }
         let sessions_only = *scope != Scope::All;
@@ -1985,6 +2061,10 @@ impl App {
             KeyCode::Up => *selected = selected.saturating_sub(1),
             KeyCode::Char('p') if ctrl => *selected = selected.saturating_sub(1),
             KeyCode::Enter => {
+                // Toggling keeps the list open, to flip several in a row.
+                if let Some(Target::Integration(name)) = chosen {
+                    return self.toggle_integration(name);
+                }
                 self.mode = Mode::Normal;
                 return match chosen {
                     Some(Target::Command(cmd)) => self.run(cmd),
@@ -1993,7 +2073,7 @@ impl App {
                     Some(Target::Workspace(w)) => self.open_workspace(w),
                     Some(Target::Task(i)) => self.run_task(i),
                     Some(Target::Layout(i)) => self.apply_layout(i),
-                    None => Vec::new(),
+                    Some(Target::Integration(_)) | None => Vec::new(),
                 };
             }
             _ => match edit_line(query, &key) {
@@ -2860,6 +2940,45 @@ impl App {
 
     /// `Ctrl+Space L`: the layout meant for this space, the only one, or a
     /// choice in the palette.
+    /// Switches `[integrations.<name>]` on or off now, and saves it to the
+    /// config file so it sticks.
+    fn toggle_integration(&mut self, name: &'static str) -> Vec<ClientMessage> {
+        let Some(on) = self.config.integrations.enabled_mut(name) else {
+            return Vec::new();
+        };
+        *on = !*on;
+        let enabled = *on;
+        // Keys of an integration exist only while it is on.
+        match Keymap::from_config(&self.config.keys, &hidden_commands(&self.config)) {
+            Ok(k) => self.keymap = k,
+            Err(e) => self.set_status(Tone::Error, e.to_string()),
+        }
+        if !self.config.integrations.git_status.enabled {
+            self.git.clear();
+        }
+        let (title, _, cmd) = integration_info(name);
+        let key = cmd
+            .filter(|_| enabled)
+            .and_then(|c| self.keymap.hint(c))
+            .map(|k| format!(": {} {k}", self.keymap.leader))
+            .unwrap_or_default();
+        let state = if enabled { "on" } else { "off" };
+        self.set_status(Tone::Info, format!("{title} {state}{key}"));
+        if let Some(path) = &self.config_path {
+            self.effects.push(Effect::SaveIntegration {
+                path: PathBuf::from(path),
+                name,
+                enabled,
+            });
+        }
+        Vec::new()
+    }
+
+    /// A side effect failed in a way the user should know about.
+    pub fn effect_failed(&mut self, msg: String) {
+        self.set_status(Tone::Error, msg);
+    }
+
     fn pick_layout(&mut self) -> Vec<ClientMessage> {
         let space = self
             .active_workspace()
@@ -3541,7 +3660,7 @@ mod tests {
         app.on_terminal_event(leader());
         assert!(app.on_terminal_event(ch('N')).is_empty());
         assert!(
-            matches!(&app.status, Some((Tone::Info, m)) if m.contains("[integrations.obsidian]"))
+            matches!(&app.status, Some((Tone::Info, m)) if m.contains("Turn it on in the menu"))
         );
         // A user binding N to something else doesn't clash with the default.
         let mut config = Config::default();
@@ -3658,7 +3777,7 @@ mod tests {
         off.on_terminal_event(leader());
         assert!(off.on_terminal_event(ch('U')).is_empty());
         assert!(
-            matches!(&off.status, Some((Tone::Info, m)) if m.contains("[integrations.usage] enabled = true"))
+            matches!(&off.status, Some((Tone::Info, m)) if m.contains("is off. Turn it on in the menu, under Integrations"))
         );
 
         let mut app = integrated(dir.path());
@@ -5091,6 +5210,69 @@ mod tests {
                 .is_leader(&KeyEvent::new(KeyCode::Char(' '), KeyModifiers::CONTROL))
         );
         assert!(matches!(&app.status, Some((Tone::Error, m)) if m.contains("leader")));
+    }
+
+    #[test]
+    fn integrations_toggle_from_their_list_and_are_saved() {
+        let mut app = app();
+        app.config_path = Some("/home/u/.config/hive/config.toml".into());
+        app.on_terminal_event(leader());
+        app.on_terminal_event(ch('I'));
+        assert!(matches!(
+            app.mode,
+            Mode::Palette {
+                scope: Scope::Integrations,
+                ..
+            }
+        ));
+        let items = app.palette_items();
+        assert_eq!(items.len(), hive_core::config::Integrations::NAMES.len());
+        assert!(items.iter().all(|i| i.title.starts_with("[ ] ")));
+
+        // Typing filters; enter turns it on and keeps the list open.
+        for c in "obsid".chars() {
+            app.on_terminal_event(ch(c));
+        }
+        assert_eq!(
+            app.palette_items()[0].target,
+            Target::Integration("obsidian")
+        );
+        app.on_terminal_event(enter());
+        assert!(app.config.integrations.obsidian.enabled);
+        assert!(matches!(
+            app.mode,
+            Mode::Palette {
+                scope: Scope::Integrations,
+                ..
+            }
+        ));
+        assert_eq!(app.palette_items()[0].title, "[x] Obsidian notes");
+        assert_eq!(app.palette_items()[0].key.as_deref(), Some("N"));
+        assert!(
+            matches!(&app.status, Some((Tone::Info, m)) if m == "Obsidian notes on: Ctrl+Space N")
+        );
+        assert!(matches!(
+            app.effects.last(),
+            Some(Effect::SaveIntegration { name: "obsidian", enabled: true, path })
+                if path.ends_with("config.toml")
+        ));
+        // Its key and palette entry exist at once.
+        assert!(!app.keymap.keys_for(Command::Notes).is_empty());
+        app.on_terminal_event(key(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(palette_has(&mut app, Command::Notes));
+
+        // And go again when it's turned off.
+        app.run(Command::Integrations);
+        for c in "obsid".chars() {
+            app.on_terminal_event(ch(c));
+        }
+        app.on_terminal_event(enter());
+        assert!(!app.config.integrations.obsidian.enabled);
+        assert!(app.keymap.keys_for(Command::Notes).is_empty());
+        assert!(matches!(
+            app.effects.last(),
+            Some(Effect::SaveIntegration { enabled: false, .. })
+        ));
     }
 
     #[test]

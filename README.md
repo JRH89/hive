@@ -27,7 +27,7 @@ Run Claude Code, Codex, Gemini CLI, OpenCode or any shell side by side, see at a
 </table>
 
 ## Integrations
-Optional and off by default: hidden from the palette until enabled, and their keys say how to turn them on. Each opens as an ordinary session beside your agents.
+Optional and off by default: hidden from the palette until enabled. Turn them on and off from **Integrations** in the menu (`Ctrl+Space I`, or type "integrations" in the palette): it takes effect at once and is saved to `config.toml`. Each opens as an ordinary session beside your agents.
 
 | Integration | Key | What it does |
 |---|---|---|
@@ -75,7 +75,7 @@ curl -fsSL https://github.com/jrh89/hive/releases/latest/download/install.sh | s
 irm https://github.com/jrh89/hive/releases/latest/download/install.ps1 | iex
 ```
 
-The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.4.12` to pin a version. Later, `hive update` upgrades in place (then `hive daemon stop` to restart the daemon on the new version; this ends running sessions).
+The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.4.13` to pin a version. Later, `hive update` upgrades in place (then `hive daemon stop` to restart the daemon on the new version; this ends running sessions).
 
 **From source** (Rust ≥ 1.89):
 

@@ -22,3 +22,5 @@ date: 2026-10-30
 **Consequences:** Future integrations ([[Phase 7 - herdr parity]] ideas) follow the same shape: config table, hidden commands, built from sessions and panes.
 
 **Amendment (2026-10-31):** a disabled command's leader key is no longer silent. It shows a status hint naming the config table to enable (`Keymap::disabled`, `enable_hint`). The palette and help still hide it. Reason: user pressed `Ctrl+Space U` with no config and thought it was broken.
+
+**Amendment (2026-11-01):** integrations can be switched from the TUI (`Ctrl+Space I`), saved to the config; the hint now points there. See [[ADR-0024 Integrations toggle from the TUI]].
