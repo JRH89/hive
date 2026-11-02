@@ -92,7 +92,7 @@ Everything you type goes to the agent, except the **leader** key (`Ctrl+Space`) 
 | `]` / `[` | Next / previous tab |
 | `w` | Workspaces |
 | `r` | Rename session |
-| `x` | Terminate session (asks first; offers to remove a clean worktree) |
+| `x` | Terminate session (asks first in a dialog: `y` yes, `w` also remove its clean worktree, `a` always, i.e. don't ask again via `[general] confirm_terminate`, anything else cancels) |
 | `a` | Take input control from another window |
 | `d` | Detach |
 | `?` | Help, listing your current bindings |

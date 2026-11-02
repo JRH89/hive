@@ -114,6 +114,19 @@ pub enum Mode {
     },
 }
 
+/// What a confirmation dialog says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfirmDialog {
+    pub title: String,
+    pub question: String,
+    /// The running agents it would stop, or other context.
+    pub detail: String,
+    /// What `y` does.
+    pub action: String,
+    /// `w` (also remove the session's worktree) is offered.
+    pub worktree: bool,
+}
+
 /// What a right-click menu is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuTarget {
@@ -436,11 +449,12 @@ pub enum Effect {
     /// Append `line` to today's daily note in `dir` (the frontend adds the
     /// date and time).
     Journal { dir: PathBuf, line: String },
-    /// Write `[integrations.<name>] enabled` to the config file at `path`.
-    SaveIntegration {
+    /// Write `key = value` in `[table]` of the config file at `path`.
+    SaveSetting {
         path: PathBuf,
-        name: &'static str,
-        enabled: bool,
+        table: String,
+        key: &'static str,
+        value: bool,
     },
 }
 
@@ -1100,7 +1114,7 @@ impl App {
         matches!(&self.status, Some((_, m)) if [OBSERVING, CONTROL_LOST, CONTROL_FREE].contains(&m.as_str()))
     }
 
-    fn set_status(&mut self, tone: Tone, msg: impl Into<String>) {
+    pub fn set_status(&mut self, tone: Tone, msg: impl Into<String>) {
         self.status = Some((tone, msg.into()));
     }
 
@@ -1631,52 +1645,12 @@ impl App {
                 self.mode = Mode::Normal;
                 Vec::new()
             }
-            Mode::ConfirmKill(id) => {
-                self.mode = Mode::Normal;
-                let worktree = self.sessions.get(&id).and_then(|s| s.worktree.clone());
-                match (key.code, worktree) {
-                    (KeyCode::Char('y' | 'Y'), _) => {
-                        self.set_status(Tone::Info, terminating(id));
-                        vec![ClientMessage::KillSession(id)]
-                    }
-                    (KeyCode::Char('w'), Some(path)) => {
-                        self.set_status(Tone::Info, terminating(id));
-                        self.remove_worktree_after.insert(id, path);
-                        vec![ClientMessage::KillSession(id)]
-                    }
-                    _ => {
-                        self.status = None;
-                        Vec::new()
-                    }
-                }
+            Mode::ConfirmKill(_) | Mode::ConfirmCloseTab(_) | Mode::ConfirmCloseSpace(_) => {
+                self.on_confirm_key(key)
             }
             Mode::Rename { .. } => self.on_rename_key(key),
             Mode::Menu { .. } => self.on_menu_key(key),
             Mode::RenameTab { .. } => self.on_rename_tab_key(key),
-            Mode::ConfirmCloseTab(i) => {
-                self.mode = Mode::Normal;
-                if !matches!(key.code, KeyCode::Char('y' | 'Y')) {
-                    self.status = None;
-                    return Vec::new();
-                }
-                let ids = self.tabs.get(i).map(|t| t.root.panes()).unwrap_or_default();
-                self.terminate(ids)
-            }
-            Mode::ConfirmCloseSpace(w) => {
-                self.mode = Mode::Normal;
-                if !matches!(key.code, KeyCode::Char('y' | 'Y')) {
-                    self.status = None;
-                    return Vec::new();
-                }
-                let ids: Vec<SessionId> = self
-                    .sessions
-                    .values()
-                    .filter(|s| s.workspace == w)
-                    .map(|s| s.id)
-                    .collect();
-                self.set_status(Tone::Info, format!("Closing {}…", self.workspace_name(w)));
-                ids.into_iter().map(ClientMessage::KillSession).collect()
-            }
             Mode::NewSession { .. } => self.on_picker_key(key),
             Mode::Workspaces { .. } => self.on_workspaces_key(key),
             Mode::Palette { .. } => self.on_palette_key(key),
@@ -1735,7 +1709,7 @@ impl App {
             KeyCode::Char('/') => self.open_palette(true),
             KeyCode::Char('x') => {
                 if let Some(id) = self.cursor {
-                    self.mode = Mode::ConfirmKill(id);
+                    return self.ask(Mode::ConfirmKill(id));
                 }
             }
             KeyCode::Char('r') => {
@@ -1884,7 +1858,7 @@ impl App {
             }
             Command::Kill => {
                 if let Some(id) = current.or(self.cursor) {
-                    self.mode = Mode::ConfirmKill(id);
+                    return self.ask(Mode::ConfirmKill(id));
                 }
             }
             Command::TakeControl => {
@@ -2148,8 +2122,7 @@ impl App {
                 .is_some_and(|s| s.state.is_alive() && is_agent(s))
         });
         if agent {
-            self.mode = confirm;
-            return Vec::new();
+            return self.ask(confirm);
         }
         self.terminate(ids)
     }
@@ -2551,10 +2524,7 @@ impl App {
                 };
                 Vec::new()
             }
-            (MenuTarget::Space(w), CloseSpace) => {
-                self.mode = Mode::ConfirmCloseSpace(w);
-                Vec::new()
-            }
+            (MenuTarget::Space(w), CloseSpace) => self.ask(Mode::ConfirmCloseSpace(w)),
             (MenuTarget::Tab(i), Rename) if i < self.tabs.len() => {
                 self.mode = Mode::RenameTab {
                     tab: i,
@@ -2582,10 +2552,7 @@ impl App {
                 out.extend(self.new_terminal(Place::Split(split_dir(action))));
                 out
             }
-            (MenuTarget::Session(id), Terminate) => {
-                self.mode = Mode::ConfirmKill(id);
-                Vec::new()
-            }
+            (MenuTarget::Session(id), Terminate) => self.ask(Mode::ConfirmKill(id)),
             _ => Vec::new(),
         }
     }
@@ -2964,19 +2931,151 @@ impl App {
             .unwrap_or_default();
         let state = if enabled { "on" } else { "off" };
         self.set_status(Tone::Info, format!("{title} {state}{key}"));
-        if let Some(path) = &self.config_path {
-            self.effects.push(Effect::SaveIntegration {
-                path: PathBuf::from(path),
-                name,
-                enabled,
-            });
-        }
+        self.save_setting(&format!("integrations.{name}"), "enabled", enabled);
         Vec::new()
     }
 
-    /// A side effect failed in a way the user should know about.
-    pub fn effect_failed(&mut self, msg: String) {
-        self.set_status(Tone::Error, msg);
+    /// Saves a switch to the config file so it lasts (the frontend writes it).
+    fn save_setting(&mut self, table: &str, key: &'static str, value: bool) {
+        if let Some(path) = &self.config_path {
+            self.effects.push(Effect::SaveSetting {
+                path: PathBuf::from(path),
+                table: table.to_string(),
+                key,
+                value,
+            });
+        }
+    }
+
+    /// The dialog for the confirmation being asked, if any.
+    pub fn confirm_dialog(&self) -> Option<ConfirmDialog> {
+        let running_agents = |ids: &mut dyn Iterator<Item = SessionId>| -> String {
+            let names: Vec<String> = ids
+                .filter_map(|id| self.sessions.get(&id))
+                .filter(|s| s.state.is_alive() && is_agent(s))
+                .map(|s| s.label.clone())
+                .collect();
+            match names.len() {
+                0 => String::new(),
+                1 => format!("{} is still running.", names[0]),
+                _ => format!("Still running: {}.", names.join(", ")),
+            }
+        };
+        Some(match &self.mode {
+            Mode::ConfirmKill(id) => {
+                let s = self.sessions.get(id);
+                let name = s.map_or("this session".to_string(), |s| s.label.clone());
+                ConfirmDialog {
+                    title: "Terminate".into(),
+                    question: format!("Terminate {name} (session {id})?"),
+                    detail: running_agents(&mut std::iter::once(*id)),
+                    action: "Terminate".into(),
+                    worktree: s.is_some_and(|s| s.worktree.is_some()),
+                }
+            }
+            Mode::ConfirmCloseTab(i) => {
+                let ids = self
+                    .tabs
+                    .get(*i)
+                    .map(|t| t.root.panes())
+                    .unwrap_or_default();
+                ConfirmDialog {
+                    title: "Close tab".into(),
+                    question: format!("Close tab {} and end its {} session(s)?", i + 1, ids.len()),
+                    detail: running_agents(&mut ids.into_iter()),
+                    action: "Close the tab".into(),
+                    worktree: false,
+                }
+            }
+            Mode::ConfirmCloseSpace(w) => {
+                let ids: Vec<SessionId> = self
+                    .sessions
+                    .values()
+                    .filter(|s| s.workspace == *w && s.state.is_alive())
+                    .map(|s| s.id)
+                    .collect();
+                ConfirmDialog {
+                    title: "Close space".into(),
+                    question: format!(
+                        "Close {} and end its {} session(s)?",
+                        self.workspace_name(*w),
+                        ids.len()
+                    ),
+                    detail: running_agents(&mut ids.into_iter()),
+                    action: "Close the space".into(),
+                    worktree: false,
+                }
+            }
+            _ => return None,
+        })
+    }
+
+    /// Asks with `confirm` before terminating, unless the user turned that
+    /// off (`[general] confirm_terminate`).
+    fn ask(&mut self, confirm: Mode) -> Vec<ClientMessage> {
+        if self.config.general.confirm_terminate {
+            self.mode = confirm;
+            Vec::new()
+        } else {
+            self.confirmed(confirm, false)
+        }
+    }
+
+    /// Carries out a confirmation dialog's action.
+    fn confirmed(&mut self, confirm: Mode, remove_worktree: bool) -> Vec<ClientMessage> {
+        match confirm {
+            Mode::ConfirmKill(id) => {
+                if remove_worktree
+                    && let Some(path) = self.sessions.get(&id).and_then(|s| s.worktree.clone())
+                {
+                    self.remove_worktree_after.insert(id, path);
+                }
+                self.set_status(Tone::Info, terminating(id));
+                vec![ClientMessage::KillSession(id)]
+            }
+            Mode::ConfirmCloseTab(i) => {
+                let ids = self.tabs.get(i).map(|t| t.root.panes()).unwrap_or_default();
+                self.terminate(ids)
+            }
+            Mode::ConfirmCloseSpace(w) => {
+                let ids: Vec<SessionId> = self
+                    .sessions
+                    .values()
+                    .filter(|s| s.workspace == w)
+                    .map(|s| s.id)
+                    .collect();
+                self.set_status(Tone::Info, format!("Closing {}…", self.workspace_name(w)));
+                ids.into_iter().map(ClientMessage::KillSession).collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// A key in a confirmation dialog: y confirms, a confirms and stops
+    /// asking, w (a session in a worktree) also removes the worktree;
+    /// anything else cancels.
+    fn on_confirm_key(&mut self, key: KeyEvent) -> Vec<ClientMessage> {
+        let confirm = std::mem::replace(&mut self.mode, Mode::Normal);
+        let has_worktree = matches!(confirm, Mode::ConfirmKill(id)
+            if self.sessions.get(&id).is_some_and(|s| s.worktree.is_some()));
+        match key.code {
+            KeyCode::Char('y' | 'Y') | KeyCode::Enter => self.confirmed(confirm, false),
+            KeyCode::Char('w') if has_worktree => self.confirmed(confirm, true),
+            KeyCode::Char('a' | 'A') => {
+                self.config.general.confirm_terminate = false;
+                self.save_setting("general", "confirm_terminate", false);
+                let out = self.confirmed(confirm, false);
+                self.set_status(
+                    Tone::Info,
+                    "Won't ask again. Turn it back on with [general] confirm_terminate = true",
+                );
+                out
+            }
+            _ => {
+                self.status = None;
+                Vec::new()
+            }
+        }
     }
 
     fn pick_layout(&mut self) -> Vec<ClientMessage> {
@@ -3604,6 +3703,62 @@ mod tests {
             .map(|&id| ClientMessage::KillSession(id))
             .collect();
         assert_eq!(out, kills);
+    }
+
+    #[test]
+    fn confirmations_are_a_dialog_with_always() {
+        let mut app = app();
+        app.config_path = Some("/home/u/.config/hive/config.toml".into());
+        assert!(app.run(Command::ClosePane).is_empty());
+        assert_eq!(app.mode, Mode::ConfirmKill(1));
+        let d = app.confirm_dialog().unwrap();
+        assert_eq!(d.question, "Terminate shell (session 1)?");
+        assert_eq!(d.detail, "shell is still running.");
+        assert!(!d.worktree);
+
+        // Anything but y, Enter, w or a cancels.
+        assert!(app.on_terminal_event(ch('n')).is_empty());
+        assert_eq!(app.mode, Mode::Normal);
+        app.run(Command::ClosePane);
+        assert_eq!(
+            app.on_terminal_event(enter()),
+            [ClientMessage::KillSession(1)]
+        );
+
+        // a terminates, stops asking, and saves that.
+        app.run(Command::Kill);
+        assert_eq!(app.mode, Mode::ConfirmKill(1));
+        assert_eq!(
+            app.on_terminal_event(ch('a')),
+            [ClientMessage::KillSession(1)]
+        );
+        assert!(!app.config.general.confirm_terminate);
+        assert!(matches!(
+            app.effects.last(),
+            Some(Effect::SaveSetting { table, key: "confirm_terminate", value: false, .. })
+                if table == "general"
+        ));
+        // From now on there is no question.
+        assert_eq!(app.run(Command::Kill), [ClientMessage::KillSession(1)]);
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn the_worktree_choice_is_offered_for_worktree_sessions() {
+        let mut app = app();
+        let mut s = info(1, SessionState::Running);
+        s.worktree = Some("/wt/hive-claude-1".into());
+        app.on_server(ServerMessage::SessionUpdated(s));
+        app.run(Command::Kill);
+        assert!(app.confirm_dialog().unwrap().worktree);
+        assert_eq!(
+            app.on_terminal_event(ch('w')),
+            [ClientMessage::KillSession(1)]
+        );
+        assert_eq!(
+            app.remove_worktree_after.get(&1).map(String::as_str),
+            Some("/wt/hive-claude-1")
+        );
     }
 
     #[test]
@@ -5253,8 +5408,8 @@ mod tests {
         );
         assert!(matches!(
             app.effects.last(),
-            Some(Effect::SaveIntegration { name: "obsidian", enabled: true, path })
-                if path.ends_with("config.toml")
+            Some(Effect::SaveSetting { table, key: "enabled", value: true, path })
+                if table == "integrations.obsidian" && path.ends_with("config.toml")
         ));
         // Its key and palette entry exist at once.
         assert!(!app.keymap.keys_for(Command::Notes).is_empty());
@@ -5271,7 +5426,7 @@ mod tests {
         assert!(app.keymap.keys_for(Command::Notes).is_empty());
         assert!(matches!(
             app.effects.last(),
-            Some(Effect::SaveIntegration { enabled: false, .. })
+            Some(Effect::SaveSetting { value: false, .. })
         ));
     }
 

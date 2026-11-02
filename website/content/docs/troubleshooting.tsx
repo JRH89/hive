@@ -32,6 +32,14 @@ const problems: [string, React.ReactNode][] = [
     <><code>notify-send</code> is missing (on Debian and Ubuntu it is in <code>libnotify-bin</code>), or your desktop has no notification service. On macOS set <code>[integrations.desktop_notify] command</code> to a tool such as <code>terminal-notifier</code>.</>,
   ],
   [
+    "Closing tabs or panes takes seconds",
+    <>The daemon is older than <code>hive</code> (Hive warns at startup: <em>hived X is running</em>). Daemons before 0.4.12 waited 3 seconds for shells. <code>hive daemon stop</code> (ends running sessions) then <code>hive</code> starts the current one.</>,
+  ],
+  [
+    "Hive asks before every close and I want it to stop",
+    <>Press <kbd>a</kbd> in the dialog (always), or set <code>[general] confirm_terminate = false</code>. Set it back to <code>true</code> to be asked again.</>,
+  ],
+  [
     "daemon speaks protocol vN, this client speaks vM",
     <>A daemon from an older version is still running. <code>hive daemon stop</code> (ends its sessions), then <code>hive</code>.</>,
   ],

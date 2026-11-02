@@ -29,6 +29,8 @@ Logs never contain environment variables or agent output.
 | `No Obsidian vault in <project>` | Hive looks for `.obsidian/` at or above the agent's directory, or one level below the repository root |
 | No desktop notifications | `notify-send` is missing (Debian/Ubuntu: `libnotify-bin`) or there is no notification service. On macOS set `[integrations.desktop_notify] command` (e.g. `terminal-notifier`) |
 | An agent shows no status | Only agents with screen rules or that report their status show one. `hive agents -a` lists them |
+| Closing tabs or panes takes seconds | The daemon is older than `hive` (Hive warns at startup). Daemons before 0.4.12 waited 3 s for shells. `hive daemon stop` (ends sessions), then `hive` |
+| Hive asks before every close | Press `a` in the dialog, or set `[general] confirm_terminate = false` |
 | `daemon speaks protocol vN, this client speaks vM` | A daemon from an older version is still running. `hive daemon stop` (ends its sessions), then run `hive` again |
 | `` `claude` (agent `claude`) was not found on PATH `` | The agent isn't installed or isn't on the `PATH` of the shell you ran `hive` from. Check `hive doctor`; set an absolute `command` under `[agents.<name>]` if needed |
 | `hive: invalid config: …` | The message names the key. Fix it, or check with `hive doctor`. A config error never leaves a broken screen behind |

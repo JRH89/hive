@@ -4,6 +4,9 @@
 
 [general]
 default_agent = "claude"
+# Ask before terminating a session or closing a pane, tab or space with a
+# running agent. "a" in the dialog sets this to false.
+confirm_terminate = true
 # hive-dark (default), hive-light, ansi (16 colours), mono (no colour)
 theme = "hive-dark"
 

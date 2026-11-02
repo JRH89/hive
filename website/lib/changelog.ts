@@ -10,6 +10,15 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    version: "0.4.15",
+    date: "2026-11-01T21:09:53-08:00",
+    title: "Confirmations you can't miss",
+    changes: [
+      "Terminating a session or closing a pane, tab or space with a running agent now asks in a dialog in the middle of the screen, naming the agents it would stop. y or Enter goes ahead, a goes ahead and never asks again (saved as [general] confirm_terminate = false), anything else cancels.",
+      "Hive warns at startup when the running daemon is older than hive. Old daemons keep old behaviour, such as the 3-second wait when closing shells that 0.4.12 removed; hive daemon stop then hive updates it.",
+    ],
+  },
+  {
     version: "0.4.14",
     date: "2026-11-01T18:17:53-08:00",
     title: "Documentation",

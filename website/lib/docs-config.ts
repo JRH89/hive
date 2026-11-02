@@ -25,6 +25,7 @@ export const configSections: ConfigSection[] = [
     options: [
       { key: "general.default_agent", type: "string", default: '"claude"', meaning: "Agent hive new starts when you don't name one." },
       { key: "general.theme", type: "string", default: '"hive-dark"', meaning: "hive-dark, hive-light, ansi (your terminal's 16 colours) or mono (no colour)." },
+      { key: "general.confirm_terminate", type: "bool", default: "true", meaning: "Ask before terminating a session, or closing a pane, tab or space that would stop a running agent. Pressing a (always) in the dialog sets it to false." },
     ],
   },
   {
