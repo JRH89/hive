@@ -471,11 +471,18 @@ pub enum Effect {
 /// is the point (checks, tasks, usage, layout commands) stay.
 fn removed_on_exit(s: &SessionInfo) -> bool {
     let kept = [GITHUB_AGENT, TASK_AGENT, USAGE_AGENT, LAYOUT_AGENT];
-    matches!(s.state, SessionState::Exited { code: Some(0), .. })
-        && !kept.contains(&s.agent.as_str())
+    // Ctrl+C is a quit too: agents that die of it end with SIGINT (or 130).
+    let quit = match &s.state {
+        SessionState::Exited { code, signal } => {
+            matches!(code, Some(0 | 130)) || signal.as_deref() == Some("Interrupt")
+        }
+        _ => false,
+    };
+    quit && !kept.contains(&s.agent.as_str())
 }
 
-/// A shell that takes `-c "exec …"`: sh, bash, zsh, fish and kin.
+/// A shell that takes `-c "exec …"`: sh, bash, zsh, fish and kin, alone
+/// or already running a relaunch (`shell -c "…"`, from an earlier restore).
 fn is_posix_shell(command: &[String]) -> bool {
     let Some(first) = command.first() else {
         return false;
@@ -484,7 +491,8 @@ fn is_posix_shell(command: &[String]) -> bool {
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or_default();
-    command.len() == 1 && matches!(name, "sh" | "bash" | "zsh" | "fish" | "dash" | "ksh")
+    let alone = command.len() == 1 || (command.len() == 3 && command[1] == "-c");
+    alone && matches!(name, "sh" | "bash" | "zsh" | "fish" | "dash" | "ksh")
 }
 
 /// Quotes a word for `sh -c` (and fish) when it needs it.
@@ -5045,6 +5053,21 @@ mod tests {
                 .is_empty()
         );
         assert!(matches!(&app.status, Some((Tone::Warning, m)) if m.contains("code 1")));
+        // Ctrl+C quits too, as a signal or as code 130.
+        for (id, code, signal) in [(4, None, Some("Interrupt")), (5, Some(130), None)] {
+            app.on_server(ServerMessage::SessionUpdated(info(
+                id,
+                SessionState::Running,
+            )));
+            let state = SessionState::Exited {
+                code,
+                signal: signal.map(str::to_owned),
+            };
+            assert_eq!(
+                app.on_server(ServerMessage::SessionUpdated(info(id, state))),
+                vec![ClientMessage::KillSession(id)]
+            );
+        }
         // A task's output is kept even when it succeeds.
         let task = SessionInfo {
             agent: TASK_AGENT.into(),
@@ -5279,6 +5302,21 @@ mod tests {
         let req = app.relaunch_request(4).unwrap();
         assert_eq!(
             req.command,
+            vec!["/bin/bash", "-c", "exec codex resume --last"]
+        );
+        // Restored before, with the old `; exec shell` wrapper: rebuilt.
+        let again = SessionInfo {
+            agent: "shell".into(),
+            command: vec![
+                "/bin/bash".into(),
+                "-c".into(),
+                "codex resume --last; exec /bin/bash".into(),
+            ],
+            ..running(lost(6, "web"), "codex")
+        };
+        app.on_server(ServerMessage::SessionUpdated(again));
+        assert_eq!(
+            app.relaunch_request(6).unwrap().command,
             vec!["/bin/bash", "-c", "exec codex resume --last"]
         );
         // Nothing known to be running: the same command as before.
