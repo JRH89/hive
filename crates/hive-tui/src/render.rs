@@ -846,6 +846,16 @@ fn draw_sidebar_session(
     let width = row1.width as usize;
     let detected = s.presence.as_ref().filter(|_| s.state.is_alive());
     let name = display_name(s);
+    let space = app
+        .workspaces
+        .get(&s.workspace)
+        .map(|w| w.name.as_str())
+        .unwrap_or("");
+    let title = if in_tree || space.is_empty() {
+        name.as_str()
+    } else {
+        space
+    };
     let base = if is_cursor {
         theme.cursor_row()
     } else {
@@ -877,7 +887,7 @@ fn draw_sidebar_session(
             }),
         ),
         Span::styled(format!("{dot} "), base.fg(dot_color)),
-        Span::styled(truncate(theme, &name, label_width), label_style),
+        Span::styled(truncate(theme, title, label_width), label_style),
     ];
     if shared {
         // Another running agent uses the same directory.
@@ -886,31 +896,18 @@ fn draw_sidebar_session(
             base.fg(theme.warning).add_modifier(Modifier::BOLD),
         ));
     }
-    // Where it runs: its space (agents of every space are listed), then
-    // the branch, or the directory outside git.
-    let space = app
-        .workspaces
-        .get(&s.workspace)
-        .map(|w| w.name.clone())
-        .unwrap_or_default();
+    // Include the branch or directory when it adds location information.
     let spot = s
         .branch
         .clone()
         .unwrap_or_else(|| dir_name(&s.cwd).to_string());
-    // Under its space in the tree, the space's name would repeat.
-    let place = if spot == space || space.is_empty() || in_tree {
-        spot
-    } else {
-        format!("{space} · {spot}")
-    };
     let mut detail = Vec::new();
-    if s.state == SessionState::Lost {
-        detail.push("ended".to_string());
+    if !in_tree && !space.is_empty() {
+        detail.push(name.clone());
     }
-    if let Some(a) = app.activity(s.id).filter(|a| *a != Activity::Idle) {
-        detail.push(a.word().to_string());
+    if in_tree || spot != space {
+        detail.push(spot);
     }
-    detail.push(place);
     // The agent actually running, e.g. Claude Code started from a shell.
     match detected {
         Some(p) if p.label != s.label && name == s.label => detail.push(p.label.clone()),
@@ -1817,12 +1814,14 @@ mod tests {
         );
         assert!(lines[5].contains("+ new") && lines[5].contains("menu"));
         assert!(lines[7].contains("AGENTS"));
-        assert!(lines[9].contains("● claude") && lines[9].contains('1'));
+        assert!(lines[9].contains("● proj") && lines[9].contains('1'));
+        assert!(lines[10].contains("claude"));
         // Both running sessions use /home/u/proj: flagged as sharing.
         assert!(lines[9].contains(" !"), "{:?}", lines[9]);
-        assert!(lines[11].starts_with("▌● api"), "{:?}", lines[11]);
-        assert!(lines[12].contains("proj · claude"));
-        assert!(lines[13].contains("○ old") && !lines[13].contains('!'));
+        assert!(lines[11].starts_with("▌● proj"), "{:?}", lines[11]);
+        assert!(lines[12].contains("api · claude"));
+        assert!(lines[13].contains("○ proj") && !lines[13].contains('!'));
+        assert!(lines[14].contains("old"));
         // The agent's screen starts right of the sidebar.
         let panel: String = lines[1]
             .chars()
@@ -1867,12 +1866,13 @@ mod tests {
             !lines.iter().any(|l| l.contains("empty")),
             "spaces with nothing open aren't listed"
         );
-        assert!(lines[11].contains("claude") && lines[11].contains('1'));
-        assert!(lines[12].contains("web · main"), "{:?}", lines[12]);
-        assert!(lines[13].contains("later") && lines[13].contains('2'));
-        assert!(lines[15].contains("● codex") && lines[15].contains('3'));
+        assert!(lines[11].contains("web") && lines[11].contains('1'));
+        assert!(lines[12].contains("claude · main"), "{:?}", lines[12]);
+        assert!(lines[13].contains("web") && lines[13].contains('2'));
+        assert!(lines[14].contains("later"));
+        assert!(lines[15].contains("● api") && lines[15].contains('3'));
         assert!(
-            lines[16].contains("wt api · hive/codex-2"),
+            lines[16].contains("wt codex · hive/code"),
             "{:?}",
             lines[16]
         );
@@ -1890,7 +1890,7 @@ mod tests {
         assert_eq!(app.space_sessions(), vec![1, 3]);
         assert_eq!(app.agents(), vec![1, 3, 2]);
         let lines = rendered(&app, 80, 24);
-        assert!(lines[15].contains("codex"), "{:?}", lines[15]);
+        assert!(lines[15].contains("api"), "{:?}", lines[15]);
 
         // git status counts, when the integration supplies them.
         assert!(app.git_roots().is_empty(), "off by default");
@@ -1905,6 +1905,28 @@ mod tests {
         let lines = rendered(&app, 80, 24);
         assert!(lines[3].contains("main ~3 ↑2"), "{:?}", lines[3]);
         assert!(!lines[3].contains('↓'));
+    }
+
+    #[test]
+    fn agent_list_leads_with_space_and_uses_symbol_for_status() {
+        let mut app = App::new(Config::default(), Start::Auto, (80, 20));
+        app.on_connect();
+        app.on_server(ServerMessage::WorkspaceList(vec![workspace(1, "pinleads")]));
+        let mut agent = session(1, "codex", SessionState::Running);
+        agent.agent = "codex".into();
+        agent.cwd = "/home/u/pinleads".into();
+        agent.presence = Some(hive_protocol::AgentPresence {
+            agent: "codex".into(),
+            label: "codex".into(),
+            status: hive_protocol::AgentStatus::Working,
+            message: None,
+            source: hive_protocol::PresenceSource::Process,
+        });
+        app.on_server(ServerMessage::SessionList(vec![agent]));
+        let lines = rendered(&app, 80, 20);
+        assert!(lines[9].contains("pinleads"), "{:?}", lines[9]);
+        assert!(lines[10].contains("codex"), "{:?}", lines[10]);
+        assert!(!lines[10].contains("working"), "{:?}", lines[10]);
     }
 
     #[test]
@@ -1936,7 +1958,7 @@ mod tests {
         let buf = term.backend().buffer();
         let text: String = buf.content().iter().map(|c| c.symbol()).collect();
         assert!(text.is_ascii(), "non-ASCII glyph drawn: {text:?}");
-        assert!(text.contains("SPACES") && text.contains(">* claude"));
+        assert!(text.contains("SPACES") && text.contains(">* proj"));
         assert!(
             buf.content()
                 .iter()
