@@ -1694,6 +1694,17 @@ mod tests {
     }
 
     #[test]
+    fn the_empty_screen_shows_the_whole_hexagon() {
+        let mut app = App::new(Config::default(), Start::Auto, (80, 24));
+        app.on_connect();
+        app.on_server(ServerMessage::SessionList(Vec::new()));
+        let screen = rendered(&app, 80, 24).join("\n");
+        for line in brand::MARK_ART {
+            assert!(screen.contains(line.trim()), "missing {line:?}:\n{screen}");
+        }
+    }
+
+    #[test]
     fn the_tagline_can_be_turned_off() {
         let has_tagline = |config: Config| {
             let mut app = App::new(config, Start::Auto, (80, 24));

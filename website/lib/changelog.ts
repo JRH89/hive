@@ -10,6 +10,16 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    version: "0.5.3",
+    date: "2026-11-03T14:57:47-08:00",
+    title: "Quitting an agent with Ctrl+C removes it too",
+    changes: [
+      "An agent you quit with Ctrl+C now leaves the sidebar like one you quit normally. Before, it stayed listed as ended.",
+      "Sessions restored more than once now get the fixed relaunch from 0.5.2. Before, they kept the old wrapper, and quitting the agent left a bare shell listed under its name.",
+      "The hexagon on the empty screen has its straight sides back.",
+    ],
+  },
+  {
     version: "0.5.2",
     date: "2026-11-02T21:20:51-08:00",
     title: "Restored agents leave when you quit them",

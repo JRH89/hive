@@ -7,11 +7,12 @@ pub const MARK: &str = "◇";
 pub const MARK_ASCII: &str = "<>";
 /// The hexagon mark: one honeycomb cell holding a prompt. Plain ASCII so it
 /// renders in any terminal and font.
-pub const MARK_ART: [&str; 5] = [
-    r"   ____   ",
-    r"  /    \  ",
-    r" /  >_  \ ",
-    r" \      / ",
-    r"  \____/  ",
+pub const MARK_ART: [&str; 6] = [
+    r"   ______   ",
+    r"  /      \  ",
+    r" /        \ ",
+    r"|    >_    |",
+    r" \        / ",
+    r"  \______/  ",
 ];
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
