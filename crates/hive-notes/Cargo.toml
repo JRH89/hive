@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-hive-workspace = { version = "0.5.1", path = "../hive-workspace" }
+hive-workspace = { version = "0.5.2", path = "../hive-workspace" }
 
 [dev-dependencies]
 tempfile = "3.27.0"

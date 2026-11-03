@@ -475,7 +475,7 @@ fn removed_on_exit(s: &SessionInfo) -> bool {
         && !kept.contains(&s.agent.as_str())
 }
 
-/// A shell that takes `-c "…; exec shell"`: sh, bash, zsh, fish and kin.
+/// A shell that takes `-c "exec …"`: sh, bash, zsh, fish and kin.
 fn is_posix_shell(command: &[String]) -> bool {
     let Some(first) = command.first() else {
         return false;
@@ -2557,7 +2557,8 @@ impl App {
     /// The request that starts an ended session again: same command, place
     /// and label. The agent that was running in it resumes its conversation
     /// where it can (`claude --continue`, `codex resume --last`); one typed
-    /// into a shell runs in that shell, which stays when the agent exits.
+    /// into a shell runs through that shell (`exec`), so quitting the agent
+    /// ends the session like any other agent.
     fn relaunch_request(&self, id: SessionId) -> Option<CreateSession> {
         let info = self.sessions.get(&id)?;
         let mut env: Vec<(String, String)> = std::env::vars().collect();
@@ -2590,7 +2591,7 @@ impl App {
                 command = vec![
                     shell.clone(),
                     "-c".into(),
-                    format!("{}; exec {}", line.join(" "), sh_quote(shell)),
+                    format!("exec {}", line.join(" ")),
                 ];
             }
             _ => {}
@@ -5268,7 +5269,7 @@ mod tests {
         )));
         let req = app.relaunch_request(2).unwrap();
         assert_eq!(req.command, vec!["claude", "--verbose", "--continue"]);
-        // Typed into a shell: the shell runs it and stays afterwards.
+        // Typed into a shell: the shell runs it, and the session ends with it.
         let shell = SessionInfo {
             agent: "shell".into(),
             command: vec!["/bin/bash".into()],
@@ -5278,7 +5279,7 @@ mod tests {
         let req = app.relaunch_request(4).unwrap();
         assert_eq!(
             req.command,
-            vec!["/bin/bash", "-c", "codex resume --last; exec /bin/bash"]
+            vec!["/bin/bash", "-c", "exec codex resume --last"]
         );
         // Nothing known to be running: the same command as before.
         app.on_server(ServerMessage::SessionUpdated(lost(5, "plain")));

@@ -10,6 +10,15 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    version: "0.5.2",
+    date: "2026-11-02T21:20:51-08:00",
+    title: "Restored agents leave when you quit them",
+    changes: [
+      "Quitting an agent that Ctrl+Space R brought back (one first started from a terminal) now ends its session, so it leaves the sidebar. Before, a bare shell took over the pane and stayed listed under the agent's name.",
+      "The daemon now notices an agent quitting even when the process that started it lives on, so the sidebar stops showing it.",
+    ],
+  },
+  {
     version: "0.5.1",
     date: "2026-11-02T13:49:41-08:00",
     title: "q closes the notes pane",
