@@ -12,7 +12,7 @@ date: 2026-11-01
 - `StoredSession.running` (serde default) records the catalog agent in the foreground (from presence). A `Lost` record carries it back as presence (status `Unknown`).
 - `hive daemon stop` lists the sessions it will end and asks (only on a TTY; `-y` skips). It writes `restore.json` in the state dir, which the next daemon merges once (deduped by id) and deletes. This covers daemons before 0.4.16, which forget on a stop.
 - TUI: Enter relaunches one, the new `Command::RestoreSessions` (leader `R`) relaunches all (CreateSession + KillSession of the record each). A one-time status line on start says how many ended.
-- A relaunch resumes the agent that was running: `hive_agents::catalog::resume_args` (claude `--continue`, codex `resume --last`). Launched directly → args appended. Typed into a POSIX shell → `shell -c "agent args…; exec shell"`, so the terminal stays. Other agents → the old command.
+- A relaunch resumes the agent that was running: `hive_agents::catalog::resume_args` (claude `--continue`, codex `resume --last`). Launched directly → args appended. Typed into a POSIX shell → `shell -c "exec agent args…"`, so quitting the agent ends the session (amended 2026-11-02: `; exec shell` left a bare shell listed as the agent). Other agents → the old command.
 
 **Consequences:**
 - Upgrades no longer lose the layout of spaces and agents; conversations come back for Claude Code and Codex.

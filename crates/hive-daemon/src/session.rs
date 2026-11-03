@@ -44,6 +44,9 @@ const READ_BUF: usize = 16 * 1024;
 /// How often an unrecognised foreground process group is looked at again
 /// (a launcher may start the agent a moment later).
 const REIDENTIFY: Duration = Duration::from_secs(2);
+/// How often a recognised one is looked at again: the agent can exit while
+/// its group lives on (`sh -c 'agent; exec sh'`), with the same leader.
+const RECHECK: Duration = Duration::from_secs(5);
 const MAX_REPORT_MESSAGE: usize = 200;
 
 #[derive(Clone, Debug)]
@@ -378,7 +381,12 @@ impl Session {
         if d.reported.as_ref().is_some_and(|r| r.pgid != pgid) {
             d.reported = None;
         }
-        let stale = d.kind.is_none() && d.identified_at.is_none_or(|t| now - t >= REIDENTIFY);
+        let every = if d.kind.is_none() {
+            REIDENTIFY
+        } else {
+            RECHECK
+        };
+        let stale = d.identified_at.is_none_or(|t| now - t >= every);
         let mut kind_changed = false;
         if d.pgid != pgid || stale {
             let kind = pgid.and_then(hive_agents::process::identify_group);

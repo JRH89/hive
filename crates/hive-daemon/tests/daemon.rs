@@ -1716,6 +1716,35 @@ async fn agents_are_recognised_and_their_status_tracked() {
     );
 }
 
+/// An agent that quits while its process group lives on (a restored
+/// `sh -c 'agent; exec sh'`) stops being shown as that agent.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_agent_that_quits_inside_its_shell_is_forgotten() {
+    let h = Harness::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let fake = tmp.path().join("claude");
+    std::fs::write(&fake, "#!/bin/sh\necho started\nread x\n").unwrap();
+    std::fs::set_permissions(&fake, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+
+    let mut c = h.client().await;
+    let script = format!("{}; echo back; sleep 60", fake.display());
+    let s = create_info(&mut c, sh(&script, TermSize::DEFAULT)).await;
+    wait_presence(&mut c, s.id, "claude", |p| {
+        p.is_some_and(|p| p.agent == "claude")
+    })
+    .await;
+    let mut screen = attach(&mut c, s.id, TermSize::DEFAULT).await;
+    wait_for_text(&mut c, &mut screen, "started").await;
+    c.send(&ClientMessage::Input {
+        session: s.id,
+        data: b"q\r".to_vec(),
+    })
+    .await
+    .unwrap();
+    wait_for_text(&mut c, &mut screen, "back").await;
+    wait_presence(&mut c, s.id, "no agent", |p| p.is_none()).await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_plain_shell_has_no_agent_presence() {
     let h = Harness::start().await;
