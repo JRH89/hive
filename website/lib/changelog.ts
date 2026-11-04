@@ -10,6 +10,15 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    version: "0.5.4",
+    date: "2026-11-04T15:23:40-08:00",
+    title: "Windows on Arm",
+    changes: [
+      "Native Windows Arm64 binaries (Snapdragon and other Arm PCs). Before, the Windows installer stopped with \"no prebuilt binary\" on these machines.",
+      "The Windows installer checks the CPU in a way that works in both Windows PowerShell 5.1 and PowerShell 7, and installs the x64 build (run under emulation) for older releases without an Arm one.",
+    ],
+  },
+  {
     version: "0.5.3",
     date: "2026-11-03T14:57:47-08:00",
     title: "Quitting an agent with Ctrl+C removes it too",

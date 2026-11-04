@@ -37,8 +37,14 @@ jobs:
       - run: scripts/smoke.sh target/release
 
   windows:
-    name: Windows (clippy, test, smoke)
-    runs-on: windows-2022
+    name: Windows ${{ matrix.arch }} (clippy, test, smoke)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x64, os: windows-2022 }
+          - { arch: arm64, os: windows-11-arm }
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable

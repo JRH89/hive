@@ -61,7 +61,7 @@ panes = [
 ```
 
 ## Install
-Linux (x86_64 and aarch64), macOS (Apple silicon and Intel) and Windows 10+ (x86_64); CI tests all three. On Windows, agent status comes only from agents that report it (`hive report-agent`).
+Linux (x86_64 and aarch64), macOS (Apple silicon and Intel) and Windows 10+ (x86_64 and Arm64); CI tests all three. On Windows, agent status comes only from agents that report it (`hive report-agent`).
 
 **Linux and macOS:**
 
@@ -75,7 +75,7 @@ curl -fsSL https://github.com/jrh89/hive/releases/latest/download/install.sh | s
 irm https://github.com/jrh89/hive/releases/latest/download/install.ps1 | iex
 ```
 
-The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.5.3` to pin a version. Later, `hive update` upgrades in place (then `hive daemon stop` to restart the daemon on the new version; this ends running sessions, and `Ctrl+Space R` restores them).
+The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.5.4` to pin a version. Later, `hive update` upgrades in place (then `hive daemon stop` to restart the daemon on the new version; this ends running sessions, and `Ctrl+Space R` restores them).
 
 **From source** (Rust ≥ 1.89):
 
