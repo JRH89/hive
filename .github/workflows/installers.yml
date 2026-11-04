@@ -39,15 +39,25 @@ jobs:
           "$HIVE_INSTALL_DIR/hive" daemon stop
 
   windows:
-    name: install.ps1 (windows)
-    runs-on: windows-latest
+    name: install.ps1 (${{ matrix.os }}, ${{ matrix.shell }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, windows-11-arm]
+        # powershell is Windows PowerShell 5.1, what `irm | iex` runs in by
+        # default on Windows 10 and 11.
+        shell: [pwsh, powershell]
+    runs-on: ${{ matrix.os }}
     env:
       HIVE_INSTALL_DIR: ${{ github.workspace }}\bin
       HIVE_STATE_DIR: ${{ github.workspace }}\state
     steps:
       - uses: actions/checkout@v5
-      - shell: pwsh
-        run: ./scripts/install.ps1
+      - name: Install the way the README says (irm | iex)
+        shell: pwsh
+        run: |
+          & ${{ matrix.shell }} -NoProfile -Command 'Get-Content -Raw ./scripts/install.ps1 | Invoke-Expression'
+          if ($LASTEXITCODE) { exit 1 }
       - name: Run the installed binaries
         shell: pwsh
         run: |

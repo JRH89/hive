@@ -22,6 +22,7 @@ jobs:
           # Cross-built on Apple silicon; tested natively by the arm64 job.
           - { target: x86_64-apple-darwin, os: macos-15, cross: true }
           - { target: x86_64-pc-windows-msvc, os: windows-2022 }
+          - { target: aarch64-pc-windows-msvc, os: windows-11-arm }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5

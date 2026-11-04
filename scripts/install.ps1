@@ -15,11 +15,14 @@ $repo = 'jrh89/hive'
 $version = if ($env:HIVE_VERSION) { $env:HIVE_VERSION } else { 'latest' }
 $dir = if ($env:HIVE_INSTALL_DIR) { $env:HIVE_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'hive\bin' }
 
-$arch = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture
-if ($arch -ne 'X64') {
-    throw "no prebuilt binary for $arch; build from source instead (see README)"
+# The machine's CPU, also from a 32-bit PowerShell. Not RuntimeInformation:
+# Windows PowerShell 5.1 (the default on Windows 10 and 11) often can't load it.
+$arch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+$name = switch ($arch) {
+    'AMD64' { 'hive-x86_64-pc-windows-msvc' }
+    'ARM64' { 'hive-aarch64-pc-windows-msvc' }
+    default { throw "no prebuilt binary for this CPU ($arch); build from source instead (see README)" }
 }
-$name = 'hive-x86_64-pc-windows-msvc'
 
 $base = if ($env:HIVE_DOWNLOAD_URL) { $env:HIVE_DOWNLOAD_URL }
         elseif ($version -eq 'latest') { "https://github.com/$repo/releases/latest/download" }
@@ -29,7 +32,16 @@ $tmp = Join-Path ([IO.Path]::GetTempPath()) "hive-install-$PID"
 New-Item -ItemType Directory -Force $tmp | Out-Null
 try {
     Say "downloading $name ($version)"
-    Invoke-WebRequest "$base/$name.zip" -OutFile "$tmp\$name.zip" -UseBasicParsing
+    try {
+        Invoke-WebRequest "$base/$name.zip" -OutFile "$tmp\$name.zip" -UseBasicParsing
+    } catch {
+        # Releases before 0.5.4 have no Arm build; Windows on Arm runs the
+        # x64 one under emulation.
+        if ($name -ne 'hive-aarch64-pc-windows-msvc') { throw }
+        $name = 'hive-x86_64-pc-windows-msvc'
+        Say "this release has no Arm build; installing $name, which Windows runs under emulation"
+        Invoke-WebRequest "$base/$name.zip" -OutFile "$tmp\$name.zip" -UseBasicParsing
+    }
     Invoke-WebRequest "$base/$name.zip.sha256" -OutFile "$tmp\$name.zip.sha256" -UseBasicParsing
     $want = ((Get-Content "$tmp\$name.zip.sha256" -Raw).Trim() -split '\s+')[0].ToLower()
     $got = (Get-FileHash -Algorithm SHA256 "$tmp\$name.zip").Hash.ToLower()

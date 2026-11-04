@@ -62,7 +62,7 @@ export default function Install() {
 
           <h2 id="windows">Windows</h2>
           <p>
-            For Windows 10 or later on x86_64, in PowerShell. Binaries go to{" "}
+            For Windows 10 or later on x86_64 or Arm64, in PowerShell (Windows PowerShell or PowerShell 7). Binaries go to{" "}
             <code>%LOCALAPPDATA%\hive\bin</code>, which the installer adds to your user PATH.
           </p>
           <CopyCommand command={windows} />
