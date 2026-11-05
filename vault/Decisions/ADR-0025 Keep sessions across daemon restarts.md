@@ -17,4 +17,5 @@ date: 2026-11-01
 **Consequences:**
 - Upgrades no longer lose the layout of spaces and agents; conversations come back for Claude Code and Codex.
 - Ended sessions stay listed until restored or dismissed (`x`). Tests that remove workspaces dismiss them first.
+- Amended 2026-11-04: a session ended by a signal other than SIGINT is saved like a live one, with the agent last seen in it (`Session::last_agent`). Powering off signals every process at once; an agent dying just before hived saved it vanished from the store.
 - Supersedes ADR-0009's "graceful shutdown forgets them". Processes still never survive (spec §4).

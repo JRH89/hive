@@ -81,7 +81,7 @@ const features = [
 const faqs = [
   [
     "Is Hive ready to use?",
-    "Yes, on Linux, macOS and Windows. Hive is young but complete: terminals and agents in split panes and tabs, live agent status, detach and reattach, automatic reconnection, spaces that follow your cd, Git worktrees, a command palette, themes and configurable keys. It is tested with real terminals in CI on all three platforms. Version 0.5.4 ships prebuilt binaries and a one-line installer; hive update upgrades in place.",
+    "Yes, on Linux, macOS and Windows. Hive is young but complete: terminals and agents in split panes and tabs, live agent status, detach and reattach, automatic reconnection, spaces that follow your cd, Git worktrees, a command palette, themes and configurable keys. It is tested with real terminals in CI on all three platforms. Version 0.5.5 ships prebuilt binaries and a one-line installer; hive update upgrades in place.",
   ],
   [
     "Which agents can I run?",
@@ -138,7 +138,7 @@ const structuredData = [
     applicationCategory: "DeveloperApplication",
     applicationSubCategory: "Terminal multiplexer",
     operatingSystem: "Linux, macOS, Windows",
-    softwareVersion: "0.5.4",
+    softwareVersion: "0.5.5",
     downloadUrl: `${repoUrl}/releases/latest`,
     installUrl: `${siteUrl}install/`,
     license: "https://opensource.org/licenses/MIT",
@@ -460,7 +460,7 @@ journal = true        # log agent activity to today's note`}</code>
               <h2 id="start-title">Your terminal. Your platform.</h2>
             </div>
             <span className="development-badge">
-              <span className="tiny-square" /> v0.5.4 RELEASED
+              <span className="tiny-square" /> v0.5.5 RELEASED
             </span>
           </div>
           <ReleaseInstall />
@@ -592,7 +592,7 @@ journal = true        # log agent activity to today's note`}</code>
             <article>
               <span className="roadmap-marker current" />
               <div>
-                <span className="roadmap-status available">RELEASED · v0.5.4</span>
+                <span className="roadmap-status available">RELEASED · v0.5.5</span>
                 <h3>Everywhere, terminal first</h3>
                 <p>
                   macOS and Windows binaries. New opens a terminal, spaces
