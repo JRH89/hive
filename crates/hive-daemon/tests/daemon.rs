@@ -964,6 +964,68 @@ async fn graceful_shutdown_keeps_sessions_to_relaunch_and_ids_keep_increasing() 
     assert!(next > first);
 }
 
+/// Powering off signals every process at once, so an agent can die just
+/// before hived saves it. It still comes back to relaunch, with its agent.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_agent_killed_just_before_the_daemon_comes_back() {
+    let mut h = Harness::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let fake = tmp.path().join("claude");
+    let pid_file = tmp.path().join("pid");
+    std::fs::write(
+        &fake,
+        format!("#!/bin/sh\necho $$ > {}\nsleep 60\n", pid_file.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+
+    let mut c = h.client().await;
+    let s = create_info(&mut c, sh(&fake.display().to_string(), TermSize::DEFAULT)).await;
+    wait_presence(&mut c, s.id, "claude", |p| {
+        p.is_some_and(|p| p.agent == "claude")
+    })
+    .await;
+    let pid = std::fs::read_to_string(&pid_file).unwrap();
+    let status = std::process::Command::new("kill")
+        .args(["-TERM", pid.trim()])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    timeout(T, async {
+        while list(&mut c).await.iter().any(|i| i.state.is_alive()) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("exit reported");
+    // The store has caught up with the exit (the agent's presence is gone
+    // from listings, but it is remembered for the relaunch).
+    timeout(T, async {
+        loop {
+            let text = std::fs::read_to_string(h.paths.state_dir.join("sessions.json"))
+                .unwrap_or_default();
+            if text.contains("\"running\": \"claude\"") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("killed session not kept in the store");
+    drop(c);
+
+    h.crash().await;
+    h.restart().await;
+    let mut c = h.client().await;
+    let sessions = list(&mut c).await;
+    assert_eq!(sessions.len(), 1, "{sessions:?}");
+    assert_eq!(sessions[0].state, SessionState::Lost);
+    assert_eq!(
+        sessions[0].presence.as_ref().map(|p| p.agent.as_str()),
+        Some("claude")
+    );
+}
+
 #[tokio::test]
 async fn sessions_saved_by_the_cli_before_a_stop_are_restored() {
     let mut h = Harness::start().await;

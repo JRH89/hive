@@ -330,6 +330,16 @@ impl Session {
         tracing::debug!(session = self.id, "pty reader finished");
     }
 
+    /// The known agent last seen running here, even after the session ended:
+    /// what a relaunch resumes (ADR-0025).
+    pub fn last_agent(&self) -> Option<String> {
+        lock(&self.meta)
+            .presence
+            .as_ref()
+            .filter(|p| hive_agents::catalog::by_id(&p.agent).is_some())
+            .map(|p| p.agent.clone())
+    }
+
     pub fn info(&self) -> SessionInfo {
         self.info_locked(&lock(&self.meta))
     }

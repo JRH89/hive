@@ -560,11 +560,25 @@ impl Daemon {
         }
         saved.closed = !include_live;
         let mut sessions: Vec<StoredSession> = if include_live {
-            self.list()
+            let live: Vec<_> = self.sessions.lock().unwrap().values().cloned().collect();
+            let mut kept: Vec<StoredSession> = live
                 .iter()
-                .filter(|s| s.state.is_alive() || self.is_lost(s.id))
-                .map(StoredSession::from_info)
-                .collect()
+                .filter_map(|s| {
+                    let info = s.info();
+                    (info.state.is_alive() || killed(&info.state)).then(|| StoredSession {
+                        running: s.last_agent(),
+                        ..StoredSession::from_info(&info)
+                    })
+                })
+                .collect();
+            kept.extend(
+                self.lost
+                    .lock()
+                    .unwrap()
+                    .values()
+                    .map(StoredSession::from_info),
+            );
+            kept
         } else {
             self.lost
                 .lock()
@@ -596,6 +610,21 @@ impl Daemon {
             Ok(()) => saved.bytes = bytes,
             Err(e) => tracing::warn!("cannot write {}: {e}", self.store_path.display()),
         }
+    }
+}
+
+/// Ended by a signal from outside (not Ctrl+C): most often the machine
+/// shutting down, which signals every process at once, so the agent can die
+/// just before hived saves it. Kept like a running session, so it comes back
+/// as relaunchable instead of vanishing (ADR-0025). A shell whose child was
+/// killed exits 128 + the signal instead (129 SIGHUP, 143 SIGTERM).
+fn killed(state: &hive_protocol::SessionState) -> bool {
+    match state {
+        hive_protocol::SessionState::Exited {
+            signal: Some(s), ..
+        } => s != "Interrupt",
+        hive_protocol::SessionState::Exited { code, .. } => matches!(code, Some(129 | 143)),
+        _ => false,
     }
 }
 

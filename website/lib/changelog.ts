@@ -10,6 +10,14 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    version: "0.5.5",
+    date: "2026-11-04T16:06:43-08:00",
+    title: "Your agents survive turning the computer off",
+    changes: [
+      "Shutting down or rebooting no longer loses agents. The system stops every program at once, so an agent could end a moment before Hive saved it and be forgotten. Now it comes back as ended with the rest, and Ctrl+Space R resumes it.",
+    ],
+  },
+  {
     version: "0.5.4",
     date: "2026-11-04T15:23:40-08:00",
     title: "Windows on Arm",
