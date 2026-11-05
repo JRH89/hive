@@ -616,9 +616,16 @@ impl Daemon {
 /// Ended by a signal from outside (not Ctrl+C): most often the machine
 /// shutting down, which signals every process at once, so the agent can die
 /// just before hived saves it. Kept like a running session, so it comes back
-/// as relaunchable instead of vanishing (ADR-0025).
+/// as relaunchable instead of vanishing (ADR-0025). A shell whose child was
+/// killed exits 128 + the signal instead (129 SIGHUP, 143 SIGTERM).
 fn killed(state: &hive_protocol::SessionState) -> bool {
-    matches!(state, hive_protocol::SessionState::Exited { signal: Some(s), .. } if s != "Interrupt")
+    match state {
+        hive_protocol::SessionState::Exited {
+            signal: Some(s), ..
+        } => s != "Interrupt",
+        hive_protocol::SessionState::Exited { code, .. } => matches!(code, Some(129 | 143)),
+        _ => false,
+    }
 }
 
 /// Persists the store after every burst of lifecycle events.
