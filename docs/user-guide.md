@@ -202,7 +202,7 @@ Each pane starts in the space's root. With no layout for the space, the only lay
 Right-click a space for **open, new terminal here, rename, close space** (close asks, then terminates its sessions); a tab for **rename, split right/below, close tab** (a tab's name shows after its number); an agent for **open, rename, split right/below, terminate**.
 
 
-Everything in the sidebar and the tab bar is clickable: spaces, agents, **+ new**, **menu** and tabs. Click a pane to focus it. The wheel scrolls the sidebar. In the terminal panel, clicks and the wheel go to agents that use the mouse; full-screen apps without mouse support scroll with the wheel. Hold `Shift` to select text with your terminal as usual. Turn the mouse off with `[terminal] mouse_support = false`.
+Everything in the sidebar and the tab bar is clickable: spaces, agents, **+ new**, **menu** and tabs. Click a pane to focus it. The wheel scrolls the SPACES or AGENTS list under the pointer without changing your selection; a list longer than its room shows a scrollbar. In the terminal panel, clicks and the wheel go to agents that use the mouse; full-screen apps without mouse support scroll with the wheel. Hold `Shift` to select text with your terminal as usual. Turn the mouse off with `[terminal] mouse_support = false`.
 
 ### Agent status
 

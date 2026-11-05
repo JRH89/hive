@@ -434,7 +434,19 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         .iter()
         .position(|(w, _)| Some(*w) == space)
         .unwrap_or(0);
-    let first = selected.saturating_sub(room.saturating_sub(1) as usize);
+    let first = app.spaces_view.first(groups.len(), room as usize, selected);
+    let list = Rect {
+        y: inner.y + 2,
+        height: (room * 2).min(bottom.saturating_sub(inner.y + 2)),
+        ..inner
+    };
+    // Rows leave the last column to the scrollbar when the list overflows.
+    let bar = u16::from(groups.len() > room as usize);
+    let item = |y| Rect {
+        width: inner.width - bar,
+        ..row(y)
+    };
+    let iw = width - bar as usize;
     let mut y = inner.y + 2;
     for (w, ids) in groups.iter().skip(first).take(room as usize) {
         let chosen = Some(*w) == space;
@@ -461,7 +473,7 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         let name = truncate(
             theme,
             app.workspace_name(*w),
-            width.saturating_sub(4 + count.len()),
+            iw.saturating_sub(4 + count.len()),
         );
         frame.render_widget(
             Paragraph::new(Line::from(vec![
@@ -469,16 +481,16 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 Span::styled(name, name_style),
             ]))
             .style(base),
-            row(y),
+            item(y),
         );
         frame.render_widget(
             Paragraph::new(Span::styled(count, base.fg(theme.muted))).alignment(Alignment::Right),
-            row(y),
+            item(y),
         );
         let branch = space_branch(app, *w).unwrap_or_default();
         // `[integrations.git_status]`: "~3 ↑2 ↓1", only what's non-zero.
         let git = app.git.get(w).map(git_counts).unwrap_or_default();
-        let room = width.saturating_sub(3 + if git.is_empty() { 0 } else { git.len() + 1 });
+        let room = iw.saturating_sub(3 + if git.is_empty() { 0 } else { git.len() + 1 });
         let mut line = vec![Span::styled(
             format!("   {}", truncate(theme, &branch, room)),
             base.fg(theme.muted),
@@ -486,16 +498,18 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         if !git.is_empty() {
             line.push(Span::styled(format!(" {git}"), base.fg(theme.accent_dim)));
         }
-        frame.render_widget(Paragraph::new(Line::from(line)).style(base), row(y + 1));
+        frame.render_widget(Paragraph::new(Line::from(line)).style(base), item(y + 1));
         hits.push((
             Rect {
                 height: 2,
-                ..row(y)
+                ..item(y)
             },
             SidebarHit::Workspace(*w),
         ));
         y += 2;
     }
+    hits.push((list, SidebarHit::SpacesList));
+    draw_scrollbar(frame, list, groups.len(), room as usize, first, theme);
     if groups.is_empty() {
         frame.render_widget(
             Paragraph::new(Span::styled(
@@ -551,7 +565,13 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         .iter()
         .position(|id| Some(*id) == app.cursor)
         .unwrap_or(0);
-    let start = (cursor_idx + 1).saturating_sub(available.max(1) as usize);
+    let room = available.max(1) as usize;
+    let start = app.agents_view.first(ids.len(), room, cursor_idx);
+    let list = Rect {
+        y,
+        height: bottom.saturating_sub(y),
+        ..inner
+    };
     let current = app.focused();
     let shown = app.active_tab().map(|t| t.root.panes()).unwrap_or_default();
     for (position, id) in ids.iter().enumerate().skip(start) {
@@ -568,9 +588,14 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             },
             SidebarHit::Session(*id),
         ));
+        let bar = u16::from(ids.len() > room);
+        let item = |y| Rect {
+            width: inner.width - bar,
+            ..row(y)
+        };
         draw_sidebar_session(
             frame,
-            [row(y), row(y + 1)],
+            [item(y), item(y + 1)],
             app,
             s,
             position,
@@ -587,6 +612,37 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             theme,
         );
         y += 2;
+    }
+    hits.push((list, SidebarHit::AgentsList));
+    draw_scrollbar(frame, list, ids.len(), room, start, theme);
+}
+
+/// A one-column scrollbar at the right edge of `list` when `len` items
+/// don't fit `room` at a time; `first` is the first one shown.
+fn draw_scrollbar(
+    frame: &mut Frame,
+    list: Rect,
+    len: usize,
+    room: usize,
+    first: usize,
+    theme: &Theme,
+) {
+    let height = list.height as usize;
+    if len <= room || height == 0 || list.width == 0 {
+        return;
+    }
+    let thumb = (height * room / len).clamp(1, height);
+    let at = (height - thumb) * first / (len - room);
+    let x = list.x + list.width - 1;
+    for i in 0..height {
+        let (glyph, color) = if (at..at + thumb).contains(&i) {
+            (theme.glyphs.scroll_thumb, theme.muted)
+        } else {
+            (theme.glyphs.scroll_track, theme.surface)
+        };
+        frame
+            .buffer_mut()
+            .set_string(x, list.y + i as u16, glyph, Style::new().fg(color));
     }
 }
 
@@ -695,10 +751,22 @@ fn draw_sidebar_tree(frame: &mut Frame, inner: Rect, app: &App, theme: &Theme) {
             Item::Space(w, _) => app.collapsed.contains(w) && cursor_space == Some(*w),
         })
         .unwrap_or(0);
-    let start = (at + 1).saturating_sub(room);
+    let start = app.spaces_view.first(items.len(), room, at);
+    let list = Rect {
+        y: top,
+        height: (bottom + 1).saturating_sub(top),
+        ..inner
+    };
     let current = app.focused();
     let shown = app.active_tab().map(|t| t.root.panes()).unwrap_or_default();
     let space = app.shown_space();
+    // Rows leave the last column to the scrollbar when the list overflows.
+    let bar = u16::from(items.len() > room);
+    let cell = |y| Rect {
+        width: inner.width - bar,
+        ..row(y)
+    };
+    let iw = width - bar as usize;
     let mut y = top;
     for item in items.iter().skip(start) {
         if y + 2 > bottom + 1 {
@@ -737,7 +805,7 @@ fn draw_sidebar_tree(frame: &mut Frame, inner: Rect, app: &App, theme: &Theme) {
                 let name = truncate(
                     theme,
                     app.workspace_name(w),
-                    width.saturating_sub(6 + count.len()),
+                    iw.saturating_sub(6 + count.len()),
                 );
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![
@@ -746,16 +814,16 @@ fn draw_sidebar_tree(frame: &mut Frame, inner: Rect, app: &App, theme: &Theme) {
                         Span::styled(name, name_style),
                     ]))
                     .style(base),
-                    row(y),
+                    cell(y),
                 );
                 frame.render_widget(
                     Paragraph::new(Span::styled(count, base.fg(theme.muted)))
                         .alignment(Alignment::Right),
-                    row(y),
+                    cell(y),
                 );
                 let branch = space_branch(app, w).unwrap_or_default();
                 let git = app.git.get(&w).map(git_counts).unwrap_or_default();
-                let room = width.saturating_sub(5 + if git.is_empty() { 0 } else { git.len() + 1 });
+                let room = iw.saturating_sub(5 + if git.is_empty() { 0 } else { git.len() + 1 });
                 let mut line = vec![Span::styled(
                     format!("     {}", truncate(theme, &branch, room)),
                     base.fg(theme.muted),
@@ -763,20 +831,20 @@ fn draw_sidebar_tree(frame: &mut Frame, inner: Rect, app: &App, theme: &Theme) {
                 if !git.is_empty() {
                     line.push(Span::styled(format!(" {git}"), base.fg(theme.accent_dim)));
                 }
-                frame.render_widget(Paragraph::new(Line::from(line)).style(base), row(y + 1));
+                frame.render_widget(Paragraph::new(Line::from(line)).style(base), cell(y + 1));
                 // The arrow folds; the rest of the row opens the space.
                 hits.push((
                     Rect {
                         width: 3,
                         height: 2,
-                        ..row(y)
+                        ..cell(y)
                     },
                     SidebarHit::Collapse(w),
                 ));
                 hits.push((
                     Rect {
                         height: 2,
-                        ..row(y)
+                        ..cell(y)
                     },
                     SidebarHit::Workspace(w),
                 ));
@@ -793,13 +861,13 @@ fn draw_sidebar_tree(frame: &mut Frame, inner: Rect, app: &App, theme: &Theme) {
                 hits.push((
                     Rect {
                         height: 2,
-                        ..row(y)
+                        ..cell(y)
                     },
                     SidebarHit::Session(id),
                 ));
                 draw_sidebar_session(
                     frame,
-                    [indent(row(y)), indent(row(y + 1))],
+                    [indent(cell(y)), indent(cell(y + 1))],
                     app,
                     s,
                     position,
@@ -819,6 +887,8 @@ fn draw_sidebar_tree(frame: &mut Frame, inner: Rect, app: &App, theme: &Theme) {
         }
         y += 2;
     }
+    hits.push((list, SidebarHit::SpacesList));
+    draw_scrollbar(frame, list, items.len(), room, start, theme);
 }
 
 /// Whether a sidebar session is on screen.
@@ -1715,6 +1785,80 @@ mod tests {
         let mut config = Config::default();
         config.branding.show_tagline = false;
         assert!(!has_tagline(config));
+    }
+
+    #[test]
+    fn overflowing_sidebar_lists_get_a_scrollbar_and_the_wheel_scrolls_them() {
+        let mut app = App::new(Config::default(), Start::Auto, (80, 24));
+        app.on_connect();
+        app.on_server(ServerMessage::WorkspaceList(
+            (1..=8)
+                .map(|i| workspace(i, &format!("space{i}")))
+                .collect(),
+        ));
+        app.on_server(ServerMessage::SessionList(
+            (1..=8)
+                .map(|i| SessionInfo {
+                    workspace: i,
+                    ..session(i, &format!("agent{i}"), SessionState::Running)
+                })
+                .collect(),
+        ));
+        let bar = |screen: &[String]| -> Vec<usize> {
+            let col = SIDEBAR_WIDTH as usize - 2;
+            screen
+                .iter()
+                .enumerate()
+                .filter(|(_, l)| matches!(l.chars().nth(col), Some('┃' | '│')))
+                .map(|(y, _)| y)
+                .collect()
+        };
+        let screen = rendered(&app, 80, 24);
+        let rows = bar(&screen);
+        assert!(!rows.is_empty(), "no scrollbar:\n{}", screen.join("\n"));
+        // Nothing overflows: no scrollbar.
+        let mut few = App::new(Config::default(), Start::Auto, (80, 24));
+        few.on_connect();
+        few.on_server(ServerMessage::SessionList(vec![session(
+            1,
+            "a",
+            SessionState::Running,
+        )]));
+        assert!(bar(&rendered(&few, 80, 24)).is_empty());
+
+        // The wheel over SPACES scrolls it without changing the selection.
+        let before = app.shown_space();
+        // In the sidebar only (the header names the current space too).
+        let side = |l: &String| l.chars().take(SIDEBAR_WIDTH as usize).collect::<String>();
+        let shows = |screen: &[String], name: &str| screen.iter().any(|l| side(l).contains(name));
+        // The selected space (the last) is in view, the first isn't.
+        assert!(shows(&screen, "space8") && !shows(&screen, "space1 "));
+        let y = screen
+            .iter()
+            .position(|l| side(l).contains("space8"))
+            .unwrap() as u16;
+        for _ in 0..8 {
+            app.on_terminal_event(crossterm::event::Event::Mouse(
+                crossterm::event::MouseEvent {
+                    kind: crossterm::event::MouseEventKind::ScrollUp,
+                    column: 3,
+                    row: y,
+                    modifiers: crossterm::event::KeyModifiers::NONE,
+                },
+            ));
+        }
+        let scrolled = rendered(&app, 80, 24);
+        assert!(shows(&scrolled, "space1 "), "{}", scrolled.join("\n"));
+        assert_eq!(app.shown_space(), before);
+        // Long rows stop short of the scrollbar.
+        let agents = scrolled.iter().position(|l| l.contains("AGENTS")).unwrap();
+        let line = &scrolled[agents + 3];
+        let col = SIDEBAR_WIDTH as usize - 2;
+        assert!(
+            line.contains('…') && matches!(line.chars().nth(col), Some('┃' | '│')),
+            "{}",
+            scrolled.join("\n")
+        );
     }
 
     #[test]

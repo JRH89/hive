@@ -150,7 +150,7 @@ export default function Interface() {
 
       <h2 id="mouse">Mouse</h2>
       <p>
-        Everything in the sidebar and the tab bar is clickable, the wheel scrolls the sidebar, and
+        Everything in the sidebar and the tab bar is clickable, the wheel scrolls the SPACES or AGENTS list under the pointer (a list that doesn&apos;t fit shows a scrollbar), and
         clicking a pane focuses it. In a terminal, clicks and the wheel go to agents that use the
         mouse; full-screen programs without mouse support scroll with the wheel. Hold{" "}
         <kbd>Shift</kbd> to select text with your terminal as usual.

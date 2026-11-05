@@ -49,6 +49,9 @@ pub struct Glyphs {
     pub group: &'static str,
     /// A collapsed space in the tree sidebar (`group` is an expanded one).
     pub collapsed: &'static str,
+    /// A sidebar list's scrollbar: the track and the part showing the view.
+    pub scroll_track: &'static str,
+    pub scroll_thumb: &'static str,
     /// Text-input caret.
     pub caret: &'static str,
     pub ellipsis: &'static str,
@@ -70,6 +73,8 @@ impl Glyphs {
         current: "▌",
         group: "▾",
         collapsed: "▸",
+        scroll_track: "│",
+        scroll_thumb: "┃",
         caret: "▏",
         ellipsis: "…",
         ascii: false,
@@ -88,6 +93,8 @@ impl Glyphs {
         current: ">",
         group: "-",
         collapsed: "+",
+        scroll_track: "|",
+        scroll_thumb: "#",
         caret: "_",
         ellipsis: "~",
         ascii: true,

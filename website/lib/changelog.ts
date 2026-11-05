@@ -10,6 +10,15 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    version: "0.5.7",
+    date: "2026-11-04T21:11:36-08:00",
+    title: "Scrollbars in the sidebar",
+    changes: [
+      "The SPACES and AGENTS lists (and the tree sidebar) show a scrollbar when they hold more than fits, so you can see there's more and where you are.",
+      "The mouse wheel scrolls the list under the pointer without changing which space or agent is selected.",
+    ],
+  },
+  {
     version: "0.5.6",
     date: "2026-11-04T16:25:52-08:00",
     title: "Put your spaces in any order",

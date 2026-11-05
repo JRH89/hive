@@ -5,7 +5,7 @@
 //! Switching sessions re-attaches (see ADR-0007): the daemon holds every
 //! session's screen, so the client only ever mirrors the visible one.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU16;
 use std::path::{Path, PathBuf};
@@ -271,6 +271,43 @@ pub enum SidebarHit {
     Tab(usize),
     /// The tab bar's `+`: a new terminal tab.
     NewTab,
+    /// The rest of the SPACES list (or the whole tree sidebar): the wheel
+    /// scrolls it.
+    SpacesList,
+    /// The rest of the AGENTS list.
+    AgentsList,
+}
+
+/// Where a sidebar list's view starts. Kept across frames, so the wheel
+/// scrolls the list without moving the selection; a new selection is
+/// brought into view.
+#[derive(Debug, Default)]
+pub struct ListView {
+    top: Cell<usize>,
+    follow: Cell<Option<usize>>,
+}
+
+impl ListView {
+    /// The first of `len` items to show, `room` at a time.
+    pub fn first(&self, len: usize, room: usize, selected: usize) -> usize {
+        let mut top = self.top.get();
+        if self.follow.get() != Some(selected) {
+            if selected < top {
+                top = selected;
+            } else if selected >= top + room {
+                top = selected + 1 - room;
+            }
+            self.follow.set(Some(selected));
+        }
+        let top = top.min(len.saturating_sub(room));
+        self.top.set(top);
+        top
+    }
+
+    /// Scrolls by `delta` items; `first` keeps it within the list.
+    pub fn scroll(&self, delta: isize) {
+        self.top.set(self.top.get().saturating_add_signed(delta));
+    }
 }
 
 /// Where the next session created from the UI goes.
@@ -343,6 +380,9 @@ pub struct App {
     pub space_order_path: Option<PathBuf>,
     /// The space being dragged in the sidebar, and whether it moved.
     drag_space: Option<(WorkspaceId, bool)>,
+    /// Scroll positions of the SPACES list (or the tree) and AGENTS list.
+    pub spaces_view: ListView,
+    pub agents_view: ListView,
     /// Exited sessions this window asked the daemon to remove.
     auto_removing: BTreeSet<SessionId>,
     /// The ended-sessions notice was shown (once per run).
@@ -663,6 +703,8 @@ impl App {
             space_order: Vec::new(),
             space_order_path: None,
             drag_space: None,
+            spaces_view: ListView::default(),
+            agents_view: ListView::default(),
             auto_removing: BTreeSet::new(),
             told_ended: false,
             tasks: None,
@@ -1741,12 +1783,27 @@ impl App {
                 (MouseEventKind::Down(MouseButton::Left), Some(SidebarHit::Menu)) => {
                     self.run(Command::Palette)
                 }
-                (MouseEventKind::ScrollDown, _) => {
-                    self.move_cursor(1);
-                    Vec::new()
-                }
-                (MouseEventKind::ScrollUp, _) => {
-                    self.move_cursor(-1);
+                (MouseEventKind::ScrollDown | MouseEventKind::ScrollUp, _) => {
+                    let delta = if m.kind == MouseEventKind::ScrollDown {
+                        1
+                    } else {
+                        -1
+                    };
+                    let tree = self.config.general.sidebar_tree;
+                    match hit {
+                        Some(
+                            SidebarHit::Workspace(_)
+                            | SidebarHit::Collapse(_)
+                            | SidebarHit::SpacesList,
+                        ) => self.spaces_view.scroll(delta),
+                        Some(SidebarHit::Session(_) | SidebarHit::AgentsList) if tree => {
+                            self.spaces_view.scroll(delta)
+                        }
+                        Some(SidebarHit::Session(_) | SidebarHit::AgentsList) => {
+                            self.agents_view.scroll(delta)
+                        }
+                        _ => self.move_cursor(delta),
+                    }
                     Vec::new()
                 }
                 _ => Vec::new(),
