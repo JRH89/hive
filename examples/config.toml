@@ -129,8 +129,8 @@ jump_modifier = "alt"
 # next_session, prev_session, next_workspace, prev_workspace, sidebar,
 # toggle_sidebar, split_right, split_down, focus_next_pane, zoom, close_pane,
 # new_tab, next_tab, prev_tab, close_tab, rename_session, kill_session,
-# take_control, detach, help, integrations, restore_sessions, sidebar_tree,
-# settings,
+# take_control, detach, help, integrations, restore_sessions, move_space_up,
+# move_space_down, sidebar_tree, settings,
 # layout (with [layouts]),
 # notes, review, pull_request, run_task, usage (with their [integrations.*])
 palette = [":", "P"]

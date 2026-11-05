@@ -27,6 +27,8 @@ export const keyGroups: KeyGroup[] = [
       { name: "next_workspace", keys: [], global: ["alt+down"], title: "Next space" },
       { name: "prev_workspace", keys: [], global: ["alt+up"], title: "Previous space" },
       { name: "workspaces", keys: ["w"], title: "Switch workspace (space)" },
+      { name: "move_space_up", keys: [], global: ["alt+shift+up"], title: "Move the space up the sidebar (or drag it with the mouse)" },
+      { name: "move_space_down", keys: [], global: ["alt+shift+down"], title: "Move the space down the sidebar (or drag it with the mouse)" },
       { name: "sidebar", keys: ["s", "tab"], title: "Focus the sidebar" },
       { name: "toggle_sidebar", keys: ["b"], title: "Show or hide the sidebar" },
       { name: "sidebar_tree", keys: [], title: "Sidebar as one tree: agents under their space, foldable (on or off)" },

@@ -10,6 +10,14 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    version: "0.5.6",
+    date: "2026-11-04T16:25:52-08:00",
+    title: "Put your spaces in any order",
+    changes: [
+      "Drag a space up or down the sidebar to reorder the list, or press Alt+Shift+Up / Alt+Shift+Down. The order is remembered.",
+    ],
+  },
+  {
     version: "0.5.5",
     date: "2026-11-04T16:06:43-08:00",
     title: "Your agents survive turning the computer off",

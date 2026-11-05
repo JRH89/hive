@@ -122,6 +122,17 @@ fn run_effect(config: &Config, effect: app::Effect) -> Option<String> {
                 ));
             }
         }
+        app::Effect::SaveSpaceOrder { path, roots } => {
+            let mut text = roots.join("\n");
+            text.push('\n');
+            let tmp = path.with_extension("tmp");
+            if let Err(e) = std::fs::write(&tmp, text).and_then(|()| std::fs::rename(&tmp, &path)) {
+                return Some(format!(
+                    "Couldn't save the space order to {}: {e}",
+                    path.display()
+                ));
+            }
+        }
     }
     None
 }
@@ -227,6 +238,16 @@ pub async fn run(
     let auto_start = config.daemon.auto_start;
     let mut app = App::new(config, start, (size.width, size.height));
     app.config_path = Some(paths.config_file.display().to_string());
+    let order_file = paths.state_dir.join("space-order");
+    app.space_order = std::fs::read_to_string(&order_file)
+        .map(|t| {
+            t.lines()
+                .filter(|l| !l.is_empty())
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default();
+    app.space_order_path = Some(order_file);
     app.daemon_pid = Some(client.daemon.pid);
     if let Some(msg) = daemon_outdated(&client.daemon.version) {
         app.set_status(app::Tone::Warning, msg);
