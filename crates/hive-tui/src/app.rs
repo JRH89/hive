@@ -337,6 +337,12 @@ pub struct App {
     pub bell: bool,
     /// Spaces collapsed in the tree sidebar (`[general] sidebar_tree`).
     pub collapsed: BTreeSet<WorkspaceId>,
+    /// The order you put spaces in, by root folder; others follow by id.
+    pub space_order: Vec<String>,
+    /// Where `space_order` is saved (`space-order` in the state dir).
+    pub space_order_path: Option<PathBuf>,
+    /// The space being dragged in the sidebar, and whether it moved.
+    drag_space: Option<(WorkspaceId, bool)>,
     /// Exited sessions this window asked the daemon to remove.
     auto_removing: BTreeSet<SessionId>,
     /// The ended-sessions notice was shown (once per run).
@@ -464,6 +470,8 @@ pub enum Effect {
         key: &'static str,
         value: bool,
     },
+    /// Save the space order (root folders, one per line) to `path`.
+    SaveSpaceOrder { path: PathBuf, roots: Vec<String> },
 }
 
 /// Whether an ended session goes away by itself: an agent, terminal or
@@ -652,6 +660,9 @@ impl App {
             done: BTreeSet::new(),
             bell: false,
             collapsed: BTreeSet::new(),
+            space_order: Vec::new(),
+            space_order_path: None,
+            drag_space: None,
             auto_removing: BTreeSet::new(),
             told_ended: false,
             tasks: None,
@@ -913,12 +924,71 @@ impl App {
 
     /// Workspaces in sidebar order (creation order), including any that
     /// sessions refer to but whose details haven't arrived yet.
+    /// Spaces in the order you put them in (`space_order`), then the rest
+    /// by id (creation order).
     pub fn workspace_order(&self) -> Vec<WorkspaceId> {
         let mut ids: Vec<WorkspaceId> = self.workspaces.keys().copied().collect();
         ids.extend(self.sessions.values().map(|s| s.workspace));
         ids.sort_unstable();
         ids.dedup();
+        let rank = |w: &WorkspaceId| {
+            self.workspaces
+                .get(w)
+                .and_then(|i| self.space_order.iter().position(|r| *r == i.root))
+                .unwrap_or(usize::MAX)
+        };
+        ids.sort_by_key(|w| (rank(w), *w));
         ids
+    }
+
+    /// Moves space `w` to where `target` is in the list (before it when
+    /// moving up, after it when moving down). Returns whether it moved.
+    fn move_space_to(&mut self, w: WorkspaceId, target: WorkspaceId) -> bool {
+        let mut order = self.workspace_order();
+        let (Some(from), Some(to)) = (
+            order.iter().position(|&x| x == w),
+            order.iter().position(|&x| x == target),
+        ) else {
+            return false;
+        };
+        if from == to {
+            return false;
+        }
+        order.remove(from);
+        order.insert(to, w);
+        self.space_order = order
+            .iter()
+            .filter_map(|w| self.workspaces.get(w).map(|i| i.root.clone()))
+            .collect();
+        true
+    }
+
+    /// Moves the selected space one place up (`-1`) or down the sidebar.
+    fn move_space(&mut self, delta: isize) {
+        let Some(w) = self.shown_space() else {
+            self.set_status(Tone::Info, "No space to move.");
+            return;
+        };
+        let shown: Vec<WorkspaceId> = self.spaces().into_iter().map(|(w, _)| w).collect();
+        let Some(i) = shown.iter().position(|&x| x == w) else {
+            return;
+        };
+        let j = i as isize + delta;
+        if j < 0 || j as usize >= shown.len() {
+            return;
+        }
+        if self.move_space_to(w, shown[j as usize]) {
+            self.save_space_order();
+        }
+    }
+
+    fn save_space_order(&mut self) {
+        if let Some(path) = self.space_order_path.clone() {
+            self.effects.push(Effect::SaveSpaceOrder {
+                path,
+                roots: self.space_order.clone(),
+            });
+        }
     }
 
     /// Sidebar groups: each workspace with its sessions in creation order.
@@ -1630,12 +1700,35 @@ impl App {
             (true, Some(SidebarHit::NewTab)) => return self.new_terminal(Place::NewTab),
             _ => {}
         }
+        // Dragging a space reorders the list; it is saved on release.
+        match (m.kind, self.drag_space, hit) {
+            (
+                MouseEventKind::Drag(MouseButton::Left),
+                Some((w, _)),
+                Some(SidebarHit::Workspace(t) | SidebarHit::Collapse(t)),
+            ) => {
+                if self.move_space_to(w, t) {
+                    self.drag_space = Some((w, true));
+                }
+                return Vec::new();
+            }
+            (MouseEventKind::Drag(MouseButton::Left), Some(_), _) => return Vec::new(),
+            (MouseEventKind::Up(_), Some((_, moved)), _) => {
+                self.drag_space = None;
+                if moved {
+                    self.save_space_order();
+                }
+                return Vec::new();
+            }
+            _ => {}
+        }
         if self.sidebar_visible && m.column < px {
             return match (m.kind, hit) {
                 (MouseEventKind::Down(MouseButton::Left), Some(SidebarHit::Session(id))) => {
                     self.switch_to(id)
                 }
                 (MouseEventKind::Down(MouseButton::Left), Some(SidebarHit::Workspace(w))) => {
+                    self.drag_space = Some((w, false));
                     self.open_space(w)
                 }
                 (MouseEventKind::Down(MouseButton::Left), Some(SidebarHit::Collapse(w))) => {
@@ -1988,6 +2081,8 @@ impl App {
             Command::Detach => return self.detach(),
             Command::Help => self.mode = Mode::Help,
             Command::RestoreSessions => return self.restore_sessions(),
+            Command::MoveSpaceUp => self.move_space(-1),
+            Command::MoveSpaceDown => self.move_space(1),
             Command::SidebarTree => {
                 let on = !self.config.general.sidebar_tree;
                 self.config.general.sidebar_tree = on;
@@ -3771,6 +3866,21 @@ mod tests {
             attaches(app.on_terminal_event(alt(KeyCode::Right))),
             attach_msg(&app, 1)
         );
+        // Alt+Shift+arrows move the focused session's space.
+        app.on_server(ServerMessage::WorkspaceList(vec![
+            ws(1, "web", true),
+            ws(2, "api", true),
+        ]));
+        app.on_server(ServerMessage::SessionUpdated(SessionInfo {
+            workspace: 2,
+            ..info(2, SessionState::Running)
+        }));
+        assert_eq!(app.workspace_order(), vec![1, 2]);
+        assert!(
+            app.on_terminal_event(key(KeyCode::Down, KeyModifiers::ALT | KeyModifiers::SHIFT))
+                .is_empty()
+        );
+        assert_eq!(app.workspace_order(), vec![2, 1]);
         // Plain digits still reach the agent.
         attached(&mut app, 1);
         assert_eq!(
@@ -4979,6 +5089,64 @@ mod tests {
             attaches(app.on_terminal_event(ch('2'))),
             attach_msg(&app, 2)
         );
+    }
+
+    #[test]
+    fn spaces_are_reordered_by_dragging_or_keys_and_the_order_is_saved() {
+        let mut app = app_with_workspaces();
+        app.space_order_path = Some("/state/space-order".into());
+        for (id, w) in [(4, 2), (5, 3)] {
+            app.on_server(ServerMessage::SessionUpdated(SessionInfo {
+                workspace: w,
+                ..info(id, SessionState::Running)
+            }));
+        }
+        let order =
+            |app: &App| -> Vec<WorkspaceId> { app.spaces().iter().map(|(w, _)| *w).collect() };
+        assert_eq!(order(&app), vec![1, 2, 3]);
+        // A saved order is followed; spaces it doesn't know come after.
+        app.space_order = vec!["/src/notes".into()];
+        assert_eq!(order(&app), vec![3, 1, 2]);
+        app.space_order.clear();
+
+        // Drag `web` (row 1) onto `notes` (row 3), then let go.
+        for (w, y) in [(1, 1), (2, 2), (3, 3)] {
+            app.sidebar_hits
+                .borrow_mut()
+                .push((Rect::new(0, y, 20, 1), SidebarHit::Workspace(w)));
+        }
+        app.on_terminal_event(mouse(MouseEventKind::Down(MouseButton::Left), 2, 1));
+        app.on_terminal_event(mouse(MouseEventKind::Drag(MouseButton::Left), 2, 2));
+        app.on_terminal_event(mouse(MouseEventKind::Drag(MouseButton::Left), 2, 3));
+        assert_eq!(order(&app), vec![2, 3, 1]);
+        assert!(
+            app.effects.is_empty(),
+            "saved on release, not while dragging"
+        );
+        app.on_terminal_event(mouse(MouseEventKind::Up(MouseButton::Left), 2, 3));
+        assert_eq!(
+            app.effects.last(),
+            Some(&Effect::SaveSpaceOrder {
+                path: "/state/space-order".into(),
+                roots: vec!["/src/api".into(), "/src/notes".into(), "/src/web".into()],
+            })
+        );
+        // A plain click doesn't save anything.
+        app.effects.clear();
+        app.on_terminal_event(mouse(MouseEventKind::Down(MouseButton::Left), 2, 2));
+        app.on_terminal_event(mouse(MouseEventKind::Up(MouseButton::Left), 2, 2));
+        assert!(app.effects.is_empty());
+
+        // The keys move the selected space one place, stopping at the ends.
+        app.focus = Focus::Sidebar;
+        app.cursor = Some(1);
+        app.run(Command::MoveSpaceUp);
+        assert_eq!(order(&app), vec![2, 1, 3]);
+        app.run(Command::MoveSpaceUp);
+        app.run(Command::MoveSpaceUp);
+        assert_eq!(order(&app), vec![1, 2, 3]);
+        app.run(Command::MoveSpaceDown);
+        assert_eq!(order(&app), vec![2, 1, 3]);
     }
 
     #[test]

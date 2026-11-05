@@ -31,7 +31,7 @@ export default function Interface() {
         <code>claude</code>). Plain terminals and tool panes such as lazygit aren&apos;t listed.
       </p>
       <p>
-        Click a space to switch to it, an agent to open it, <strong>+ new</strong> for a new space
+        Click a space to switch to it (drag it up or down to reorder the list, or <kbd>Alt+Shift+↑</kbd> <kbd>Alt+Shift+↓</kbd>; the order is saved), an agent to open it, <strong>+ new</strong> for a new space
         and <strong>menu</strong> for the command palette. <kbd>Ctrl+Space</kbd> <kbd>b</kbd>{" "}
         hides the sidebar; it also hides itself in narrow terminals.
       </p>

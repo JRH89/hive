@@ -54,7 +54,7 @@ Arguments after `--` go to the agent: `hive new claude -- --model opus`.
  ● #1 api · api · main · running · 2 active        Ctrl+Space leader · then : commands
 ```
 
-The sidebar lists your **spaces** (one per repository, with its branch and agent count) and, below them, **every agent** in every space, grouped by space, each with the space it runs in, so you see which one needs you wherever you are. Click a space to switch to it, an agent to open it, **+ new** to open a new space (a terminal in your home folder; `cd` to where you want to work), and **menu** for the command palette.
+The sidebar lists your **spaces** (one per repository, with its branch and agent count) and, below them, **every agent** in every space, grouped by space, each with the space it runs in, so you see which one needs you wherever you are. Click a space to switch to it (drag it up or down to reorder the list, or `Alt+Shift+↑`/`↓`; the order is saved), an agent to open it, **+ new** to open a new space (a terminal in your home folder; `cd` to where you want to work), and **menu** for the command palette.
 
 Prefer one list? `[general] sidebar_tree = true` (or `sidebar_tree` in the palette, which saves it) shows each space with its agents indented under it. In the sidebar, Space folds or unfolds the cursor's space, ← folds, Enter or → unfolds, and clicking the arrow does the same. A folded space still shows its most urgent agent's status. Off by default.
 

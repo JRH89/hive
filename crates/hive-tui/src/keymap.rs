@@ -50,12 +50,14 @@ pub enum Command {
     Help,
     Integrations,
     RestoreSessions,
+    MoveSpaceUp,
+    MoveSpaceDown,
     SidebarTree,
     Settings,
 }
 
 impl Command {
-    pub const ALL: [Command; 40] = [
+    pub const ALL: [Command; 42] = [
         Command::Palette,
         Command::SearchSessions,
         Command::NewSession,
@@ -94,6 +96,8 @@ impl Command {
         Command::Help,
         Command::Integrations,
         Command::RestoreSessions,
+        Command::MoveSpaceUp,
+        Command::MoveSpaceDown,
         Command::SidebarTree,
         Command::Settings,
     ];
@@ -139,6 +143,8 @@ impl Command {
             Command::Help => "help",
             Command::Integrations => "integrations",
             Command::RestoreSessions => "restore_sessions",
+            Command::MoveSpaceUp => "move_space_up",
+            Command::MoveSpaceDown => "move_space_down",
             Command::SidebarTree => "sidebar_tree",
             Command::Settings => "settings",
         }
@@ -185,6 +191,8 @@ impl Command {
             Command::Help => "Help",
             Command::Integrations => "Integrations: turn on and off",
             Command::RestoreSessions => "Restore ended sessions (after a restart)",
+            Command::MoveSpaceUp => "Move the space up the list (or drag it)",
+            Command::MoveSpaceDown => "Move the space down the list (or drag it)",
             Command::SidebarTree => "Sidebar: one tree of spaces and agents, on or off",
             Command::Settings => "Settings (config file location)",
         }
@@ -197,6 +205,8 @@ impl Command {
             Command::PrevTab => &["alt+left"],
             Command::NextWorkspace => &["alt+down"],
             Command::PrevWorkspace => &["alt+up"],
+            Command::MoveSpaceDown => &["alt+shift+down"],
+            Command::MoveSpaceUp => &["alt+shift+up"],
             _ => &[],
         }
     }
@@ -238,6 +248,7 @@ impl Command {
             Command::Layout => &["L"],
             Command::Integrations => &["I"],
             Command::RestoreSessions => &["R"],
+            Command::MoveSpaceUp | Command::MoveSpaceDown => &[],
             Command::SidebarTree => &[],
             Command::NewWorktreeSession => &[],
             Command::AddWorkspace | Command::RenameWorkspace | Command::Settings => &[],
