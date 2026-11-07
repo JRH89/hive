@@ -10,6 +10,14 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    version: "0.5.8",
+    date: "2026-11-07T12:00:00-08:00",
+    title: "Sidebar buttons click again",
+    changes: [
+      "Fixed: in 0.5.7, \"+ new\" and \"menu\" in the sidebar ignored clicks when you had fewer spaces than fit, because the SPACES list's scroll area covered them.",
+    ],
+  },
+  {
     version: "0.5.7",
     date: "2026-11-04T21:11:36-08:00",
     title: "Scrollbars in the sidebar",

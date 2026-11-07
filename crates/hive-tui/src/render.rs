@@ -1927,6 +1927,37 @@ mod tests {
         assert!(app.collapsed.is_empty());
     }
 
+    /// Regression (0.5.7): with fewer spaces than fit, the SPACES list's
+    /// wheel area reached over the "+ new"/"menu" row and swallowed clicks.
+    #[test]
+    fn sidebar_buttons_take_clicks_when_spaces_do_not_fill_the_list() {
+        let mut app = App::new(Config::default(), Start::Attach(1), (100, 40));
+        app.on_connect();
+        app.on_server(ServerMessage::WorkspaceList(vec![workspace(1, "proj")]));
+        app.on_server(ServerMessage::SessionList(vec![session(
+            1,
+            "claude",
+            SessionState::Running,
+        )]));
+        let lines = rendered(&app, 100, 40);
+        let y = lines.iter().position(|l| l.contains("+ new")).unwrap() as u16;
+        let x = lines[y as usize].find("+ new").unwrap() as u16;
+        let out = app.on_terminal_event(crossterm::event::Event::Mouse(
+            crossterm::event::MouseEvent {
+                kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                column: x,
+                row: y,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
+        ));
+        assert!(
+            out.iter().any(
+                |m| matches!(m, hive_protocol::ClientMessage::CreateSession(r) if r.new_space)
+            ),
+            "{out:?}"
+        );
+    }
+
     #[test]
     fn sidebar_lists_sessions_and_marks_the_current_one() {
         let mut app = App::new(Config::default(), Start::Attach(2), (80, 12));

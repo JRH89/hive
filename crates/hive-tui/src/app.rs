@@ -1712,12 +1712,19 @@ impl App {
         }
         let (px, _) = self.panel_origin();
         let at = ratatui::layout::Position::new(m.column, m.row);
-        let hit = self
-            .sidebar_hits
-            .borrow()
-            .iter()
-            .find(|(r, _)| r.contains(at))
-            .map(|(_, h)| *h);
+        // A list's whole area only catches the wheel; anything drawn over
+        // it (rows, buttons) wins, whatever order render recorded them in.
+        let hit = {
+            let hits = self.sidebar_hits.borrow();
+            let mut under = hits.iter().filter(|(r, _)| r.contains(at)).map(|(_, h)| *h);
+            let first = under.next();
+            match first {
+                Some(SidebarHit::SpacesList | SidebarHit::AgentsList) => under
+                    .find(|h| !matches!(h, SidebarHit::SpacesList | SidebarHit::AgentsList))
+                    .or(first),
+                h => h,
+            }
+        };
         if matches!(m.kind, MouseEventKind::Down(MouseButton::Right)) {
             let target = match hit {
                 Some(SidebarHit::Workspace(w) | SidebarHit::Collapse(w)) => {
