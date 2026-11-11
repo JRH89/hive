@@ -4,7 +4,7 @@ import { Brand } from "@/components/brand";
 import { CopyCommand } from "@/components/copy-command";
 import { Icon } from "@/components/icon";
 import { TerminalShowcase } from "@/components/terminal-showcase";
-import { HiveBackdrop } from "@/components/hive-backdrop";
+import { HeroScene } from "@/components/hero-scene";
 import { ReleaseInstall } from "@/components/release-install";
 import { SiteFooter } from "@/components/site-footer";
 import { integrations } from "@/lib/integrations";
@@ -188,7 +188,7 @@ export default function Home() {
 
       <main id="main">
         <section className="hero wrapper" aria-labelledby="hero-title">
-          <HiveBackdrop />
+          <HeroScene />
           <div className="hero-eyebrow">
             <span className="status-dot" /> A NATIVE WORKSPACE FOR YOUR CODING
             AGENTS

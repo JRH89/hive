@@ -3600,3 +3600,55 @@ body { padding-top: 92px; }
     border-color: var(--amber);
   }
 }
+
+/* Holographic hive: the three.js hero scene (components/hero-scene.tsx). */
+main {
+  overflow-x: clip;
+}
+.hero-scene {
+  position: absolute;
+  z-index: -1;
+  top: -92px;
+  left: 50%;
+  width: 100vw;
+  height: 660px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 1.4s ease;
+  -webkit-mask-image: linear-gradient(to bottom, #000 72%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 72%, transparent 100%);
+}
+.hero-scene[data-ready] {
+  opacity: 1;
+}
+/* A soft pool of darkness behind the headline keeps the copy readable. */
+.hero-scene::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse 34% 38% at 50% 40%,
+    rgb(17 19 24 / 82%) 0%,
+    rgb(17 19 24 / 45%) 55%,
+    transparent 100%
+  );
+}
+.hero-scene canvas {
+  position: absolute;
+  inset: 0;
+}
+@media (max-width: 760px) {
+  .hero-scene {
+    top: -80px;
+    height: 760px;
+  }
+  .hero-scene::after {
+    background: radial-gradient(
+      ellipse 70% 40% at 50% 42%,
+      rgb(17 19 24 / 80%) 0%,
+      rgb(17 19 24 / 40%) 60%,
+      transparent 100%
+    );
+  }
+}
