@@ -276,6 +276,38 @@ pub enum SidebarHit {
     SpacesList,
     /// The rest of the AGENTS list.
     AgentsList,
+    /// A list's scrollbar: click or drag to move the view. `len` items,
+    /// `room` shown at a time.
+    Scrollbar {
+        list: Bar,
+        len: usize,
+        room: usize,
+    },
+}
+
+/// Which sidebar list a scrollbar moves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Bar {
+    /// SPACES, or the whole tree sidebar.
+    Spaces,
+    Agents,
+}
+
+/// The first item to show when the pointer is `row` cells down a
+/// scrollbar `height` tall: the thumb centres on the pointer.
+fn bar_top(row: u16, height: u16, len: usize, room: usize) -> usize {
+    let (height, row) = (height as usize, row as usize);
+    if len <= room || height == 0 {
+        return 0;
+    }
+    let thumb = (height * room / len).clamp(1, height);
+    let travel = height - thumb;
+    if travel == 0 {
+        return 0;
+    }
+    let at = row.saturating_sub(thumb / 2).min(travel);
+    // Round so the ends of the track reach the ends of the list.
+    (at * (len - room) + travel / 2) / travel
 }
 
 /// Where a sidebar list's view starts. Kept across frames, so the wheel
@@ -307,6 +339,11 @@ impl ListView {
     /// Scrolls by `delta` items; `first` keeps it within the list.
     pub fn scroll(&self, delta: isize) {
         self.top.set(self.top.get().saturating_add_signed(delta));
+    }
+
+    /// Show from item `top` on, without moving the selection.
+    pub fn set_top(&self, top: usize) {
+        self.top.set(top);
     }
 }
 
@@ -380,6 +417,8 @@ pub struct App {
     pub space_order_path: Option<PathBuf>,
     /// The space being dragged in the sidebar, and whether it moved.
     drag_space: Option<(WorkspaceId, bool)>,
+    /// The scrollbar being dragged: its list, track and sizes.
+    drag_bar: Option<(Bar, Rect, usize, usize)>,
     /// Scroll positions of the SPACES list (or the tree) and AGENTS list.
     pub spaces_view: ListView,
     pub agents_view: ListView,
@@ -703,6 +742,7 @@ impl App {
             space_order: Vec::new(),
             space_order_path: None,
             drag_space: None,
+            drag_bar: None,
             spaces_view: ListView::default(),
             agents_view: ListView::default(),
             auto_removing: BTreeSet::new(),
@@ -1712,19 +1752,46 @@ impl App {
         }
         let (px, _) = self.panel_origin();
         let at = ratatui::layout::Position::new(m.column, m.row);
-        // A list's whole area only catches the wheel; anything drawn over
-        // it (rows, buttons) wins, whatever order render recorded them in.
-        let hit = {
+        // A scrollbar sits over its list's rows and wins; a list's whole
+        // area only catches the wheel, so anything drawn over it (rows,
+        // buttons) wins too, whatever order render recorded them in.
+        let (hit, bar_rect) = {
             let hits = self.sidebar_hits.borrow();
-            let mut under = hits.iter().filter(|(r, _)| r.contains(at)).map(|(_, h)| *h);
-            let first = under.next();
-            match first {
-                Some(SidebarHit::SpacesList | SidebarHit::AgentsList) => under
-                    .find(|h| !matches!(h, SidebarHit::SpacesList | SidebarHit::AgentsList))
-                    .or(first),
-                h => h,
-            }
+            let rank = |h: &SidebarHit| match h {
+                SidebarHit::Scrollbar { .. } => 0,
+                SidebarHit::SpacesList | SidebarHit::AgentsList => 2,
+                _ => 1,
+            };
+            hits.iter()
+                .filter(|(r, _)| r.contains(at))
+                .enumerate()
+                .min_by_key(|(i, (_, h))| (rank(h), *i))
+                .map(|(_, (r, h))| (Some(*h), Some(*r)))
+                .unwrap_or((None, None))
         };
+        // Clicking a scrollbar jumps there; dragging follows the pointer
+        // (even off the bar) until the button is released.
+        match (m.kind, hit, bar_rect, self.drag_bar) {
+            (
+                MouseEventKind::Down(MouseButton::Left),
+                Some(SidebarHit::Scrollbar { list, len, room }),
+                Some(rect),
+                _,
+            ) => {
+                self.drag_bar = Some((list, rect, len, room));
+                self.scroll_bar_to(list, rect, len, room, m.row);
+                return Vec::new();
+            }
+            (MouseEventKind::Drag(MouseButton::Left), _, _, Some((list, rect, len, room))) => {
+                self.scroll_bar_to(list, rect, len, room, m.row);
+                return Vec::new();
+            }
+            (MouseEventKind::Up(_), _, _, Some(_)) => {
+                self.drag_bar = None;
+                return Vec::new();
+            }
+            _ => {}
+        }
         if matches!(m.kind, MouseEventKind::Down(MouseButton::Right)) {
             let target = match hit {
                 Some(SidebarHit::Workspace(w) | SidebarHit::Collapse(w)) => {
@@ -1869,6 +1936,14 @@ impl App {
         )
         .map(|b| self.input(b.repeat(WHEEL_LINES)))
         .unwrap_or_default()
+    }
+
+    fn scroll_bar_to(&self, list: Bar, track: Rect, len: usize, room: usize, row: u16) {
+        let top = bar_top(row.saturating_sub(track.y), track.height, len, room);
+        match list {
+            Bar::Spaces => self.spaces_view.set_top(top),
+            Bar::Agents => self.agents_view.set_top(top),
+        }
     }
 
     /// Whether keystrokes should go to the attached agent.

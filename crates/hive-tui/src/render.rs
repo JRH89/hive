@@ -10,7 +10,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use crate::app::{
-    Activity, App, Focus, Link, MenuTarget, Mode, SIDEBAR_WIDTH, Scope, SidebarHit, Target, Tone,
+    Activity, App, Bar, Focus, Link, MenuTarget, Mode, SIDEBAR_WIDTH, Scope, SidebarHit, Target,
+    Tone,
 };
 use crate::keymap::Command;
 use crate::layout::{Dir, PaneArea};
@@ -509,7 +510,16 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         y += 2;
     }
     hits.push((list, SidebarHit::SpacesList));
-    draw_scrollbar(frame, list, groups.len(), room as usize, first, theme);
+    draw_scrollbar(
+        frame,
+        &mut hits,
+        Bar::Spaces,
+        list,
+        groups.len(),
+        room as usize,
+        first,
+        theme,
+    );
     if groups.is_empty() {
         frame.render_widget(
             Paragraph::new(Span::styled(
@@ -614,13 +624,25 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         y += 2;
     }
     hits.push((list, SidebarHit::AgentsList));
-    draw_scrollbar(frame, list, ids.len(), room, start, theme);
+    draw_scrollbar(
+        frame,
+        &mut hits,
+        Bar::Agents,
+        list,
+        ids.len(),
+        room,
+        start,
+        theme,
+    );
 }
 
 /// A one-column scrollbar at the right edge of `list` when `len` items
 /// don't fit `room` at a time; `first` is the first one shown.
+#[allow(clippy::too_many_arguments)]
 fn draw_scrollbar(
     frame: &mut Frame,
+    hits: &mut Vec<(Rect, SidebarHit)>,
+    which: Bar,
     list: Rect,
     len: usize,
     room: usize,
@@ -634,6 +656,18 @@ fn draw_scrollbar(
     let thumb = (height * room / len).clamp(1, height);
     let at = (height - thumb) * first / (len - room);
     let x = list.x + list.width - 1;
+    hits.push((
+        Rect {
+            x,
+            width: 1,
+            ..list
+        },
+        SidebarHit::Scrollbar {
+            list: which,
+            len,
+            room,
+        },
+    ));
     for i in 0..height {
         let (glyph, color) = if (at..at + thumb).contains(&i) {
             (theme.glyphs.scroll_thumb, theme.muted)
@@ -888,7 +922,16 @@ fn draw_sidebar_tree(frame: &mut Frame, inner: Rect, app: &App, theme: &Theme) {
         y += 2;
     }
     hits.push((list, SidebarHit::SpacesList));
-    draw_scrollbar(frame, list, items.len(), room, start, theme);
+    draw_scrollbar(
+        frame,
+        &mut hits,
+        Bar::Spaces,
+        list,
+        items.len(),
+        room,
+        start,
+        theme,
+    );
 }
 
 /// Whether a sidebar session is on screen.
@@ -1785,6 +1828,70 @@ mod tests {
         let mut config = Config::default();
         config.branding.show_tagline = false;
         assert!(!has_tagline(config));
+    }
+
+    #[test]
+    fn clicking_and_dragging_the_spaces_scrollbar_scrolls_it() {
+        let mut app = App::new(Config::default(), Start::Auto, (80, 30));
+        app.on_connect();
+        app.on_server(ServerMessage::WorkspaceList(
+            (1..=12)
+                .map(|i| workspace(i, &format!("space{i}")))
+                .collect(),
+        ));
+        app.on_server(ServerMessage::SessionList(
+            (1..=12)
+                .map(|i| SessionInfo {
+                    workspace: i,
+                    ..session(i, &format!("agent{i}"), SessionState::Running)
+                })
+                .collect(),
+        ));
+        let mouse = |app: &mut App, kind, row| {
+            app.on_terminal_event(crossterm::event::Event::Mouse(
+                crossterm::event::MouseEvent {
+                    kind,
+                    column: SIDEBAR_WIDTH - 2,
+                    row,
+                    modifiers: crossterm::event::KeyModifiers::NONE,
+                },
+            ));
+        };
+        let top_space = |app: &App| -> String {
+            rendered(app, 80, 30)[2]
+                .chars()
+                .take(SIDEBAR_WIDTH as usize - 2)
+                .collect::<String>()
+        };
+        rendered(&app, 80, 30);
+        let track = app
+            .sidebar_hits
+            .borrow()
+            .iter()
+            .find(|(_, h)| matches!(h, SidebarHit::Scrollbar { .. }))
+            .map(|(r, _)| *r)
+            .expect("a scrollbar hit area");
+        let before = app.shown_space();
+        let left = crossterm::event::MouseButton::Left;
+        use crossterm::event::MouseEventKind as K;
+        // A click at the top of the track shows the first spaces.
+        mouse(&mut app, K::Down(left), track.y);
+        mouse(&mut app, K::Up(left), track.y);
+        assert!(top_space(&app).contains("space1 "), "{}", top_space(&app));
+        // Dragging the thumb to the bottom shows the last ones, even when
+        // the pointer slides off the bar.
+        mouse(&mut app, K::Down(left), track.y);
+        mouse(&mut app, K::Drag(left), track.y + track.height + 3);
+        mouse(&mut app, K::Up(left), track.y + track.height + 3);
+        let screen = rendered(&app, 80, 30);
+        let sidebar: String = screen[..(track.y + track.height) as usize]
+            .iter()
+            .map(|l| l.chars().take(SIDEBAR_WIDTH as usize).collect::<String>() + "\n")
+            .collect();
+        assert!(sidebar.contains("space12"), "{sidebar}");
+        assert!(!sidebar.contains("space1 "), "{sidebar}");
+        // Scrolling never changes the selected space.
+        assert_eq!(app.shown_space(), before);
     }
 
     #[test]

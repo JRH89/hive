@@ -10,6 +10,14 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    version: "0.5.9",
+    date: "2026-11-12T12:00:00-08:00",
+    title: "Click and drag the sidebar scrollbars",
+    changes: [
+      "Click a sidebar scrollbar to jump there, or drag it to scroll. It used to show where you were but ignore the mouse.",
+    ],
+  },
+  {
     version: "0.5.8",
     date: "2026-11-07T12:00:00-08:00",
     title: "Sidebar buttons click again",
