@@ -192,6 +192,9 @@ pub struct Env {
     pub term: Option<String>,
     /// First of `LC_ALL`, `LC_CTYPE`, `LANG` that is set.
     pub locale: Option<String>,
+    /// Running in Windows Terminal (`WT_SESSION` set). It supports 24-bit
+    /// colour but sets neither `TERM` nor `COLORTERM`.
+    pub windows_terminal: bool,
 }
 
 impl Env {
@@ -200,6 +203,7 @@ impl Env {
         Env {
             no_color: var("NO_COLOR").is_some(),
             colorterm: var("COLORTERM"),
+            windows_terminal: var("WT_SESSION").is_some(),
             term: var("TERM"),
             locale: var("LC_ALL")
                 .or_else(|| var("LC_CTYPE"))
@@ -215,6 +219,7 @@ impl Env {
             .colorterm
             .as_deref()
             .is_some_and(|c| c.contains("truecolor") || c.contains("24bit"))
+            || self.windows_terminal
         {
             Depth::TrueColor
         } else if term.contains("256color") || term.contains("direct") {
@@ -461,7 +466,24 @@ mod tests {
             colorterm: colorterm.map(str::to_string),
             term: Some(term.to_string()),
             locale: locale.map(str::to_string),
+            windows_terminal: false,
         }
+    }
+
+    #[test]
+    fn windows_terminal_is_truecolor_without_term_or_colorterm() {
+        let wt = Env {
+            term: None,
+            windows_terminal: true,
+            ..env(None, "", None)
+        };
+        assert_eq!(wt.depth(), Depth::TrueColor);
+        assert!(wt.unicode());
+        let no_color = Env {
+            no_color: true,
+            ..wt
+        };
+        assert_eq!(no_color.depth(), Depth::None);
     }
 
     fn theme(name: &str, cfg: &ThemeConfig, env: &Env) -> Theme {

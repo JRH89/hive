@@ -349,3 +349,54 @@ mod tests {
         );
     }
 }
+
+/// Folds the different ways terminals report Ctrl+Space into one key.
+/// A terminal sends NUL for it. Unix decoders report `Ctrl+Space`, but on
+/// Windows the console decodes NUL through the keyboard layout, so it can
+/// arrive as `Null`, `Ctrl+@` or `Ctrl+2` (Shift may be set as well). Without
+/// this the default leader does nothing in Windows Terminal or PowerShell.
+pub fn normalize(key: crossterm::event::KeyEvent) -> crossterm::event::KeyEvent {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let nul = match key.code {
+        KeyCode::Null => true,
+        KeyCode::Char('@' | '2') => ctrl,
+        _ => false,
+    };
+    if !nul {
+        return key;
+    }
+    let mods = (key.modifiers - KeyModifiers::SHIFT) | KeyModifiers::CONTROL;
+    KeyEvent {
+        code: KeyCode::Char(' '),
+        modifiers: mods,
+        ..key
+    }
+}
+
+#[cfg(test)]
+mod normalize_tests {
+    use super::normalize;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers as M};
+
+    #[test]
+    fn every_nul_form_becomes_ctrl_space() {
+        let space = KeyEvent::new(KeyCode::Char(' '), M::CONTROL);
+        for k in [
+            KeyEvent::new(KeyCode::Null, M::NONE),
+            KeyEvent::new(KeyCode::Char('@'), M::CONTROL),
+            KeyEvent::new(KeyCode::Char('@'), M::CONTROL | M::SHIFT),
+            KeyEvent::new(KeyCode::Char('2'), M::CONTROL),
+            KeyEvent::new(KeyCode::Char(' '), M::CONTROL),
+        ] {
+            assert_eq!(normalize(k), space, "{k:?}");
+        }
+        // Plain keys are untouched.
+        let two = KeyEvent::new(KeyCode::Char('2'), M::NONE);
+        assert_eq!(normalize(two), two);
+        let at = KeyEvent::new(KeyCode::Char('@'), M::SHIFT);
+        assert_eq!(normalize(at), at);
+        let alt2 = KeyEvent::new(KeyCode::Char('2'), M::ALT);
+        assert_eq!(normalize(alt2), alt2);
+    }
+}

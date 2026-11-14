@@ -1706,7 +1706,9 @@ impl App {
 
     pub fn on_terminal_event(&mut self, event: Event) -> Vec<ClientMessage> {
         match event {
-            Event::Key(key) if key.kind != KeyEventKind::Release => self.on_key(key),
+            Event::Key(key) if key.kind != KeyEventKind::Release => {
+                self.on_key(crate::keys::normalize(key))
+            }
             Event::Paste(text) => {
                 if let Mode::Rename { input, .. }
                 | Mode::AddWorkspace { input }
