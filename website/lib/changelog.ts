@@ -10,6 +10,16 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    version: "0.5.10",
+    date: "2026-11-14T12:00:00-08:00",
+    title: "Hive works properly on Windows",
+    changes: [
+      "Ctrl+Space works in Windows Terminal and PowerShell. Windows reported it as a different key, so Hive's commands didn't open and the next key went to the agent.",
+      "Full colour in Windows Terminal. Hive used to fall back to 16 colours there.",
+      "The full-screen interface is now tested end to end on Linux, macOS and Windows: start-up, typing, new terminals, split panes, help, resizing, detaching and reattaching.",
+    ],
+  },
+  {
     version: "0.5.9",
     date: "2026-11-12T12:00:00-08:00",
     title: "Click and drag the sidebar scrollbars",

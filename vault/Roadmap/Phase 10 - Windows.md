@@ -17,4 +17,6 @@ Design: [[ADR-0021 Windows named pipe with token auth]].
 
 Bugs found by CI: test env lacked PATH (hive sends the client env); `Path` casing in a TUI test; hived inherited the caller's stdout pipe (smoke hung) → std handles marked non-inheritable before spawn.
 
+TUI (2026-11-14): `crates/hive-cli/tests/tui.rs` drives the real TUI in ConPTY; found and fixed Ctrl+Space not recognised and 16-colour fallback in Windows Terminal ([[2026-11-14]]).
+
 Gap: no screen-based agent status on Windows (no foreground process group); self-reports work. Links: [[Status]], [[Roadmap]].

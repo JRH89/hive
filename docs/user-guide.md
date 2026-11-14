@@ -110,6 +110,8 @@ A few chords work **without the leader**, even while typing to an agent:
 
 If an agent needs one of these, rebind or unbind it under `[keys.global]` (see [Keys](#keys)).
 
+On macOS these need Option to act as Alt: in Terminal, Settings → Profiles → Keyboard → *Use Option as Meta key*; in iTerm2, set Left Option to *Esc+*. The `Ctrl+Space` keys work without it.
+
 ### Panes and tabs
 
 Split the panel to watch several agents at once. Each pane is its own terminal at its own size, with a title row showing the session and its status. Keys go to the focused pane. Switching to a session that is already in a pane focuses that pane (and its tab); otherwise the session replaces the focused pane. The tab row above the panes (`1  2  +`) is clickable: pick a tab, or `+` for a new terminal tab in the current directory. Every new tab and split is a plain terminal, like herdr. Tabs belong to a space: the row shows the selected space's tabs, Alt+←/→ moves between them, and Alt+↑/↓ switches space (back to the tab you left there). The sidebar's AGENTS list shows agents only, including one started by hand in a terminal (listed by its name, e.g. `claude`).

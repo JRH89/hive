@@ -95,6 +95,11 @@ hive`}</code>
         </tbody>
       </table>
       <p>
+        On macOS, the <kbd>Alt</kbd> shortcuts need Option to act as Alt: in Terminal choose Settings → Profiles →
+        Keyboard → <em>Use Option as Meta key</em>; in iTerm2 set Left Option to <em>Esc+</em>. The
+        <kbd>Ctrl+Space</kbd> keys work without it.
+      </p>
+      <p>
         Everything in the sidebar and tab bar is clickable too. The full list is on the{" "}
         <a href="/docs/keys/">keys page</a>.
       </p>
