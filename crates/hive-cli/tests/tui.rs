@@ -291,12 +291,14 @@ fn tui_starts_types_splits_detaches_and_reattaches() {
         s.contains("hive-three") && s.contains("SPACES")
     });
 
-    // Arrow keys and Enter go through (shell history recall).
-    tui.send(b"\x1b[A");
+    // Backspace edits the line before Enter sends it.
+    let cmd = marker_cmd("four");
+    tui.type_str(&cmd[..cmd.len() - 1]);
+    tui.type_str("XY");
+    tui.send(b"\x7f\x7f");
+    std::thread::sleep(Duration::from_millis(300));
     tui.send(b"\r");
-    tui.wait("the recalled command's output twice", |s| {
-        s.matches("hive-three").count() >= 2
-    });
+    tui.wait_for("hive-four");
 
     // Leader q detaches; the TUI exits and the sessions keep running.
     let mut tui = tui;
