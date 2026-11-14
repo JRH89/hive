@@ -29,3 +29,5 @@ hive-notes = { version = "0.5.9", path = "../hive-notes" }
 
 [dev-dependencies]
 tempfile = "3.27.0"
+portable-pty = "0.9.0"
+vt100 = "0.18.1"

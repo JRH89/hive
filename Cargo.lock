@@ -745,12 +745,14 @@ dependencies = [
  "hive-tui",
  "hive-workspace",
  "jiff",
+ "portable-pty",
  "ratatui",
  "serde_json",
  "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "vt100",
 ]
 
 [[package]]
