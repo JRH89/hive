@@ -88,7 +88,7 @@ The script downloads static binaries, verifies their SHA-256 checksum and instal
 | Homebrew | `brew tap jrh89/hive https://github.com/JRH89/hive`, then `brew install jrh89/hive/codefront-hive` |
 | Arch Linux | Download `codefront-hive-bin` and its checksum from the [release](https://github.com/JRH89/hive/releases/latest), then install with `sudo pacman -U`. The [PKGBUILD](packaging/aur/PKGBUILD) supports x86_64 and aarch64. |
 
-Use the same package manager to upgrade.
+Use the same package manager to upgrade. Yarn may hold new versions for up to 24 hours by default.
 
 **From source** (Rust ≥ 1.89):
 

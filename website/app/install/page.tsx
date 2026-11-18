@@ -77,8 +77,8 @@ export default function Install() {
           <CopyCommand command="bun add -g @codefrontlabs/hive" />
           <p>
             Use <code>pnpm add -g @codefrontlabs/hive</code> with pnpm or{" "}
-            <code>yarn dlx -p @codefrontlabs/hive hive</code> with Yarn. The launcher uses
-            Node.js. If you only have Bun, use <code>bunx --bun @codefrontlabs/hive</code>.
+            <code>yarn dlx -p @codefrontlabs/hive hive</code> with Yarn. Yarn may hold new
+            versions for up to 24 hours by default. The launcher uses Node.js. If you only have Bun, use <code>bunx --bun @codefrontlabs/hive</code>.
             GitHub Releases also has the <a href={`${releasesUrl}/latest`}>npm package archive</a>.
           </p>
 
