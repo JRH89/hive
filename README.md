@@ -146,7 +146,7 @@ Agents run unmodified in a real terminal. Hive doesn't parse their output for an
 | `hive daemon start\|stop\|status` | Manage `hived` (`stop` terminates all sessions) |
 
 ## Keys
-The leader is **Ctrl+Space**. Everything else goes to the terminal.
+The leader is **Ctrl+Space**.
 
 | Keys | Action |
 |---|---|
@@ -172,6 +172,8 @@ The leader is **Ctrl+Space**. Everything else goes to the terminal.
 | `Ctrl+Space ?` | Help (generated from your actual bindings) |
 
 Every key is configurable, and so is the leader (see below). The mouse works too: click spaces, agents, tabs, `+ new` and `menu`.
+
+Scroll through terminal history with the wheel over a pane or **Shift+Page Up / Shift+Page Down** in the focused pane. If an app turns on mouse reporting in the normal terminal screen, use the keyboard shortcuts for Hive’s history. Typing returns the pane to live output.
 
 ## Configuration
 `~/.config/hive/config.toml`. Every key is optional; [`examples/config.toml`](examples/config.toml) documents all of them. Mistakes are reported before the UI opens.

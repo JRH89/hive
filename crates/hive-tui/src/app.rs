@@ -356,7 +356,7 @@ enum Place {
     NewTab,
 }
 
-/// Lines a wheel notch scrolls in a full-screen app without mouse support.
+/// Lines per wheel notch.
 const WHEEL_LINES: usize = 3;
 
 pub struct View {
@@ -474,9 +474,8 @@ fn nz(v: u16) -> NonZeroU16 {
     NonZeroU16::new(v.max(1)).expect("clamped")
 }
 
-fn new_parser(size: TermSize, snapshot: &[u8]) -> vt100::Parser {
-    // Scrollback lives in the daemon; the client mirrors the visible screen.
-    let mut p = vt100::Parser::new(nz(size.rows), nz(size.cols), 0);
+fn new_parser(size: TermSize, snapshot: &[u8], scrollback: usize) -> vt100::Parser {
+    let mut p = vt100::Parser::new(nz(size.rows), nz(size.cols), scrollback);
     p.process(snapshot);
     p
 }
@@ -997,11 +996,14 @@ impl App {
     }
 
     /// Input for the focused session.
-    fn input(&self, data: Vec<u8>) -> Vec<ClientMessage> {
-        match self.focused() {
-            Some(session) => vec![ClientMessage::Input { session, data }],
-            None => Vec::new(),
+    fn input(&mut self, data: Vec<u8>) -> Vec<ClientMessage> {
+        let Some(session) = self.focused() else {
+            return Vec::new();
+        };
+        if let Some(view) = self.views.get_mut(&session) {
+            view.parser.screen_mut().set_scrollback(0);
         }
+        vec![ClientMessage::Input { session, data }]
     }
 
     /// Workspaces in sidebar order (creation order), including any that
@@ -1527,7 +1529,11 @@ impl App {
                         id,
                         View {
                             id,
-                            parser: new_parser(session.size, &snapshot),
+                            parser: new_parser(
+                                session.size,
+                                &snapshot,
+                                self.config.terminal.scrollback_lines,
+                            ),
                             controller,
                         },
                     );
@@ -1561,7 +1567,7 @@ impl App {
                 snapshot,
             } => {
                 if let Some(v) = self.views.get_mut(&session) {
-                    v.parser = new_parser(size, &snapshot);
+                    v.parser = new_parser(size, &snapshot, self.config.terminal.scrollback_lines);
                 }
             }
             ServerMessage::Detached { session } => {
@@ -1903,24 +1909,41 @@ impl App {
                 return Vec::new();
             }
         }
-        if !self.can_type() || self.focused() != Some(pane.session) || !pane.body.contains(at) {
+        if !pane.body.contains(at) {
             return Vec::new();
         }
-        let Some(screen) = self.view().map(|v| v.parser.screen()) else {
+        let Some(view) = self.views.get_mut(&pane.session) else {
             return Vec::new();
         };
-        let pos = (m.column - pane.body.x, m.row - pane.body.y);
+        let screen = view.parser.screen_mut();
+        if matches!(
+            m.kind,
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+        ) && !screen.alternate_screen()
+            && (screen.mouse_protocol_mode() == vt100::MouseProtocolMode::None
+                || m.modifiers.contains(KeyModifiers::SHIFT)
+                || screen.scrollback() > 0)
+        {
+            let offset = screen.scrollback();
+            screen.set_scrollback(if m.kind == MouseEventKind::ScrollUp {
+                offset.saturating_add(WHEEL_LINES)
+            } else {
+                offset.saturating_sub(WHEEL_LINES)
+            });
+            return Vec::new();
+        }
         let mode = screen.mouse_protocol_mode();
+        let encoding = screen.mouse_protocol_encoding();
+        let alternate = screen.alternate_screen();
+        let app_cursor = screen.application_cursor();
+        if !self.can_type() || self.focused() != Some(pane.session) {
+            return Vec::new();
+        }
+        let pos = (m.column - pane.body.x, m.row - pane.body.y);
         if mode != vt100::MouseProtocolMode::None {
-            return keys::encode_mouse(
-                m.kind,
-                m.modifiers,
-                pos,
-                mode,
-                screen.mouse_protocol_encoding(),
-            )
-            .map(|b| self.input(b))
-            .unwrap_or_default();
+            return keys::encode_mouse(m.kind, m.modifiers, pos, mode, encoding)
+                .map(|b| self.input(b))
+                .unwrap_or_default();
         }
         // Like xterm's alternate-scroll mode: a full-screen app without mouse
         // support scrolls with the arrow keys.
@@ -1929,15 +1952,12 @@ impl App {
             MouseEventKind::ScrollDown => KeyCode::Down,
             _ => return Vec::new(),
         };
-        if !screen.alternate_screen() {
+        if !alternate {
             return Vec::new();
         }
-        keys::encode(
-            &KeyEvent::new(arrow, KeyModifiers::NONE),
-            screen.application_cursor(),
-        )
-        .map(|b| self.input(b.repeat(WHEEL_LINES)))
-        .unwrap_or_default()
+        keys::encode(&KeyEvent::new(arrow, KeyModifiers::NONE), app_cursor)
+            .map(|b| self.input(b.repeat(WHEEL_LINES)))
+            .unwrap_or_default()
     }
 
     fn scroll_bar_to(&self, list: Bar, track: Rect, len: usize, room: usize, row: u16) {
@@ -2003,6 +2023,25 @@ impl App {
                     Some(Global::Run(cmd)) => self.run(cmd),
                     None => Vec::new(),
                 }
+            }
+            Mode::Normal
+                if self.focus == Focus::Terminal
+                    && key.modifiers == KeyModifiers::SHIFT
+                    && matches!(key.code, KeyCode::PageUp | KeyCode::PageDown)
+                    && self
+                        .view()
+                        .is_some_and(|v| !v.parser.screen().alternate_screen()) =>
+            {
+                let id = self.focused().expect("view has a focused session");
+                let screen = self.views.get_mut(&id).unwrap().parser.screen_mut();
+                let page = usize::from(screen.size().0.get());
+                let offset = screen.scrollback();
+                screen.set_scrollback(if key.code == KeyCode::PageUp {
+                    offset.saturating_add(page)
+                } else {
+                    offset.saturating_sub(page)
+                });
+                Vec::new()
             }
             Mode::Normal if self.can_type() => {
                 let app_cursor = self
@@ -3945,6 +3984,36 @@ mod tests {
     }
 
     #[test]
+    fn terminal_wheel_reveals_history_without_sending_input() {
+        let mut app = app();
+        let (px, py) = app.panel_origin();
+        let rows = app.view().unwrap().parser.screen().size().0.get();
+        let data = format!("older output\r\n{}live", "line\r\n".repeat(rows as usize));
+        app.on_server(ServerMessage::Output {
+            session: 1,
+            data: data.into_bytes(),
+        });
+
+        assert!(
+            app.on_terminal_event(mouse(MouseEventKind::ScrollUp, px + 1, py))
+                .is_empty()
+        );
+        assert!(
+            app.view()
+                .unwrap()
+                .parser
+                .screen()
+                .contents()
+                .contains("older output")
+        );
+        assert!(
+            app.on_terminal_event(key(KeyCode::PageDown, KeyModifiers::SHIFT))
+                .is_empty()
+        );
+        assert_eq!(app.view().unwrap().parser.screen().scrollback(), 0);
+    }
+
+    #[test]
     fn mouse_clicks_sessions_and_reaches_agents_that_ask_for_it() {
         let mut app = app();
         let (px, py) = app.panel_origin();
@@ -3957,7 +4026,7 @@ mod tests {
             attach_msg(&app, 2)
         );
 
-        // No mouse mode and the primary screen: wheel does nothing.
+        // A primary screen without history has nowhere to scroll.
         attached(&mut app, 2);
         assert!(
             app.on_terminal_event(mouse(MouseEventKind::ScrollUp, px + 1, py))

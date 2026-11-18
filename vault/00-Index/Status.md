@@ -24,7 +24,6 @@ cargo test --workspace
 ```
 
 ## Known gaps carried forward
-- No scrollback viewing in the TUI (the daemon keeps scrollback in its emulator but the client only mirrors the visible screen). See [[Risks and Open Questions]].
 - Shift+Enter is not distinguishable (no kitty keyboard protocol).
 - Processes don't survive a daemon crash (by design, spec §4). Only metadata does, as `Lost` sessions, after a crash or a stop, restorable with resume ([[ADR-0009 Persist session metadata, mark lost sessions]], [[ADR-0025 Keep sessions across daemon restarts]]).
 - Killing an interactive shell session waits the full kill timeout (bash ignores SIGTERM).

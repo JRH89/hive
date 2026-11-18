@@ -9,7 +9,7 @@ tags: [risks]
 - ~~Directory for TUI-launched sessions~~: the active workspace's root since Phase 4.
 - **Worktree disk use.** Removed only on request; abandoned worktrees accumulate under the data dir. `hive worktree list` shows them. A future "prune clean, unused worktrees" command could help (with confirmation).
 - **Git edge cases.** Bare repositories, `GIT_DIR` overrides and submodules are treated as plain directories or their own repository. Not tested beyond submodule-style `.git` files.
-- **Scrollback UI.** The daemon has `scrollback_lines` of history in its emulator, but the snapshot covers only the visible screen. Options: a `Scrollback{offset}` request that returns rendered rows, or include scrollback in the snapshot. Not decided in Phases 2 or 3 (not an acceptance criterion in either).
+- **Scrollback on reattach.** Primary-screen snapshots carry bounded history. Large replays fall back to the live viewport. See [[IPC Protocol]].
 - **Shift+Enter.** Legacy key encoding can't distinguish it. Claude Code users rely on it for newlines. This would need the kitty keyboard protocol on the outer terminal plus a decision on what to send the agent. Alt+Enter (`ESC CR`) works today.
 - **Mouse.** Not captured, so native selection works. Forwarding mouse to agents that enable mouse modes needs capture plus encoding (SGR 1006). Decide on a toggle.
 - **License.** Not chosen yet. The `LICENSE` file and the `license` field in `Cargo.toml` are deliberately absent until the owner picks one.

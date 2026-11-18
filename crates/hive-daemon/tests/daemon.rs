@@ -233,7 +233,7 @@ impl Screen {
         let mut p = vt100::Parser::new(
             NonZeroU16::new(size.rows).unwrap(),
             NonZeroU16::new(size.cols).unwrap(),
-            0,
+            100,
         );
         p.process(snapshot);
         Screen(p, session)
@@ -357,6 +357,30 @@ async fn interactive_session_survives_client_disconnect() {
         text.contains("ready") && text.contains("got:hello"),
         "snapshot:\n{text}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reattach_replays_history_from_the_pty() {
+    let h = Harness::start().await;
+    let size = TermSize { rows: 5, cols: 80 };
+    let mut c1 = h.client().await;
+    let id = create(
+        &mut c1,
+        sh(
+            "printf 'older output\n1\n2\n3\n4\n5\nready'; read line",
+            size,
+        ),
+    )
+    .await;
+    let mut screen = attach(&mut c1, id, size).await;
+    wait_for_text(&mut c1, &mut screen, "ready").await;
+    drop(c1);
+
+    let mut c2 = h.client().await;
+    let mut screen = attach(&mut c2, id, size).await;
+    assert!(!screen.contents().contains("older output"));
+    screen.0.screen_mut().set_scrollback(usize::MAX);
+    assert!(screen.contents().contains("older output"));
 }
 
 #[tokio::test(flavor = "multi_thread")]

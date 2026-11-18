@@ -54,7 +54,7 @@ pub fn draw(frame: &mut Frame, app: &App, theme: &Theme) {
         let focused = panes.iter().find(|p| Some(p.session) == app.focused());
         if let (Some(pane), Some(view)) = (focused, app.view()) {
             let screen = view.parser.screen();
-            if app.can_type() && !screen.hide_cursor() {
+            if app.can_type() && !screen.hide_cursor() && screen.scrollback() == 0 {
                 let (row, col) = screen.cursor_position();
                 if row < pane.body.height && col < pane.body.width {
                     frame.set_cursor_position((pane.body.x + col, pane.body.y + row));

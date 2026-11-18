@@ -33,6 +33,8 @@ Client → `Hello{protocol_version, client}` (within 5 s) → daemon replies `We
 ## Daemon → client (streamed while attached)
 `Output{data}`, `Resized{size}` (ordered with output, so mirrors stay in sync), `Resync{size,snapshot}` (after lag, and when an app leaves the alternate screen), `Detached{session}` (unprompted only when the session is removed; it can arrive before or after `SessionRemoved`). Every streamed message names its session, `ControlLost{session}`, `ControlReleased{session}` (to observers when the controller leaves).
 
+Primary-screen snapshots replay retained scrollback before restoring the live viewport. The replay is limited to half the IPC frame limit and is omitted when it exceeds that budget or the live viewport alone is at least a quarter of the frame limit. The TUI retains up to `terminal.scrollback_lines` per attached pane. Alternate-screen snapshots keep the application's viewport. The daemon sends the primary screen and its available scrollback on exit from that mode.
+
 ## Broadcasts (every client)
 `SessionUpdated(info)`, `SessionRemoved(id)`, `WorkspaceUpdated(info)`, `WorkspaceRemoved(id)`, `ShuttingDown`. If a client lags on the event channel it gets a full `WorkspaceList` and `SessionList` instead.
 

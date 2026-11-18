@@ -64,12 +64,46 @@ pub(crate) enum Chunk {
 /// client attaching mid-app gets a blank primary. The reader publishes a
 /// [`Chunk::Snapshot`] when the app leaves the alternate screen to fill it in.
 pub(crate) fn snapshot(screen: &vt100::Screen) -> Vec<u8> {
+    let live = screen.state_formatted();
     let mut out = Vec::new();
     if screen.alternate_screen() {
         out.extend_from_slice(b"\x1b[?1049h");
+    } else if screen.scrollback_len() > 0 && live.len() < hive_protocol::MAX_FRAME_LEN / 4 {
+        // Replay history and the visible rows to push the older rows into the
+        // client's scrollback. Restore the exact live screen and modes below.
+        let mut capture = SnapshotHistory::default();
+        let mut state = vt100::capture::BasicFormattedCaptureState::default();
+        if screen
+            .write_contents_formatted_basic(
+                &mut capture,
+                vt100::capture::BasicFormattedCaptureRange::Full(&mut state),
+            )
+            .is_ok()
+        {
+            out = capture.0;
+        }
     }
-    out.extend_from_slice(screen.state_formatted().as_bytes());
+    out.extend_from_slice(live.as_bytes());
     out
+}
+
+/// Leave room in the IPC frame for the exact viewport and session metadata.
+#[derive(Default)]
+struct SnapshotHistory(Vec<u8>);
+
+impl std::fmt::Write for SnapshotHistory {
+    fn write_str(&mut self, text: &str) -> std::fmt::Result {
+        let bytes = if text == "\n" {
+            b"\r\n"
+        } else {
+            text.as_bytes()
+        };
+        if self.0.len() + bytes.len() > hive_protocol::MAX_FRAME_LEN / 2 {
+            return Err(std::fmt::Error);
+        }
+        self.0.extend_from_slice(bytes);
+        Ok(())
+    }
 }
 
 /// Where a session runs: its workspace and the git working tree of its cwd.
@@ -816,5 +850,23 @@ fn write_loop(mut writer: Box<dyn Write + Send>, mut rx: mpsc::Receiver<Vec<u8>>
         {
             break;
         }
+    }
+}
+
+#[cfg(test)]
+mod scrollback_tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_rebuilds_scrollback_and_live_screen() {
+        let rows = 3.try_into().unwrap();
+        let cols = 12.try_into().unwrap();
+        let mut source = vt100::Parser::new(rows, cols, 10);
+        source.process(b"older\r\nsecond\r\nthird\r\nlive");
+        let mut mirror = vt100::Parser::new(rows, cols, 10);
+        mirror.process(&snapshot(source.screen()));
+        assert_eq!(mirror.screen().contents(), source.screen().contents());
+        mirror.screen_mut().set_scrollback(1);
+        assert_eq!(mirror.screen().cell(0, 0).unwrap().contents(), "o");
     }
 }
