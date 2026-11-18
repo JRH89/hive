@@ -10,6 +10,15 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    version: "0.5.11",
+    date: "2026-11-17T21:13:59-08:00",
+    title: "Scroll through terminal history",
+    changes: [
+      "Use the mouse wheel over a terminal pane or Shift+Page Up and Shift+Page Down to see output above the screen.",
+      "Available terminal history comes back after reattaching. Typing returns you to live output.",
+    ],
+  },
+  {
     version: "0.5.10",
     date: "2026-11-14T12:00:00-08:00",
     title: "Hive works properly on Windows",

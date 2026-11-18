@@ -9,7 +9,7 @@ import { absolute, ogImage, organization, releasesUrl, repoUrl } from "@/lib/sit
 
 const title = "Install Hive on Linux, macOS and Windows";
 const description =
-  "Install Hive with one command on Linux, macOS or Windows: checksum-verified static binaries, hive update, building from source and uninstalling.";
+  "Install Hive on Linux, macOS or Windows with a checksum-verified installer, npm, Bun, Homebrew, or an Arch Linux package.";
 
 export const metadata: Metadata = {
   title,
@@ -69,6 +69,30 @@ export default function Install() {
           <p>
             On Windows, agent status comes from agents that report it with{" "}
             <code>hive report-agent</code>, and terminals stay in the space they started in.
+          </p>
+
+          <h2 id="package-managers">Package managers</h2>
+          <h3>npm, Bun, pnpm, and Yarn</h3>
+          <CopyCommand command="npm install -g @codefrontlabs/hive" />
+          <CopyCommand command="bun add -g @codefrontlabs/hive" />
+          <p>
+            Use <code>pnpm add -g @codefrontlabs/hive</code> with pnpm or{" "}
+            <code>yarn dlx -p @codefrontlabs/hive hive</code> with Yarn. The launcher uses
+            Node.js. If you only have Bun, use <code>bunx --bun @codefrontlabs/hive</code>.
+            GitHub Releases also has the <a href={`${releasesUrl}/latest`}>npm package archive</a>.
+          </p>
+
+          <h3>Homebrew</h3>
+          <CopyCommand
+            command={`brew tap jrh89/hive ${repoUrl} && brew install jrh89/hive/codefront-hive`}
+          />
+
+          <h3>Arch Linux</h3>
+          <p>
+            Download the <code>codefront-hive-bin</code> package for x86_64 and its checksum
+            from <a href={`${releasesUrl}/latest`}>GitHub Releases</a>, then install the file with{" "}
+            <code>sudo pacman -U</code>. The <a href={`${repoUrl}/tree/master/packaging/aur`}>PKGBUILD</a>{" "}
+            builds the package on x86_64 and aarch64.
           </p>
 
           <h2 id="check">Check the setup</h2>
@@ -133,7 +157,8 @@ export default function Install() {
             <code>{"hive update\nhive daemon stop   # restart the daemon on the new version"}</code>
           </pre>
           <p>
-            Stopping the daemon ends running sessions (it lists them and asks first). The next{" "}
+            If you installed with a package manager, update with the same manager. Stopping the
+            daemon ends running sessions (it lists them and asks first). The next{" "}
             <code>hive</code> starts the new daemon, and <kbd>Ctrl+Space</kbd> <kbd>R</kbd> restores
             the sessions, with agents resuming their conversations.
           </p>

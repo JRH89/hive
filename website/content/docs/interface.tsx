@@ -151,8 +151,10 @@ export default function Interface() {
       <h2 id="mouse">Mouse</h2>
       <p>
         Everything in the sidebar and the tab bar is clickable, the wheel scrolls the SPACES or AGENTS list under the pointer (a list that doesn&apos;t fit shows a scrollbar you can click or drag), and
-        clicking a pane focuses it. In a terminal, clicks and the wheel go to agents that use the
-        mouse; full-screen programs without mouse support scroll with the wheel. Hold{" "}
+        clicking a pane focuses it. Use the wheel over a normal terminal pane to view its history,
+        or press <kbd>Shift</kbd>+<kbd>Page Up</kbd> or <kbd>Shift</kbd>+<kbd>Page Down</kbd> in the
+        focused pane. Typing returns to live output. Apps that request mouse events keep their wheel
+        handling. Hold{" "}
         <kbd>Shift</kbd> to select text with your terminal as usual.
       </p>
       <p>Right-click for menus:</p>

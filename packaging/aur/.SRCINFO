@@ -1,0 +1,18 @@
+pkgbase = codefront-hive-bin
+	pkgdesc = Terminal multiplexer for AI coding agents
+	pkgver = 0.5.11
+	pkgrel = 1
+	url = https://github.com/JRH89/hive
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	provides = hive=0.5.11
+	conflicts = hive
+	options = !strip
+	options = !debug
+	source_x86_64 = hive-0.5.11-x86_64.tar.gz::https://github.com/JRH89/hive/releases/download/v0.5.11/hive-x86_64-unknown-linux-musl.tar.gz
+	sha256sums_x86_64 = 5e05671386a01e1e7560aab0bb7ce3544011cf1b3fab4974ca1fbdcb659ed093
+	source_aarch64 = hive-0.5.11-aarch64.tar.gz::https://github.com/JRH89/hive/releases/download/v0.5.11/hive-aarch64-unknown-linux-musl.tar.gz
+	sha256sums_aarch64 = ab45a480ac2242f4f9ae00ab7d0d2850352caa8e3d028952ba381a8cc33b0438
+
+pkgname = codefront-hive-bin

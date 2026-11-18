@@ -1,0 +1,17 @@
+{
+  "name": "@codefrontlabs/hive",
+  "version": "0.0.0",
+  "description": "Hive terminal multiplexer for AI coding agents",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JRH89/hive.git"
+  },
+  "homepage": "https://hive.codefrontlabs.com/",
+  "bin": { "hive": "hive.cjs" },
+  "files": ["hive.cjs", "bin"],
+  "preferUnplugged": true,
+  "os": ["linux", "darwin", "win32"],
+  "cpu": ["x64", "arm64"],
+  "publishConfig": { "access": "public" }
+}

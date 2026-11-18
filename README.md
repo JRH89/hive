@@ -77,6 +77,19 @@ irm https://github.com/jrh89/hive/releases/latest/download/install.ps1 | iex
 
 The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.5.9` to pin a version. Later, `hive update` upgrades in place (then `hive daemon stop` to restart the daemon on the new version; this ends running sessions, and `Ctrl+Space R` restores them).
 
+**Package managers**
+
+| Manager | Install |
+|---|---|
+| npm | `npm install -g @codefrontlabs/hive` |
+| Bun | `bun add -g @codefrontlabs/hive` or `bunx --bun @codefrontlabs/hive` with Bun alone |
+| pnpm | `pnpm add -g @codefrontlabs/hive` |
+| Yarn | `yarn dlx -p @codefrontlabs/hive hive` |
+| Homebrew | `brew tap jrh89/hive https://github.com/JRH89/hive`, then `brew install jrh89/hive/codefront-hive` |
+| Arch Linux | Download `codefront-hive-bin` and its checksum from the [release](https://github.com/JRH89/hive/releases/latest), then install with `sudo pacman -U`. The [PKGBUILD](packaging/aur/PKGBUILD) supports x86_64 and aarch64. |
+
+Use the same package manager to upgrade.
+
 **From source** (Rust ≥ 1.89):
 
 ```bash
