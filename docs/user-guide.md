@@ -4,6 +4,10 @@ Hive runs several interactive AI coding agents (Claude Code, Codex, Gemini CLI, 
 
 This guide is also on the website, split into pages with full references: [keys](https://hive.codefrontlabs.com/docs/keys/), [configuration](https://hive.codefrontlabs.com/docs/configuration/) (every option and default), [command line](https://hive.codefrontlabs.com/docs/cli/) and [more](https://hive.codefrontlabs.com/docs/).
 
+## Installation
+
+Use the [install guide](https://hive.codefrontlabs.com/install/) for Linux and macOS shell installs, Windows PowerShell, npm, Bun, pnpm, Yarn, Homebrew, Arch Linux via pacman, manual downloads, and source builds. Run `hive doctor` after installing.
+
 ## Concepts
 
 | Term | Meaning |

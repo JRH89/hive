@@ -8,9 +8,10 @@ export default function GettingStarted() {
       </pre>
       <p>
         The script downloads static binaries, checks their SHA-256 checksum and puts{" "}
-        <code>hive</code> and <code>hived</code> in <code>~/.local/bin</code>. Windows and
-        building from source are on the <a href="/install/">install page</a>. Then
-        check the setup:
+        <code>hive</code> and <code>hived</code> in <code>~/.local/bin</code>. The{" "}
+        <a href="/install/">full install guide</a> covers Windows PowerShell, npm, Bun, pnpm,
+        Yarn, Homebrew, Arch Linux via pacman, manual downloads, and source builds.
+        After installing, check the setup:
       </p>
       <pre className="code">
         <code>{`hive doctor`}</code>

@@ -21,6 +21,12 @@ export const metadata: Metadata = {
 const download = `${releasesUrl}/latest/download`;
 const unix = `curl -fsSL ${download}/install.sh | sh`;
 const windows = `irm '${download}/install.ps1' | iex`;
+const archPackage = "codefront-hive-bin-0.5.11-1-x86_64.pkg.tar.zst";
+const archDownload = `${releasesUrl}/download/v0.5.11/${archPackage}`;
+const archInstall = `curl -fLO ${archDownload} &&
+curl -fLO ${archDownload}.sha256 &&
+sha256sum -c ${archPackage}.sha256 &&
+sudo pacman -U ./${archPackage}`;
 
 const Arrow = () => <Icon name="arrow" size={17} />;
 
@@ -89,10 +95,15 @@ export default function Install() {
 
           <h3>Arch Linux</h3>
           <p>
-            Download the <code>codefront-hive-bin</code> package for x86_64 and its checksum
-            from <a href={`${releasesUrl}/latest`}>GitHub Releases</a>, then install the file with{" "}
-            <code>sudo pacman -U</code>. The <a href={`${repoUrl}/tree/master/packaging/aur`}>PKGBUILD</a>{" "}
-            builds the package on x86_64 and aarch64.
+            Install the GitHub release with pacman on x86_64. The command downloads the{" "}
+            <a href={archDownload}>Arch package</a> and its{" "}
+            <a href={`${archDownload}.sha256`}>checksum</a>, then verifies and installs it.
+          </p>
+          <CopyCommand command={archInstall} />
+          <p>
+            For ARM64, build and install from the{" "}
+            <a href={`${repoUrl}/tree/master/packaging/aur`}>PKGBUILD</a> with{" "}
+            <code>makepkg -si</code>. AUR publication is pending.
           </p>
 
           <h2 id="check">Check the setup</h2>
@@ -161,6 +172,13 @@ export default function Install() {
             daemon ends running sessions (it lists them and asks first). The next{" "}
             <code>hive</code> starts the new daemon, and <kbd>Ctrl+Space</kbd> <kbd>R</kbd> restores
             the sessions, with agents resuming their conversations.
+          </p>
+
+          <h2 id="manual">Manual download</h2>
+          <p>
+            Download the archive for your OS and CPU from{" "}
+            <a href={`${releasesUrl}/latest`}>GitHub Releases</a>, verify its SHA-256 checksum,
+            and extract <code>hive</code> and <code>hived</code> into the same directory on your PATH.
           </p>
 
           <h2 id="source">Build from source</h2>

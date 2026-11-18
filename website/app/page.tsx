@@ -464,6 +464,11 @@ journal = true        # log agent activity to today's note`}</code>
             </span>
           </div>
           <ReleaseInstall />
+          <p>
+            <a className="text-link" href="/install/#package-managers">
+              Install with npm, Bun, Homebrew, or pacman
+            </a>
+          </p>
           <details className="source-build-details">
             <summary>
               Or build from source{" "}
