@@ -3,7 +3,6 @@ import { SiteHeader } from "@/components/site-header";
 import { Brand } from "@/components/brand";
 import { CopyCommand } from "@/components/copy-command";
 import { Icon } from "@/components/icon";
-import { TerminalShowcase } from "@/components/terminal-showcase";
 import { HeroScene } from "@/components/hero-scene";
 import { ReleaseInstall } from "@/components/release-install";
 import { SiteFooter } from "@/components/site-footer";
@@ -217,7 +216,21 @@ export default function Home() {
             <span aria-hidden="true">/</span> Built to stay local
           </p>
 
-          <TerminalShowcase />
+          <figure className="showcase">
+            {/* Static export uses the original terminal capture. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/screenshots/main.png"
+              alt="Hive terminal interface with a spaces and agents sidebar, tabs, and an agent beside a shell"
+              width={2443}
+              height={1553}
+              className="h-auto w-full rounded-lg border border-white/10"
+            />
+            <figcaption className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+              <span>Hive running in a terminal with scripted demo output.</span>
+              <a className="text-link" href="#screenshots">Watch the walkthrough <Arrow /></a>
+            </figcaption>
+          </figure>
         </section>
 
         <section
