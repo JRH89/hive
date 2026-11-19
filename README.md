@@ -86,7 +86,7 @@ The script downloads static binaries, verifies their SHA-256 checksum and instal
 | pnpm | `pnpm add -g @codefrontlabs/hive` |
 | Yarn | `yarn dlx -p @codefrontlabs/hive hive` |
 | Homebrew | `brew tap jrh89/hive https://github.com/JRH89/hive`, then `brew install jrh89/hive/codefront-hive` |
-| Arch Linux | Verify the [x86_64 package](https://github.com/JRH89/hive/releases/download/v0.5.11/codefront-hive-bin-0.5.11-1-x86_64.pkg.tar.zst) with its [checksum](https://github.com/JRH89/hive/releases/download/v0.5.11/codefront-hive-bin-0.5.11-1-x86_64.pkg.tar.zst.sha256), then run `sudo pacman -U ./codefront-hive-bin-0.5.11-1-x86_64.pkg.tar.zst`. On ARM64, build the [PKGBUILD](packaging/aur/PKGBUILD) with `makepkg -si`. AUR publication is pending. |
+| Arch Linux | Verify the [x86_64 package](https://github.com/JRH89/hive/releases/download/v0.5.12/codefront-hive-bin-0.5.12-1-x86_64.pkg.tar.zst) with its [checksum](https://github.com/JRH89/hive/releases/download/v0.5.12/codefront-hive-bin-0.5.12-1-x86_64.pkg.tar.zst.sha256), then run `sudo pacman -U ./codefront-hive-bin-0.5.12-1-x86_64.pkg.tar.zst`. On ARM64, build the [PKGBUILD](packaging/aur/PKGBUILD) with `makepkg -si`. AUR publication is pending. |
 
 Use the same package manager to upgrade. Yarn may hold new versions for up to 24 hours by default.
 

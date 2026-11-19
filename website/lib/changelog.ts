@@ -10,6 +10,15 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    version: "0.5.12",
+    date: "2026-11-19T02:36:05-08:00",
+    title: "Choose a shell for each terminal",
+    changes: [
+      "Choose an installed shell for a new tab or a split, or save a default shell from the command palette.",
+      "New terminals use the shell that launched Hive when it can be identified. This includes Git Bash and PowerShell on Windows.",
+    ],
+  },
+  {
     version: "0.5.11",
     date: "2026-11-17T21:13:59-08:00",
     title: "Scroll through terminal history",

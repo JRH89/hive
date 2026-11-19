@@ -8,9 +8,9 @@ workflow. Publish a GitHub release before advertising the packages.
 Download all six binary archives and their checksums, then build the package:
 
 ```sh
-gh release download v0.5.11 --dir /tmp/hive-assets
-python3 scripts/package-npm.py v0.5.11 /tmp/hive-assets /tmp/hive-packages
-npm publish /tmp/hive-packages/codefrontlabs-hive-0.5.11.tgz --access public
+gh release download v0.5.12 --dir /tmp/hive-assets
+python3 scripts/package-npm.py v0.5.12 /tmp/hive-assets /tmp/hive-packages
+npm publish /tmp/hive-packages/codefrontlabs-hive-0.5.12.tgz --access public
 ```
 
 The package ships a single launcher and both native executables for each

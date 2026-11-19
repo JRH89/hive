@@ -21,8 +21,8 @@ export const metadata: Metadata = {
 const download = `${releasesUrl}/latest/download`;
 const unix = `curl -fsSL ${download}/install.sh | sh`;
 const windows = `irm '${download}/install.ps1' | iex`;
-const archPackage = "codefront-hive-bin-0.5.11-1-x86_64.pkg.tar.zst";
-const archDownload = `${releasesUrl}/download/v0.5.11/${archPackage}`;
+const archPackage = "codefront-hive-bin-0.5.12-1-x86_64.pkg.tar.zst";
+const archDownload = `${releasesUrl}/download/v0.5.12/${archPackage}`;
 const archInstall = `curl -fLO ${archDownload} &&
 curl -fLO ${archDownload}.sha256 &&
 sha256sum -c ${archPackage}.sha256 &&
