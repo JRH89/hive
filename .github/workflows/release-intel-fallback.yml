@@ -1,0 +1,22 @@
+name: Build Hive v0.5.12 on Intel macOS
+on:
+  push:
+    branches: [release-build/v0.5.12-intel]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: v0.5.12
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --workspace --locked
+      - run: cargo build --release --locked --target x86_64-apple-darwin
+      - run: scripts/smoke.sh target/x86_64-apple-darwin/release
+      - run: scripts/package.sh x86_64-apple-darwin dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: x86_64-apple-darwin
+          path: dist/*
