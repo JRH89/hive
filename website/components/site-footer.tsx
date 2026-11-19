@@ -7,7 +7,7 @@ export function SiteFooter() {
       <a className="brand-link" href="/" aria-label="Hive home">
         <Brand />
       </a>
-      <span>A Codefront Labs product. Built with Rust.</span>
+      <span>A product of <a href="https://www.codefrontlabs.com">Codefront Labs</a>. Built with Rust.</span>
       <nav aria-label="Footer navigation">
         <a href="/install/">Install</a>
         <a href="/features/">Features</a>
