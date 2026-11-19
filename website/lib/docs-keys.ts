@@ -37,6 +37,8 @@ export const keyGroups: KeyGroup[] = [
   {
     title: "Start things",
     commands: [
+      { name: "new_terminal_with", keys: [], title: "Open a tab with a chosen shell" },
+      { name: "default_shell", keys: [], title: "Choose and save the default terminal shell" },
       { name: "new_session", keys: ["c"], title: "New terminal in the focused pane's directory" },
       { name: "new_agent", keys: ["A"], title: "New agent: pick one from a list" },
       { name: "new_worktree_terminal", keys: ["C"], title: "New terminal in its own git worktree (own branch)" },
@@ -49,6 +51,8 @@ export const keyGroups: KeyGroup[] = [
   {
     title: "Panes and tabs",
     commands: [
+      { name: "split_right_with", keys: [], title: "Choose a shell for a split on the right" },
+      { name: "split_down_with", keys: [], title: "Choose a shell for a split below" },
       { name: "split_right", keys: ["v", "%"], title: "Split: new terminal on the right" },
       { name: "split_down", keys: ["-", "\""], title: "Split: new terminal below" },
       { name: "focus_next_pane", keys: ["o"], title: "Focus the next pane" },

@@ -18,6 +18,7 @@ show_header = true
 show_tagline = true
 
 [terminal]
+shell = ""          # executable or path; empty uses [agents.shell] or auto
 scrollback_lines = 10000
 # Click sessions, scroll, and pass the mouse to agents that use it.
 # Hold Shift to select text natively.
@@ -124,10 +125,12 @@ jump_modifier = "alt"
 # Command = key or list of keys, pressed after the leader. Setting a command
 # replaces its default keys; [] unbinds it. 1-9 always jump to sessions.
 # Commands (all listed at https://hive.codefrontlabs.com/docs/keys/):
-# palette, search_sessions, new_session, new_agent, new_worktree_terminal,
+# palette, search_sessions, new_session, new_terminal_with, default_shell,
+# new_agent, new_worktree_terminal,
 # new_worktree_session, new_space, workspaces, add_workspace, rename_workspace,
 # next_session, prev_session, next_workspace, prev_workspace, sidebar,
-# toggle_sidebar, split_right, split_down, focus_next_pane, zoom, close_pane,
+# toggle_sidebar, split_right, split_down, split_right_with, split_down_with,
+# focus_next_pane, zoom, close_pane,
 # new_tab, next_tab, prev_tab, close_tab, rename_session, kill_session,
 # take_control, detach, help, integrations, restore_sessions, move_space_up,
 # move_space_down, sidebar_tree, settings,

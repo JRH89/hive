@@ -148,6 +148,17 @@ export default function Interface() {
         help screen are built from your own key bindings, so they always match them.
       </p>
 
+      <h2 id="shells">Terminal shells</h2>
+      <p>
+        The <strong>New Terminal With…</strong>, <strong>Split Right With…</strong>, and{" "}
+        <strong>Split Down With…</strong> commands let you choose an installed shell for each pane.
+        The dropdown beside <kbd>+</kbd> opens the new-tab picker.
+      </p>
+      <p>
+        Hive normally uses the shell it was opened from. To override it for new panes, choose{" "}
+        <strong>Default Shell</strong> in the palette or set <code>[terminal] shell</code>.
+      </p>
+
       <h2 id="mouse">Mouse</h2>
       <p>
         Everything in the sidebar and the tab bar is clickable, the wheel scrolls the SPACES or AGENTS list under the pointer (a list that doesn&apos;t fit shows a scrollbar you can click or drag), and

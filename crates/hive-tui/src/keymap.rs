@@ -15,6 +15,8 @@ pub enum Command {
     Palette,
     SearchSessions,
     NewSession,
+    NewTerminalWith,
+    DefaultShell,
     NewAgent,
     NewWorktreeTerminal,
     NewSpace,
@@ -32,6 +34,8 @@ pub enum Command {
     ToggleSidebar,
     SplitRight,
     SplitDown,
+    SplitRightWith,
+    SplitDownWith,
     FocusNextPane,
     Zoom,
     ClosePane,
@@ -57,10 +61,12 @@ pub enum Command {
 }
 
 impl Command {
-    pub const ALL: [Command; 42] = [
+    pub const ALL: [Command; 46] = [
         Command::Palette,
         Command::SearchSessions,
         Command::NewSession,
+        Command::NewTerminalWith,
+        Command::DefaultShell,
         Command::NewAgent,
         Command::NewWorktreeTerminal,
         Command::NewSpace,
@@ -76,6 +82,8 @@ impl Command {
         Command::ToggleSidebar,
         Command::SplitRight,
         Command::SplitDown,
+        Command::SplitRightWith,
+        Command::SplitDownWith,
         Command::FocusNextPane,
         Command::Zoom,
         Command::ClosePane,
@@ -108,6 +116,8 @@ impl Command {
             Command::Palette => "palette",
             Command::SearchSessions => "search_sessions",
             Command::NewSession => "new_session",
+            Command::NewTerminalWith => "new_terminal_with",
+            Command::DefaultShell => "default_shell",
             Command::NewAgent => "new_agent",
             Command::NewWorktreeTerminal => "new_worktree_terminal",
             Command::NewSpace => "new_space",
@@ -125,6 +135,8 @@ impl Command {
             Command::ToggleSidebar => "toggle_sidebar",
             Command::SplitRight => "split_right",
             Command::SplitDown => "split_down",
+            Command::SplitRightWith => "split_right_with",
+            Command::SplitDownWith => "split_down_with",
             Command::FocusNextPane => "focus_next_pane",
             Command::Zoom => "zoom",
             Command::ClosePane => "close_pane",
@@ -155,6 +167,8 @@ impl Command {
         match self {
             Command::Palette => "Command palette",
             Command::SearchSessions => "Search sessions",
+            Command::NewTerminalWith => "New Terminal With…",
+            Command::DefaultShell => "Default Shell",
             Command::NewSession => "New terminal",
             Command::NewAgent => "New agent (pick one)",
             Command::NewWorktreeTerminal => "New terminal in its own worktree (own branch)",
@@ -172,6 +186,8 @@ impl Command {
             Command::Sidebar => "Focus the sidebar",
             Command::ToggleSidebar => "Show or hide the sidebar",
             Command::SplitRight => "Split: terminal on the right",
+            Command::SplitRightWith => "Split Right With…",
+            Command::SplitDownWith => "Split Down With…",
             Command::SplitDown => "Split: terminal below",
             Command::FocusNextPane => "Focus the next pane",
             Command::Zoom => "Zoom the pane (toggle)",
@@ -251,7 +267,13 @@ impl Command {
             Command::MoveSpaceUp | Command::MoveSpaceDown => &[],
             Command::SidebarTree => &[],
             Command::NewWorktreeSession => &[],
-            Command::AddWorkspace | Command::RenameWorkspace | Command::Settings => &[],
+            Command::AddWorkspace
+            | Command::RenameWorkspace
+            | Command::Settings
+            | Command::NewTerminalWith
+            | Command::DefaultShell
+            | Command::SplitRightWith
+            | Command::SplitDownWith => &[],
         }
     }
 }

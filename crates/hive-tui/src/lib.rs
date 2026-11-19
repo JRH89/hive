@@ -122,6 +122,15 @@ fn run_effect(config: &Config, effect: app::Effect) -> Option<String> {
                 ));
             }
         }
+        app::Effect::SaveShell { path, shell } => {
+            if let Err(e) = update_config(&path, |text| hive_core::config::set_shell(text, &shell))
+            {
+                return Some(format!(
+                    "Couldn't save default shell to {}: {e}. It applies until hive exits.",
+                    path.display()
+                ));
+            }
+        }
         app::Effect::SaveSpaceOrder { path, roots } => {
             let mut text = roots.join("\n");
             text.push('\n');
@@ -140,12 +149,21 @@ fn run_effect(config: &Config, effect: app::Effect) -> Option<String> {
 /// Rewrites `key` in `[table]` of the config file, through a temporary file
 /// so a failure never leaves it half written.
 fn save_setting(path: &std::path::Path, table: &str, key: &str, value: bool) -> anyhow::Result<()> {
+    update_config(path, |text| {
+        hive_core::config::set_bool(text, table, key, value)
+    })
+}
+
+fn update_config(
+    path: &std::path::Path,
+    update: impl FnOnce(&str) -> Result<String, String>,
+) -> anyhow::Result<()> {
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e.into()),
     };
-    let text = hive_core::config::set_bool(&text, table, key, value).map_err(anyhow::Error::msg)?;
+    let text = update(&text).map_err(anyhow::Error::msg)?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }

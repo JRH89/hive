@@ -177,6 +177,46 @@ fn draw_overlay(frame: &mut Frame, body: Rect, app: &App, theme: &Theme) {
             workspace,
             worktree,
         } => draw_picker(frame, body, app, selected, workspace, worktree, theme),
+        Mode::ShellPicker {
+            selected,
+            action,
+            ref choices,
+        } => {
+            let inner = popup(
+                frame,
+                body,
+                76,
+                choices.len() as u16 + 2,
+                action.title(),
+                theme,
+            );
+            let start = (selected + 1).saturating_sub(usize::from(inner.height));
+            let mut hits = app.sidebar_hits.borrow_mut();
+            let lines: Vec<Line> = choices
+                .iter()
+                .enumerate()
+                .skip(start)
+                .take(usize::from(inner.height))
+                .map(|(i, (label, command))| {
+                    hits.push((
+                        Rect::new(inner.x, inner.y + (i - start) as u16, inner.width, 1),
+                        SidebarHit::ShellChoice(i),
+                    ));
+                    let style = if i == selected {
+                        theme.highlight()
+                    } else {
+                        Style::new().fg(theme.text)
+                    };
+                    let number = if i < 9 {
+                        (i + 1).to_string()
+                    } else {
+                        " ".into()
+                    };
+                    Line::styled(format!(" {number}  {label}  {command}"), style)
+                })
+                .collect();
+            frame.render_widget(Paragraph::new(lines), inner);
+        }
         Mode::Workspaces { selected } => draw_workspaces(frame, body, app, selected, theme),
         Mode::Menu {
             target, selected, ..
@@ -289,6 +329,8 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         " + ",
         Style::new().fg(theme.accent).add_modifier(Modifier::BOLD),
     ));
+    hits.push((Rect::new(x + 3, area.y, 3, 1), SidebarHit::ChooseShell));
+    spans.push(Span::styled(" v ", muted));
     let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 
@@ -1173,6 +1215,11 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             }
             spans
         }
+        Mode::ShellPicker { action, .. } => hints(&[
+            ("↑↓", "choose"),
+            ("enter", action.submit_hint()),
+            ("esc", "cancel"),
+        ]),
         Mode::Help => vec![Span::styled(" Help · any key to close", muted)],
         Mode::Normal => {
             if let Some((tone, msg)) = &app.status {

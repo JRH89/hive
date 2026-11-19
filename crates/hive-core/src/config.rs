@@ -115,6 +115,7 @@ impl Default for Branding {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Terminal {
+    pub shell: String,
     pub scrollback_lines: usize,
     pub mouse_support: bool,
 }
@@ -122,6 +123,7 @@ pub struct Terminal {
 impl Default for Terminal {
     fn default() -> Self {
         Terminal {
+            shell: String::new(),
             scrollback_lines: 10_000,
             mouse_support: true,
         }
@@ -276,6 +278,44 @@ pub fn set_bool(text: &str, table: &str, key: &str, on: bool) -> Result<String, 
         Some(toml::Value::Boolean(b)) if *b == on => Ok(out),
         _ => Err(format!("couldn't find where to set {header} {key}")),
     }
+}
+
+/// Saves the terminal shell while preserving the rest of the config.
+pub fn set_shell(text: &str, shell: &str) -> Result<String, String> {
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct Settings {
+        terminal: TerminalSettings,
+    }
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct TerminalSettings {
+        shell: Option<toml::Spanned<String>>,
+    }
+
+    let settings: Settings = toml::from_str(text).map_err(|e| e.message().to_string())?;
+    let value = toml::Value::String(shell.into()).to_string();
+    let mut updated = text.to_string();
+    if let Some(existing) = settings.terminal.shell {
+        updated.replace_range(existing.span(), &value);
+    } else if let Some((at, header)) = text
+        .split_inclusive('\n')
+        .scan(0, |offset, line| {
+            *offset += line.len();
+            Some((*offset, line))
+        })
+        .find(|(_, line)| line.split('#').next().unwrap_or("").trim() == "[terminal]")
+    {
+        let newline = if header.ends_with('\n') { "" } else { "\n" };
+        updated.insert_str(at, &format!("{newline}shell = {value}\n"));
+    } else {
+        updated.push_str(&format!("\n[terminal]\nshell = {value}\n"));
+    }
+    let parsed = Config::parse(&updated).map_err(|e| e.message().to_string())?;
+    if parsed.terminal.shell != shell {
+        return Err("couldn't set [terminal] shell".into());
+    }
+    Ok(updated)
 }
 
 /// `[integrations.review]` / `[integrations.github]`: a tool opened in the
@@ -536,19 +576,23 @@ impl Config {
     /// user's shell, and `[agents.*]`, which override built-ins of the same
     /// name. Built-ins may not be installed; check before offering them.
     pub fn agents(&self) -> BTreeMap<String, AgentDef> {
-        let default = if cfg!(windows) {
-            "powershell.exe"
-        } else {
-            "/bin/sh"
-        };
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| default.into());
         let mut agents: BTreeMap<String, AgentDef> = hive_agents::CATALOG
             .iter()
             .map(|k| (k.id.to_string(), AgentDef::simple(k.command)))
-            .chain([("shell".to_string(), AgentDef::simple(&shell))])
             .collect();
         agents.extend(self.agents.clone());
+        agents.insert("shell".into(), self.shell());
         agents
+    }
+
+    pub fn shell(&self) -> AgentDef {
+        if !self.terminal.shell.is_empty() {
+            return AgentDef::simple(&self.terminal.shell);
+        }
+        self.agents
+            .get("shell")
+            .cloned()
+            .unwrap_or_else(|| AgentDef::simple(&crate::launch::default_shell()))
     }
 
     /// Whether `name` is defined in the config file (not only built in).
@@ -564,6 +608,45 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saving_shell_preserves_unrelated_settings_and_comments() {
+        let path = r"C:\Program Files\Git\bin\bash.exe";
+        let text = "# settings\n[terminal] # Terminal\nmouse_support = false\n";
+        let inserted = set_shell(text, path).unwrap();
+        assert_eq!(Config::parse(&inserted).unwrap().terminal.shell, path);
+        assert!(inserted.contains("mouse_support = false"));
+        assert!(inserted.contains("# settings"));
+        let existing = "[terminal]\nshell = 'pwsh.exe' # current shell\n";
+        let updated = set_shell(existing, path).unwrap();
+        assert!(updated.contains("# current shell"));
+        assert_eq!(Config::parse(&updated).unwrap().terminal.shell, path);
+        assert!(
+            Config::parse(&set_shell(&updated, "").unwrap())
+                .unwrap()
+                .terminal
+                .shell
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn terminal_shell_overrides_the_legacy_shell_for_every_launch() {
+        let config = Config::parse(
+            "[terminal]\nshell = 'C:\\Program Files\\Git\\bin\\bash.exe'\n[agents.shell]\ncommand = 'powershell.exe'",
+        )
+        .unwrap();
+        assert_eq!(
+            config.agent("shell").unwrap().command,
+            r"C:\Program Files\Git\bin\bash.exe"
+        );
+    }
+
+    #[test]
+    fn legacy_shell_override_still_supplies_its_arguments() {
+        let config = Config::parse("[agents.shell]\ncommand = 'my-shell'\nargs = ['-i']").unwrap();
+        assert_eq!(config.agent("shell").unwrap().argv(&[]), ["my-shell", "-i"]);
+    }
 
     #[test]
     fn empty_config_uses_defaults() {

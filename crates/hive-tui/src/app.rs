@@ -79,6 +79,11 @@ pub enum Mode {
         workspace: Option<WorkspaceId>,
         worktree: bool,
     },
+    ShellPicker {
+        selected: usize,
+        action: ShellAction,
+        choices: Vec<(&'static str, String)>,
+    },
     /// Workspace picker; `selected` indexes `App::workspace_order()`.
     Workspaces {
         selected: usize,
@@ -114,6 +119,32 @@ pub enum Mode {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellAction {
+    Tab,
+    Split(Dir),
+    Default,
+}
+
+impl ShellAction {
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Tab => "New terminal with",
+            Self::Split(Dir::Right) => "Split right with",
+            Self::Split(Dir::Down) => "Split down with",
+            Self::Default => "Default shell",
+        }
+    }
+
+    pub fn submit_hint(self) -> &'static str {
+        match self {
+            Self::Tab => "open tab",
+            Self::Split(_) => "open split",
+            Self::Default => "save default",
+        }
+    }
+}
+
 /// What a confirmation dialog says.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfirmDialog {
@@ -144,6 +175,8 @@ pub enum MenuAction {
     Rename,
     SplitRight,
     SplitDown,
+    SplitRightWith,
+    SplitDownWith,
     CloseTab,
     CloseSpace,
     Terminate,
@@ -157,6 +190,8 @@ impl MenuAction {
             MenuAction::Rename => "Rename",
             MenuAction::SplitRight => "Split right",
             MenuAction::SplitDown => "Split below",
+            MenuAction::SplitRightWith => "Split right with…",
+            MenuAction::SplitDownWith => "Split below with…",
             MenuAction::CloseTab => "Close tab",
             MenuAction::CloseSpace => "Close space…",
             MenuAction::Terminate => "Terminate…",
@@ -271,6 +306,8 @@ pub enum SidebarHit {
     Tab(usize),
     /// The tab bar's `+`: a new terminal tab.
     NewTab,
+    ChooseShell,
+    ShellChoice(usize),
     /// The rest of the SPACES list (or the whole tree sidebar): the wheel
     /// scrolls it.
     SpacesList,
@@ -518,7 +555,7 @@ fn digit(key: &KeyEvent) -> Option<usize> {
 }
 
 fn split_dir(action: MenuAction) -> Dir {
-    if action == MenuAction::SplitDown {
+    if matches!(action, MenuAction::SplitDown | MenuAction::SplitDownWith) {
         Dir::Down
     } else {
         Dir::Right
@@ -537,10 +574,16 @@ pub const LAYOUT_AGENT: &str = "layout";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
     /// Run `[integrations.desktop_notify] command` with these two arguments.
-    Notify { title: String, body: String },
+    Notify {
+        title: String,
+        body: String,
+    },
     /// Append `line` to today's daily note in `dir` (the frontend adds the
     /// date and time).
-    Journal { dir: PathBuf, line: String },
+    Journal {
+        dir: PathBuf,
+        line: String,
+    },
     /// Write `key = value` in `[table]` of the config file at `path`.
     SaveSetting {
         path: PathBuf,
@@ -548,8 +591,15 @@ pub enum Effect {
         key: &'static str,
         value: bool,
     },
+    SaveShell {
+        path: PathBuf,
+        shell: String,
+    },
     /// Save the space order (root folders, one per line) to `path`.
-    SaveSpaceOrder { path: PathBuf, roots: Vec<String> },
+    SaveSpaceOrder {
+        path: PathBuf,
+        roots: Vec<String>,
+    },
 }
 
 /// Whether an ended session goes away by itself: an agent, terminal or
@@ -1755,6 +1805,23 @@ impl App {
         if self.link == Link::Connected && matches!(self.mode, Mode::Menu { .. }) {
             return self.on_menu_mouse(m);
         }
+        if self.link == Link::Connected && matches!(self.mode, Mode::ShellPicker { .. }) {
+            if m.kind == MouseEventKind::Down(MouseButton::Left) {
+                let at = ratatui::layout::Position::new(m.column, m.row);
+                let choice = self.sidebar_hits.borrow().iter().find_map(|(rect, hit)| {
+                    if let SidebarHit::ShellChoice(index) = hit
+                        && rect.contains(at)
+                    {
+                        return Some(*index);
+                    }
+                    None
+                });
+                if let Some(index) = choice {
+                    return self.choose_shell(index);
+                }
+            }
+            return Vec::new();
+        }
         if self.link != Link::Connected || self.mode != Mode::Normal {
             return Vec::new();
         }
@@ -1822,6 +1889,10 @@ impl App {
         match (click, hit) {
             (true, Some(SidebarHit::Tab(i))) => return self.select_tab(i),
             (true, Some(SidebarHit::NewTab)) => return self.new_terminal(Place::NewTab),
+            (true, Some(SidebarHit::ChooseShell)) => {
+                self.open_shell_picker(ShellAction::Tab);
+                return Vec::new();
+            }
             _ => {}
         }
         // Dragging a space reorders the list; it is saved on release.
@@ -2004,6 +2075,7 @@ impl App {
             Mode::Menu { .. } => self.on_menu_key(key),
             Mode::RenameTab { .. } => self.on_rename_tab_key(key),
             Mode::NewSession { .. } => self.on_picker_key(key),
+            Mode::ShellPicker { .. } => self.on_shell_picker_key(key),
             Mode::Workspaces { .. } => self.on_workspaces_key(key),
             Mode::Palette { .. } => self.on_palette_key(key),
             Mode::AddWorkspace { .. } | Mode::RenameWorkspace { .. } => {
@@ -2146,6 +2218,10 @@ impl App {
             Command::Palette => self.open_palette(false),
             Command::SearchSessions => self.open_palette(true),
             Command::NewSession => return self.new_terminal(Place::Replace),
+            Command::NewTerminalWith => self.open_shell_picker(ShellAction::Tab),
+            Command::DefaultShell => self.open_shell_picker(ShellAction::Default),
+            Command::SplitRightWith => self.open_shell_picker(ShellAction::Split(Dir::Right)),
+            Command::SplitDownWith => self.open_shell_picker(ShellAction::Split(Dir::Down)),
             Command::NewAgent => self.open_picker_for(Place::Replace),
             Command::SplitRight => return self.new_terminal(Place::Split(Dir::Right)),
             Command::SplitDown => return self.new_terminal(Place::Split(Dir::Down)),
@@ -2629,7 +2705,7 @@ impl App {
     /// space's root. Agents and dev servers are started from it by hand and
     /// detected from the process.
     fn new_terminal(&mut self, place: Place) -> Vec<ClientMessage> {
-        self.open_terminal(place, false)
+        self.open_terminal(place, false, None)
     }
 
     /// A terminal in a new space of its own, starting in the home
@@ -2669,10 +2745,15 @@ impl App {
             );
             return Vec::new();
         }
-        self.open_terminal(Place::NewTab, true)
+        self.open_terminal(Place::NewTab, true, None)
     }
 
-    fn open_terminal(&mut self, place: Place, worktree: bool) -> Vec<ClientMessage> {
+    fn open_terminal(
+        &mut self,
+        place: Place,
+        worktree: bool,
+        shell: Option<String>,
+    ) -> Vec<ClientMessage> {
         let workspace = self.active_workspace();
         let cwd = self
             .current()
@@ -2683,7 +2764,11 @@ impl App {
                     .and_then(|w| self.workspaces.get(&w))
                     .map(|w| PathBuf::from(&w.root))
             });
-        match launch::create_request(&self.config, "shell", None, cwd, &[], self.panel) {
+        let def = match shell {
+            Some(command) => argv_def(&[command]),
+            None => self.config.shell(),
+        };
+        match launch::request_for(&def, "shell", None, cwd, &[], self.panel) {
             Ok(mut req) => {
                 req.workspace = workspace;
                 req.worktree = worktree.then_some(NewWorktree { branch: None });
@@ -2705,6 +2790,99 @@ impl App {
                 Vec::new()
             }
         }
+    }
+
+    fn open_shell_picker(&mut self, action: ShellAction) {
+        let save = action == ShellAction::Default;
+        let fallback = if save {
+            ("Use launching environment or [agents.shell]", String::new())
+        } else {
+            ("Current default", self.config.shell().command)
+        };
+        let mut choices: Vec<_> = std::iter::once(fallback)
+            .chain(
+                launch::installed_shells()
+                    .into_iter()
+                    .filter_map(|(label, exe)| {
+                        Some((label, exe.into_os_string().into_string().ok()?))
+                    }),
+            )
+            .collect();
+        let selected = if save {
+            choices
+                .iter()
+                .position(|(_, shell)| shell == &self.config.terminal.shell)
+                .unwrap_or_else(|| {
+                    choices.insert(1, ("Current setting", self.config.terminal.shell.clone()));
+                    1
+                })
+        } else {
+            0
+        };
+        self.mode = Mode::ShellPicker {
+            selected,
+            action,
+            choices,
+        };
+    }
+
+    fn on_shell_picker_key(&mut self, key: KeyEvent) -> Vec<ClientMessage> {
+        let Mode::ShellPicker {
+            selected, choices, ..
+        } = &mut self.mode
+        else {
+            return Vec::new();
+        };
+        let last = choices.len().saturating_sub(1);
+        let index = match (digit(&key), key.code) {
+            (Some(n), _) if n <= last => n,
+            (_, KeyCode::Enter) => *selected,
+            (_, KeyCode::Down | KeyCode::Char('j')) => {
+                *selected = (*selected + 1).min(last);
+                return Vec::new();
+            }
+            (_, KeyCode::Up | KeyCode::Char('k')) => {
+                *selected = selected.saturating_sub(1);
+                return Vec::new();
+            }
+            (_, KeyCode::Esc | KeyCode::Char('q')) => {
+                self.mode = Mode::Normal;
+                return Vec::new();
+            }
+            _ => return Vec::new(),
+        };
+        self.choose_shell(index)
+    }
+
+    fn choose_shell(&mut self, index: usize) -> Vec<ClientMessage> {
+        let Mode::ShellPicker {
+            action, choices, ..
+        } = &self.mode
+        else {
+            return Vec::new();
+        };
+        let Some((label, shell)) = choices.get(index).cloned() else {
+            return Vec::new();
+        };
+        let action = *action;
+        self.mode = Mode::Normal;
+        let place = match action {
+            ShellAction::Tab => Some(Place::NewTab),
+            ShellAction::Split(dir) => Some(Place::Split(dir)),
+            ShellAction::Default => None,
+        };
+        if let Some(place) = place {
+            return self.open_terminal(place, false, (index != 0).then_some(shell));
+        }
+        self.config.terminal.shell = shell.clone();
+        if let Some(path) = &self.config_path {
+            self.effects.push(Effect::SaveShell {
+                path: PathBuf::from(path),
+                shell,
+            });
+        }
+        self.set_status(Tone::Info, format!("Default shell: {label}"));
+        Vec::new()
     }
 
     fn select_tab(&mut self, i: usize) -> Vec<ClientMessage> {
@@ -2959,8 +3137,23 @@ impl App {
         use MenuAction::*;
         match target {
             MenuTarget::Space(_) => vec![Open, NewTerminal, Rename, CloseSpace],
-            MenuTarget::Tab(_) => vec![Rename, SplitRight, SplitDown, CloseTab],
-            MenuTarget::Session(_) => vec![Open, Rename, SplitRight, SplitDown, Terminate],
+            MenuTarget::Tab(_) => vec![
+                Rename,
+                SplitRight,
+                SplitDown,
+                SplitRightWith,
+                SplitDownWith,
+                CloseTab,
+            ],
+            MenuTarget::Session(_) => vec![
+                Open,
+                Rename,
+                SplitRight,
+                SplitDown,
+                SplitRightWith,
+                SplitDownWith,
+                Terminate,
+            ],
         }
     }
 
@@ -3071,6 +3264,11 @@ impl App {
                 out.extend(self.new_terminal(Place::Split(split_dir(action))));
                 out
             }
+            (MenuTarget::Tab(i), SplitRightWith | SplitDownWith) => {
+                let out = self.select_tab(i);
+                self.open_shell_picker(ShellAction::Split(split_dir(action)));
+                out
+            }
             (MenuTarget::Tab(i), CloseTab) if i < self.tabs.len() => {
                 let mut out = self.select_tab(i);
                 out.extend(self.close_tab());
@@ -3084,6 +3282,11 @@ impl App {
             (MenuTarget::Session(id), SplitRight | SplitDown) => {
                 let mut out = self.switch_to(id);
                 out.extend(self.new_terminal(Place::Split(split_dir(action))));
+                out
+            }
+            (MenuTarget::Session(id), SplitRightWith | SplitDownWith) => {
+                let out = self.switch_to(id);
+                self.open_shell_picker(ShellAction::Split(split_dir(action)));
                 out
             }
             (MenuTarget::Session(id), Terminate) => self.ask(Mode::ConfirmKill(id)),
@@ -6277,6 +6480,96 @@ mod tests {
             app.effects.last(),
             Some(Effect::SaveSetting { value: false, .. })
         ));
+    }
+
+    #[test]
+    fn choosing_a_shell_opens_a_tab_without_changing_the_default() {
+        let mut app = app();
+        let command = std::env::current_exe()
+            .unwrap()
+            .into_os_string()
+            .into_string()
+            .unwrap();
+        assert!(app.run(Command::NewTerminalWith).is_empty());
+        let Mode::ShellPicker { choices, .. } = &mut app.mode else {
+            panic!("expected shell picker");
+        };
+        choices.insert(1, ("Test shell", command.clone()));
+        let out = app.on_terminal_event(ch('2'));
+        assert!(matches!(out.as_slice(), [ClientMessage::CreateSession(req)]
+            if req.agent == "shell" && req.command == [command]));
+        assert_eq!(app.place, Place::NewTab);
+        assert!(app.config.terminal.shell.is_empty());
+    }
+
+    #[test]
+    fn the_tab_bar_dropdown_and_mouse_entries_open_a_new_tab() {
+        let mut app = app();
+        let open = MouseEventKind::Down(MouseButton::Left);
+        *app.sidebar_hits.borrow_mut() = vec![(Rect::new(34, 0, 3, 1), SidebarHit::ChooseShell)];
+        assert!(app.on_terminal_event(mouse(open, 35, 0)).is_empty());
+        let Mode::ShellPicker {
+            action: ShellAction::Tab,
+            choices,
+            ..
+        } = &mut app.mode
+        else {
+            panic!("expected the new tab shell picker");
+        };
+        let command = std::env::current_exe().unwrap().display().to_string();
+        choices.insert(1, ("Test shell", command.clone()));
+        *app.sidebar_hits.borrow_mut() =
+            vec![(Rect::new(20, 5, 12, 1), SidebarHit::ShellChoice(1))];
+        let out = app.on_terminal_event(mouse(open, 21, 5));
+        assert!(matches!(out.as_slice(), [ClientMessage::CreateSession(req)]
+            if req.command == [command]));
+        assert_eq!(app.place, Place::NewTab);
+    }
+
+    #[test]
+    fn the_shell_picker_launches_into_either_split() {
+        for (command, direction) in [
+            (Command::SplitRightWith, Dir::Right),
+            (Command::SplitDownWith, Dir::Down),
+        ] {
+            let mut app = app();
+            let shell = std::env::current_exe().unwrap().display().to_string();
+            assert!(app.run(command).is_empty());
+            let Mode::ShellPicker { choices, .. } = &mut app.mode else {
+                panic!("expected shell picker");
+            };
+            choices.insert(1, ("Test shell", shell.clone()));
+            let out = app.on_terminal_event(ch('2'));
+            assert!(matches!(out.as_slice(), [ClientMessage::CreateSession(req)]
+                if req.agent == "shell" && req.command == [shell]));
+            assert_eq!(app.place, Place::Split(direction));
+            assert!(app.config.terminal.shell.is_empty());
+        }
+    }
+
+    #[test]
+    fn choosing_a_default_shell_saves_it_and_applies_to_new_terminals() {
+        let mut app = app();
+        let command = std::env::current_exe()
+            .unwrap()
+            .into_os_string()
+            .into_string()
+            .unwrap();
+        app.config_path = Some("config.toml".into());
+        assert!(app.run(Command::DefaultShell).is_empty());
+        let Mode::ShellPicker { choices, .. } = &mut app.mode else {
+            panic!("expected shell picker");
+        };
+        choices.insert(1, ("Test shell", command.clone()));
+        assert!(app.on_terminal_event(ch('2')).is_empty());
+        assert!(
+            app.effects.iter().any(
+                |effect| matches!(effect, Effect::SaveShell { shell, .. } if shell == &command)
+            )
+        );
+        let out = app.run(Command::NewSession);
+        assert!(matches!(out.as_slice(), [ClientMessage::CreateSession(req)]
+            if req.agent == "shell" && req.command == [command]));
     }
 
     #[test]

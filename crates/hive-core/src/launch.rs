@@ -71,6 +71,83 @@ pub fn request_for(
     })
 }
 
+/// Choose a shell from the launching client's environment.
+pub(crate) fn default_shell() -> String {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    if let Some(shell) = crate::shell::launcher().and_then(Path::to_str)
+        && let Some(executable) = find_executable(shell, &path)
+        && let Ok(executable) = executable.into_os_string().into_string()
+    {
+        return executable;
+    }
+    let shell = std::env::var("SHELL").ok();
+    if let Some(shell) =
+        shell.filter(|shell| !shell.is_empty() && find_executable(shell, &path).is_some())
+    {
+        return shell;
+    }
+    #[cfg(windows)]
+    {
+        if std::env::var_os("MSYSTEM").is_some()
+            && let Some(bash) = git_bash(&path)
+        {
+            return bash.to_string_lossy().into_owned();
+        }
+        "powershell.exe".into()
+    }
+    #[cfg(not(windows))]
+    {
+        "/bin/sh".into()
+    }
+}
+
+/// Installed shell executables offered by the terminal picker.
+pub fn installed_shells() -> Vec<(&'static str, PathBuf)> {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    #[cfg(windows)]
+    let candidates = [
+        ("Git Bash / MSYS", git_bash(&path)),
+        ("PowerShell 7", find_executable("pwsh.exe", &path)),
+        (
+            "Windows PowerShell",
+            find_executable("powershell.exe", &path),
+        ),
+        ("Command Prompt", find_executable("cmd.exe", &path)),
+    ];
+    #[cfg(not(windows))]
+    let candidates = ["bash", "zsh", "fish", "dash", "ksh", "nu", "pwsh", "sh"]
+        .map(|name| (name, find_executable(name, &path)));
+    candidates
+        .into_iter()
+        .filter_map(|(name, command)| command.map(|command| (name, command)))
+        .collect()
+}
+
+#[cfg(windows)]
+fn git_bash(path: &std::ffi::OsStr) -> Option<PathBuf> {
+    // The Windows system bash.exe is a WSL launcher. An MSYS bash lives
+    // alongside msys-2.0.dll or in Git for Windows' bin directory.
+    msys_bash_on_path(path).or_else(|| {
+        ["ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"]
+            .into_iter()
+            .filter_map(std::env::var_os)
+            .map(|root| PathBuf::from(root).join("Git/bin/bash.exe"))
+            .find(|bash| bash.is_file())
+    })
+}
+
+#[cfg(any(windows, test))]
+fn msys_bash_on_path(path: &std::ffi::OsStr) -> Option<PathBuf> {
+    std::env::split_paths(path).find_map(|dir| {
+        let bash = dir.join("bash.exe");
+        if dir.join("msys-2.0.dll").is_file() && bash.is_file() {
+            return Some(bash);
+        }
+        let runtime = dir.join("../usr/bin/msys-2.0.dll");
+        (runtime.is_file() && bash.is_file()).then_some(bash)
+    })
+}
+
 /// Resolves `command` the way `execvp` would: paths containing `/` are used
 /// as-is, bare names are searched in `path_var`. On Windows, `PATHEXT`
 /// extensions (`.exe`, `.cmd`, ...) are tried too.
@@ -120,6 +197,24 @@ fn is_exec(p: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn identifies_git_bash_after_the_windows_wsl_launcher() {
+        let root = tempfile::tempdir().unwrap();
+        let system = root.path().join("System32");
+        let git = root.path().join("Git/usr/bin");
+        std::fs::create_dir_all(&system).unwrap();
+        std::fs::create_dir_all(&git).unwrap();
+        for file in [
+            system.join("bash.exe"),
+            git.join("bash.exe"),
+            git.join("msys-2.0.dll"),
+        ] {
+            std::fs::write(file, "").unwrap();
+        }
+        let path = std::env::join_paths([system, git.clone()]).unwrap();
+        assert_eq!(msys_bash_on_path(&path), Some(git.join("bash.exe")));
+    }
 
     #[cfg(unix)]
     #[test]

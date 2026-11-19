@@ -36,6 +36,21 @@ To leave the interface, press `Ctrl+Space d`. Agents keep running. Run `hive` ag
 
 Arguments after `--` go to the agent: `hive new claude -- --model opus`.
 
+### Choose a terminal shell
+
+Open the command palette with **Ctrl+Space**, then **:**. Choose **New Terminal With…**, **Split Right With…**, or **Split Down With…** and pick an installed shell. You can also click the dropdown beside **+** in the tab bar or right-click a tab for the split options. For example, open a Bash tab and add a PowerShell split beside it.
+
+Plain new-tab and split shortcuts open your default shell. **Default Shell** saves a preference for future terminals. Existing sessions keep their current shells.
+
+You can also set the executable in `config.toml`:
+
+```toml
+[terminal]
+shell = 'C:\Program Files\Git\bin\bash.exe'
+```
+
+An empty value uses an existing `[agents.shell]` entry, including any custom arguments. With neither setting, Hive checks which shell launched the frontend. If it cannot identify a supported shell, it checks `SHELL`, then looks for Git Bash when launched from MSYS. The final fallback is Windows PowerShell on Windows and `/bin/sh` on Unix.
+
 ## The interface
 
 ```text

@@ -6,4 +6,5 @@ pub mod client;
 pub mod config;
 pub mod launch;
 pub mod paths;
+mod shell;
 pub mod transport;

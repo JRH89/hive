@@ -44,6 +44,7 @@ export const configSections: ConfigSection[] = [
     intro: "How agents' terminals behave.",
     options: [
       { key: "terminal.scrollback_lines", type: "integer", default: "10000", meaning: "Lines of history the daemon keeps per session." },
+      { key: "terminal.shell", type: "string", default: '""', meaning: "Executable name or path for new terminals. Leave empty to use [agents.shell] or the shell Hive was opened from. Change it with Default Shell in the command palette." },
       { key: "terminal.mouse_support", type: "bool", default: "true", meaning: "Clickable sidebar and tabs, wheel scrolling, and mouse input for agents that use it. Hold Shift to select text natively." },
     ],
   },
