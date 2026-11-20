@@ -1,29 +1,29 @@
 class CodefrontHive < Formula
   desc "Terminal multiplexer for AI coding agents"
   homepage "https://hive.codefrontlabs.com/"
-  version "0.5.13"
+  version "0.5.14"
   license "MIT"
   conflicts_with "hive", because: "both install a hive executable"
 
   on_macos do
     on_arm do
-      url "https://github.com/JRH89/hive/releases/download/v0.5.13/hive-aarch64-apple-darwin.tar.gz"
-      sha256 "c50fb4f62ec1180285a1f099aec89f05c9936c977d1d8d518e75941db60e3e6a"
+      url "https://github.com/JRH89/hive/releases/download/v0.5.14/hive-aarch64-apple-darwin.tar.gz"
+      sha256 "eef6af026beed2895e5c5331cbeb7ad65099e671b6825f01ebc51f7268a63f4d"
     end
     on_intel do
-      url "https://github.com/JRH89/hive/releases/download/v0.5.13/hive-x86_64-apple-darwin.tar.gz"
-      sha256 "60ec64ca3c437dff954b372b46fd8be6bcee265484be67a752d7b06268aa8095"
+      url "https://github.com/JRH89/hive/releases/download/v0.5.14/hive-x86_64-apple-darwin.tar.gz"
+      sha256 "bb7a2d5732697b437ca01fd31f5afbbfeb83396e879a7a8e9e4958062ebc4ca2"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/JRH89/hive/releases/download/v0.5.13/hive-aarch64-unknown-linux-musl.tar.gz"
-      sha256 "4cd34ac18eeefb3be75d72e1e7967693682371c6935f2f63f97d78b85fd70896"
+      url "https://github.com/JRH89/hive/releases/download/v0.5.14/hive-aarch64-unknown-linux-musl.tar.gz"
+      sha256 "b344c4590d8aa92a1a1f258e02cf2c9372e682a3d0ec13b58e2a4aeca1d2bce0"
     end
     on_intel do
-      url "https://github.com/JRH89/hive/releases/download/v0.5.13/hive-x86_64-unknown-linux-musl.tar.gz"
-      sha256 "7f27b41c23e040c53ec8e16f05b54b93d51bc05ba05847b664761284eb740c1b"
+      url "https://github.com/JRH89/hive/releases/download/v0.5.14/hive-x86_64-unknown-linux-musl.tar.gz"
+      sha256 "bbc0baf523dde6ba687ae8cee9aa0354c8934fe0413b6c680c19a14708f19dfd"
     end
   end
 
