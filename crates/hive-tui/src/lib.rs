@@ -75,8 +75,81 @@ type Term = ratatui::DefaultTerminal;
 /// are logged, never shown: these are conveniences, and the bell and sidebar
 /// already carry the news. A config file that can't be saved is returned,
 /// to show.
+/// OSC 52 asks the outer terminal to set the clipboard (works over SSH;
+/// inside tmux it is wrapped for passthrough). A native clipboard tool, if
+/// installed, covers terminals that ignore OSC 52.
+fn copy_to_clipboard(text: &str) {
+    let seq = format!("\x1b]52;c;{}\x07", base64(text.as_bytes()));
+    let seq = if std::env::var_os("TMUX").is_some() {
+        format!("\x1bPtmux;{}\x1b\\", seq.replace('\x1b', "\x1b\x1b"))
+    } else {
+        seq
+    };
+    let mut out = stdout();
+    let _ = out.write_all(seq.as_bytes()).and_then(|_| out.flush());
+    let Some(argv) = clipboard_tool() else {
+        return;
+    };
+    let text = text.to_owned();
+    std::thread::spawn(move || {
+        use std::process::{Command, Stdio};
+        let child = Command::new(argv[0])
+            .args(&argv[1..])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+        if let Ok(mut child) = child {
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            let _ = child.wait();
+        }
+    });
+}
+
+/// The first native clipboard writer on PATH for this platform.
+fn clipboard_tool() -> Option<&'static [&'static str]> {
+    let candidates: &[&[&str]] = if cfg!(target_os = "macos") {
+        &[&["pbcopy"]]
+    } else if cfg!(windows) {
+        &[&["clip.exe"]]
+    } else if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        &[&["wl-copy"], &["xclip", "-selection", "clipboard"]]
+    } else if std::env::var_os("DISPLAY").is_some() {
+        &[&["xclip", "-selection", "clipboard"], &["xsel", "-bi"]]
+    } else {
+        &[]
+    };
+    let path = std::env::var_os("PATH")?;
+    candidates
+        .iter()
+        .copied()
+        .find(|c| std::env::split_paths(&path).any(|d| d.join(c[0]).is_file()))
+}
+
+fn base64(bytes: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |n, (i, b)| n | (u32::from(*b) << (16 - 8 * i)));
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(T[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
 fn run_effect(config: &Config, effect: app::Effect) -> Option<String> {
     match effect {
+        app::Effect::Copy(text) => copy_to_clipboard(&text),
         app::Effect::Notify { title, body } => {
             let cmd = &config.integrations.desktop_notify.command;
             let (program, args) = cmd.split_first()?;
@@ -493,6 +566,15 @@ async fn reconnect(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn base64_matches_the_standard_alphabet_and_padding() {
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foo"), "Zm9v");
+        assert_eq!(base64("héllo\n".as_bytes()), "aMOpbGxvCg==");
+    }
 
     #[test]
     fn an_older_daemon_is_pointed_out() {

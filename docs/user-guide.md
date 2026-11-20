@@ -223,7 +223,7 @@ Each pane starts in the space's root. With no layout for the space, the only lay
 Right-click a space for **open, new terminal here, rename, close space** (close asks, then terminates its sessions); a tab for **rename, split right/below, close tab** (a tab's name shows after its number); an agent for **open, rename, split right/below, terminate**.
 
 
-Everything in the sidebar and the tab bar is clickable: spaces, agents, **+ new**, **menu** and tabs. Click a pane to focus it. The wheel scrolls the SPACES or AGENTS list under the pointer without changing your selection; a list longer than its room shows a scrollbar you can click or drag. Use the wheel over a normal terminal pane or press **Shift+Page Up** and **Shift+Page Down** in the focused pane to view its history. Typing returns to live output. Apps that request mouse events keep their wheel handling. Full-screen apps without mouse support receive arrow keys from the wheel. Hold `Shift` to select text with your terminal as usual. Turn the mouse off with `[terminal] mouse_support = false`.
+Everything in the sidebar and the tab bar is clickable: spaces, agents, **+ new**, **menu** and tabs. Click a pane to focus it. The wheel scrolls the SPACES or AGENTS list under the pointer without changing your selection; a list longer than its room shows a scrollbar you can click or drag. Use the wheel over a normal terminal pane or press **Shift+Page Up** and **Shift+Page Down** in the focused pane to view its history. Typing returns to live output. Apps that request mouse events keep their wheel handling. Full-screen apps without mouse support receive arrow keys from the wheel. Drag over a pane to select text: it is copied to the clipboard when you let go, and the status bar says how much was copied (the highlight stays until your next click or key). In apps that take the mouse, hold `Shift` to select with your terminal instead. Turn the mouse off with `[terminal] mouse_support = false`.
 
 ### Agent status
 
@@ -359,7 +359,8 @@ Ended sessions keep their command, directory, label and space. `Ctrl+Space R` re
 ## Upgrading
 
 ```bash
-hive update         # installs the latest release next to the running hive
+hive                # updates itself first when a newer release is out ([general] auto_update)
+hive update         # or install the latest release by hand
 hive daemon stop    # the old daemon keeps running until stopped; this ends running sessions
 hive                # starts the new daemon; Ctrl+Space R restores the sessions
 ```

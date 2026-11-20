@@ -10,8 +10,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use crate::app::{
-    Activity, App, Bar, Focus, Link, MenuTarget, Mode, SIDEBAR_WIDTH, Scope, SidebarHit, Target,
-    Tone,
+    Activity, App, Bar, Focus, Link, MenuTarget, Mode, SIDEBAR_WIDTH, Scope, Selection, SidebarHit,
+    Target, Tone,
 };
 use crate::keymap::Command;
 use crate::layout::{Dir, PaneArea};
@@ -44,6 +44,9 @@ pub fn draw(frame: &mut Frame, app: &App, theme: &Theme) {
         for pane in &panes {
             if let Some(view) = app.views.get(&pane.session) {
                 draw_terminal(frame.buffer_mut(), pane.body, view.parser.screen());
+                if let Some(sel) = app.selection.filter(|s| s.session == pane.session) {
+                    draw_selection(frame.buffer_mut(), pane.body, &sel);
+                }
             }
         }
         // Before Hive's own pane chrome, so ASCII mode folds only that.
@@ -1736,6 +1739,25 @@ fn color(c: vt100::Color) -> Color {
 
 /// Copies the emulator's visible screen into `area`, clipping if the PTY is
 /// larger than the panel (e.g. while observing another client's session).
+/// A mouse selection shows reversed, which reads in every palette and
+/// with `NO_COLOR`.
+fn draw_selection(buf: &mut Buffer, body: Rect, sel: &Selection) {
+    for row in 0..body.height {
+        for col in 0..body.width {
+            if sel.contains(row, col) {
+                let cell = &mut buf[(body.x + col, body.y + row)];
+                // Toggle, so text the program already reversed still stands out.
+                let style = cell.style();
+                cell.set_style(if style.add_modifier.contains(Modifier::REVERSED) {
+                    style.remove_modifier(Modifier::REVERSED)
+                } else {
+                    style.add_modifier(Modifier::REVERSED)
+                });
+            }
+        }
+    }
+}
+
 pub fn draw_terminal(buf: &mut Buffer, area: Rect, screen: &vt100::Screen) {
     let (rows, cols) = screen.size();
     for row in 0..rows.get().min(area.height) {

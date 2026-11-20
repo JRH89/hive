@@ -360,6 +360,104 @@ fn tempfile_path() -> PathBuf {
     std::env::temp_dir().join(format!("hive-install-{}.sh", std::process::id()))
 }
 
+const LATEST: &str = "https://github.com/jrh89/hive/releases/latest";
+/// How long a "latest is vX" answer is trusted.
+const CHECK_EVERY: Duration = Duration::from_secs(60 * 60);
+
+/// Bare `hive`, like Codex and Claude Code: install a newer release, then
+/// run it in place of this process. Never stops hive opening: any failure
+/// is a warning and the current version carries on.
+fn auto_update(paths: &Paths) {
+    use std::io::IsTerminal;
+    if cfg!(debug_assertions)
+        || std::env::var_os("HIVE_NO_AUTO_UPDATE").is_some_and(|v| !v.is_empty() && v != "0")
+        || !std::io::stdout().is_terminal()
+    {
+        return;
+    }
+    let Some(tag) = latest_tag(paths) else {
+        return;
+    };
+    if !is_newer(&tag, env!("CARGO_PKG_VERSION")) {
+        return;
+    }
+    // Before the installer replaces it: on Linux the path of a replaced
+    // running binary reads as "... (deleted)".
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    eprintln!(
+        "hive: updating {} to {tag} (turn off with [general] auto_update = false)",
+        env!("CARGO_PKG_VERSION")
+    );
+    if let Err(e) = update(Some(&tag)) {
+        eprintln!("hive: update failed, opening this version: {e:#}");
+        std::thread::sleep(Duration::from_secs(2));
+        return;
+    }
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
+    // The new binary must not loop if it somehow reports the old version.
+    let mut next = std::process::Command::new(exe);
+    next.args(args).env("HIVE_NO_AUTO_UPDATE", "1");
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        let e = next.exec();
+        eprintln!("hive: updated, but could not restart: {e}");
+    }
+    #[cfg(not(unix))]
+    match next.status() {
+        Ok(st) => std::process::exit(st.code().unwrap_or(1)),
+        Err(e) => eprintln!("hive: updated, but could not restart: {e}"),
+    }
+}
+
+/// The latest release's tag, from GitHub's `releases/latest` redirect,
+/// remembered for an hour in `latest-release` in the state dir.
+fn latest_tag(paths: &Paths) -> Option<String> {
+    let cache = paths.state_dir.join("latest-release");
+    let fresh = std::fs::metadata(&cache)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .is_some_and(|age| age < CHECK_EVERY);
+    if fresh {
+        return std::fs::read_to_string(&cache)
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+    }
+    let out = std::process::Command::new("curl")
+        .args(["-fsSI", "--max-time", "3", LATEST])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    let tag = tag_from_headers(&String::from_utf8_lossy(&out.stdout));
+    // Remember a failed check too, so an offline start isn't slowed each time.
+    let _ = std::fs::write(&cache, tag.as_deref().unwrap_or(""));
+    tag
+}
+
+/// `location: https://github.com/jrh89/hive/releases/tag/v0.6.0` → `v0.6.0`.
+fn tag_from_headers(headers: &str) -> Option<String> {
+    headers
+        .lines()
+        .filter_map(|l| l.split_once(':'))
+        .filter(|(k, _)| k.trim().eq_ignore_ascii_case("location"))
+        .filter_map(|(_, v)| v.trim().rsplit_once("/tag/").map(|(_, t)| t.to_string()))
+        .find(|t| t.starts_with('v') && !t.is_empty())
+}
+
+/// Whether release tag `tag` (`v1.2.3`) is a later version than `current`.
+fn is_newer(tag: &str, current: &str) -> bool {
+    let parse = |v: &str| -> Option<(u64, u64, u64)> {
+        let mut it = v.trim_start_matches('v').split('.').map(|p| p.parse().ok());
+        Some((it.next()??, it.next()??, it.next()??))
+    };
+    matches!((parse(tag), parse(current)), (Some(t), Some(c)) if t > c)
+}
+
 async fn run(cli: Cli, paths: Paths) -> anyhow::Result<()> {
     if matches!(cli.command, Some(Command::Doctor)) {
         // Runs before loading the config so it can report a broken one.
@@ -382,6 +480,9 @@ async fn run(cli: Cli, paths: Paths) -> anyhow::Result<()> {
     }
     let config = Config::load(&paths.config_file)?;
     let auto = config.daemon.auto_start;
+    if cli.command.is_none() && config.general.auto_update {
+        auto_update(&paths);
+    }
 
     match cli.command {
         None => tui(&paths, connect(auto).await?, config, Start::Auto).await,
@@ -1060,4 +1161,25 @@ async fn doctor(paths: &Paths) -> anyhow::Result<()> {
         anyhow::bail!("{problems} problem(s) found");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_latest_tag_comes_from_the_redirect() {
+        let headers = "HTTP/2 302 \r\ndate: x\r\nLocation: https://github.com/JRH89/hive/releases/tag/v0.6.0\r\n\r\n";
+        assert_eq!(tag_from_headers(headers).as_deref(), Some("v0.6.0"));
+        assert_eq!(tag_from_headers("HTTP/2 404\r\n\r\n"), None);
+    }
+
+    #[test]
+    fn only_a_later_release_counts_as_newer() {
+        assert!(is_newer("v0.5.10", "0.5.9"));
+        assert!(is_newer("v1.0.0", "0.9.9"));
+        assert!(!is_newer("v0.5.9", "0.5.9"));
+        assert!(!is_newer("v0.5.8", "0.5.9"));
+        assert!(!is_newer("nightly", "0.5.9"));
+    }
 }

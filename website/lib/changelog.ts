@@ -10,6 +10,15 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    version: "0.5.13",
+    date: "2026-11-19T22:00:00-08:00",
+    title: "Select to copy, and hive keeps itself up to date",
+    changes: [
+      "Drag over a pane to select text. It is copied to the clipboard when you let go, and the status bar says how much was copied. Apps that take the mouse still get it; hold Shift there to select with your terminal.",
+      "Opening hive installs a newer release first, like Codex and Claude Code, checked at most once an hour. Turn it off with [general] auto_update = false, or skip it once with HIVE_NO_AUTO_UPDATE=1.",
+    ],
+  },
+  {
     version: "0.5.12",
     date: "2026-11-19T02:36:05-08:00",
     title: "Choose a shell for each terminal",

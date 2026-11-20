@@ -47,6 +47,7 @@ Knowledge base for building **Hive**, a terminal multiplexer for AI coding agent
 - [[ADR-0026 Optional tree sidebar]]
 - [[ADR-0027 Notes and context layer]]
 - [[ADR-0028 Space order is client-side]]
+- [[ADR-0029 Auto-update on launch]]
 
 ## Ongoing
 - [[Website Design]]: approved website direction, branding, scope and acceptance

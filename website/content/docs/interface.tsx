@@ -165,8 +165,9 @@ export default function Interface() {
         clicking a pane focuses it. Use the wheel over a normal terminal pane to view its history,
         or press <kbd>Shift</kbd>+<kbd>Page Up</kbd> or <kbd>Shift</kbd>+<kbd>Page Down</kbd> in the
         focused pane. Typing returns to live output. Apps that request mouse events keep their wheel
-        handling. Hold{" "}
-        <kbd>Shift</kbd> to select text with your terminal as usual.
+        handling. Drag over a pane to select text: it is copied to the clipboard when you let go,
+        and the status bar says how much was copied. In apps that take the mouse, hold{" "}
+        <kbd>Shift</kbd> to select with your terminal instead.
       </p>
       <p>Right-click for menus:</p>
       <ul>
