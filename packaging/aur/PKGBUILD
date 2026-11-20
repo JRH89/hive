@@ -1,6 +1,6 @@
 # Maintainer: Codefront Labs
 pkgname=codefront-hive-bin
-pkgver=0.5.13
+pkgver=0.5.14
 pkgrel=1
 pkgdesc='Terminal multiplexer for AI coding agents'
 arch=('x86_64' 'aarch64')
@@ -11,8 +11,8 @@ conflicts=('hive')
 options=('!strip' '!debug')
 source_x86_64=("hive-$pkgver-x86_64.tar.gz::$url/releases/download/v$pkgver/hive-x86_64-unknown-linux-musl.tar.gz")
 source_aarch64=("hive-$pkgver-aarch64.tar.gz::$url/releases/download/v$pkgver/hive-aarch64-unknown-linux-musl.tar.gz")
-sha256sums_x86_64=('7f27b41c23e040c53ec8e16f05b54b93d51bc05ba05847b664761284eb740c1b')
-sha256sums_aarch64=('4cd34ac18eeefb3be75d72e1e7967693682371c6935f2f63f97d78b85fd70896')
+sha256sums_x86_64=('bbc0baf523dde6ba687ae8cee9aa0354c8934fe0413b6c680c19a14708f19dfd')
+sha256sums_aarch64=('b344c4590d8aa92a1a1f258e02cf2c9372e682a3d0ec13b58e2a4aeca1d2bce0')
 
 package() {
     cd "$srcdir/hive-$CARCH-unknown-linux-musl"
