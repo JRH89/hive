@@ -322,6 +322,44 @@ pub enum SidebarHit {
     },
 }
 
+/// A mouse selection in a pane, in cells of its screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Selection {
+    pub session: SessionId,
+    /// The pane body it was started in; a drag is clamped to it.
+    pub body: Rect,
+    /// Where the button went down and where the pointer is, as (row, col).
+    pub anchor: (u16, u16),
+    pub head: (u16, u16),
+    /// Still dragging. Once released it stays highlighted until the next
+    /// click or key.
+    pub dragging: bool,
+}
+
+impl Selection {
+    /// First and last selected cells, in reading order, both inclusive.
+    pub fn span(&self) -> ((u16, u16), (u16, u16)) {
+        if self.anchor <= self.head {
+            (self.anchor, self.head)
+        } else {
+            (self.head, self.anchor)
+        }
+    }
+
+    pub fn contains(&self, row: u16, col: u16) -> bool {
+        let (a, b) = self.span();
+        (a..=b).contains(&(row, col))
+    }
+}
+
+/// The selected text: whole rows in the middle, trailing blanks trimmed.
+pub fn selected_text(screen: &vt100::Screen, sel: &Selection) -> String {
+    let ((r0, c0), (r1, c1)) = sel.span();
+    let text = screen.contents_between(r0, c0, r1, c1.saturating_add(1));
+    let lines: Vec<&str> = text.split('\n').map(str::trim_end).collect();
+    lines.join("\n")
+}
+
 /// Which sidebar list a scrollbar moves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Bar {
@@ -467,6 +505,8 @@ pub struct App {
     pub tasks: Option<TaskList>,
     /// Side effects for the frontend loop to carry out.
     pub effects: Vec<Effect>,
+    /// Text being (or just) selected with the mouse in a pane.
+    pub selection: Option<Selection>,
     /// Panes of a layout still to create, each placed after the previous.
     layout_queue: std::collections::VecDeque<(CreateSession, Place)>,
     /// Working state of listed repository spaces (`[integrations.git_status]`),
@@ -573,6 +613,9 @@ pub const LAYOUT_AGENT: &str = "layout";
 /// Work outside the app state, done by the frontend loop.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
+    /// Put `text` on the system clipboard (OSC 52, plus a native tool when
+    /// one is installed).
+    Copy(String),
     /// Run `[integrations.desktop_notify] command` with these two arguments.
     Notify {
         title: String,
@@ -798,6 +841,7 @@ impl App {
             told_ended: false,
             tasks: None,
             effects: Vec::new(),
+            selection: None,
             layout_queue: Default::default(),
             git: BTreeMap::new(),
             working_since: BTreeMap::new(),
@@ -1825,6 +1869,9 @@ impl App {
         if self.link != Link::Connected || self.mode != Mode::Normal {
             return Vec::new();
         }
+        if let Some(out) = self.on_select_mouse(m) {
+            return out;
+        }
         let (px, _) = self.panel_origin();
         let at = ratatui::layout::Position::new(m.column, m.row);
         // A scrollbar sits over its list's rows and wins; a list's whole
@@ -2031,6 +2078,79 @@ impl App {
             .unwrap_or_default()
     }
 
+    /// Selecting text in a pane whose program doesn't use the mouse: drag
+    /// to highlight, release to copy. `None` leaves the event to the rest
+    /// of `on_mouse`.
+    fn on_select_mouse(&mut self, m: MouseEvent) -> Option<Vec<ClientMessage>> {
+        let left = MouseButton::Left;
+        match m.kind {
+            MouseEventKind::Drag(b) if b == left => {
+                let sel = self.selection.as_mut().filter(|s| s.dragging)?;
+                let b = sel.body;
+                let col = m.column.clamp(b.x, b.x + b.width.saturating_sub(1)) - b.x;
+                let row = m.row.clamp(b.y, b.y + b.height.saturating_sub(1)) - b.y;
+                sel.head = (row, col);
+                Some(Vec::new())
+            }
+            MouseEventKind::Up(b) if b == left => {
+                let sel = self.selection.filter(|s| s.dragging)?;
+                if sel.anchor == sel.head {
+                    // A plain click: nothing selected.
+                    self.selection = None;
+                    return None;
+                }
+                self.selection = Some(Selection {
+                    dragging: false,
+                    ..sel
+                });
+                let text = self
+                    .views
+                    .get(&sel.session)
+                    .map(|v| selected_text(v.parser.screen(), &sel))
+                    .unwrap_or_default();
+                if text.trim().is_empty() {
+                    return Some(Vec::new());
+                }
+                let n = text.chars().count();
+                self.effects.push(Effect::Copy(text));
+                self.set_status(
+                    Tone::Info,
+                    format!("Copied {n} character{}", if n == 1 { "" } else { "s" }),
+                );
+                Some(Vec::new())
+            }
+            MouseEventKind::Down(_) => {
+                self.selection = None;
+                if m.kind != MouseEventKind::Down(left) {
+                    return None;
+                }
+                let at = ratatui::layout::Position::new(m.column, m.row);
+                let pane = self
+                    .pane_areas()
+                    .0
+                    .into_iter()
+                    .find(|p| p.body.contains(at))?;
+                let screen = self.views.get(&pane.session)?.parser.screen();
+                // Programs that take the mouse get it (Shift still selects
+                // in your terminal).
+                if screen.mouse_protocol_mode() != vt100::MouseProtocolMode::None {
+                    return None;
+                }
+                let cell = (m.row - pane.body.y, m.column - pane.body.x);
+                self.selection = Some(Selection {
+                    session: pane.session,
+                    body: pane.body,
+                    anchor: cell,
+                    head: cell,
+                    dragging: true,
+                });
+                // Focusing the pane still happens below.
+                None
+            }
+            _ => None,
+        }
+    }
+
     fn scroll_bar_to(&self, list: Bar, track: Rect, len: usize, room: usize, row: u16) {
         let top = bar_top(row.saturating_sub(track.y), track.height, len, room);
         match list {
@@ -2055,6 +2175,7 @@ impl App {
     }
 
     fn on_key(&mut self, key: KeyEvent) -> Vec<ClientMessage> {
+        self.selection = None;
         if matches!(self.link, Link::Reconnecting { .. }) {
             // Nothing can be sent; only quitting makes sense.
             let ctrl_c = key.code == KeyCode::Char('c') && key.modifiers == KeyModifiers::CONTROL;
@@ -4096,6 +4217,69 @@ fn complete_dir(input: &str) -> String {
 mod tests {
     use super::*;
     use hive_protocol::SessionState;
+
+    fn selecting_app(snapshot: &[u8]) -> (App, Rect) {
+        let mut app = App::new(Config::default(), Start::Attach(1), (100, 30));
+        app.on_connect();
+        app.on_server(ServerMessage::SessionList(vec![info(
+            1,
+            SessionState::Running,
+        )]));
+        app.on_server(ServerMessage::Attached {
+            session: info(1, SessionState::Running),
+            snapshot: snapshot.to_vec(),
+            controller: true,
+        });
+        let body = app.pane_areas().0[0].body;
+        (app, body)
+    }
+
+    fn press(app: &mut App, kind: MouseEventKind, col: u16, row: u16) -> Vec<ClientMessage> {
+        app.on_terminal_event(Event::Mouse(MouseEvent {
+            kind,
+            column: col,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }))
+    }
+
+    #[test]
+    fn dragging_over_a_pane_selects_and_copies_with_feedback() {
+        let (mut app, b) = selecting_app(b"hello world\r\nsecond line   ");
+        let left = MouseButton::Left;
+        assert!(press(&mut app, MouseEventKind::Down(left), b.x + 6, b.y).is_empty());
+        press(&mut app, MouseEventKind::Drag(left), b.x + 5, b.y + 1);
+        let sel = app.selection.unwrap();
+        assert!(sel.dragging && sel.contains(0, 10) && sel.contains(1, 0));
+        // Nothing reaches the agent.
+        assert!(press(&mut app, MouseEventKind::Up(left), b.x + 5, b.y + 1).is_empty());
+        assert!(
+            matches!(app.effects.as_slice(), [Effect::Copy(t)] if t == "world\nsecond"),
+            "{:?}",
+            app.effects
+        );
+        assert!(matches!(&app.status, Some((Tone::Info, m)) if m == "Copied 12 characters"));
+        // It stays highlighted until the next click or key.
+        assert!(app.selection.is_some_and(|s| !s.dragging));
+        press(&mut app, MouseEventKind::Down(left), b.x, b.y + 5);
+        press(&mut app, MouseEventKind::Up(left), b.x, b.y + 5);
+        assert!(app.selection.is_none());
+        assert_eq!(app.effects.len(), 1, "a plain click copies nothing");
+    }
+
+    #[test]
+    fn a_program_that_takes_the_mouse_gets_drags_instead_of_a_selection() {
+        // SGR button-event tracking.
+        let (mut app, b) = selecting_app(b"\x1b[?1002h\x1b[?1006hhello");
+        let left = MouseButton::Left;
+        press(&mut app, MouseEventKind::Down(left), b.x, b.y);
+        let out = press(&mut app, MouseEventKind::Drag(left), b.x + 3, b.y);
+        assert!(app.selection.is_none());
+        assert!(
+            matches!(out.as_slice(), [ClientMessage::Input { .. }]),
+            "{out:?}"
+        );
+    }
 
     fn info(id: SessionId, state: SessionState) -> SessionInfo {
         SessionInfo {

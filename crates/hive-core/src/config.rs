@@ -78,6 +78,10 @@ pub struct General {
     /// The sidebar as one tree: each space with its agents indented under
     /// it, collapsible. Off: SPACES, then AGENTS.
     pub sidebar_tree: bool,
+    /// Bare `hive` installs a newer release before opening, like `hive
+    /// update` (Linux, macOS and Windows release binaries; checked at most
+    /// hourly). `HIVE_NO_AUTO_UPDATE=1` skips it for one run.
+    pub auto_update: bool,
     /// Ignored: from early versions of the spec, accepted so configs that
     /// set it still load.
     #[serde(rename = "restore_workspace")]
@@ -91,6 +95,7 @@ impl Default for General {
             default_agent: "claude".into(),
             confirm_terminate: true,
             sidebar_tree: false,
+            auto_update: true,
             _restore_workspace: None,
         }
     }
@@ -751,6 +756,13 @@ mod tests {
         assert!(!Config::parse(&general).unwrap().general.confirm_terminate);
         assert!(Config::default().general.confirm_terminate);
         assert!(!Config::default().general.sidebar_tree);
+        assert!(Config::default().general.auto_update);
+        assert!(
+            !Config::parse("[general]\nauto_update = false\n")
+                .unwrap()
+                .general
+                .auto_update
+        );
         assert!(
             Config::parse("[general]\nsidebar_tree = true\n")
                 .unwrap()

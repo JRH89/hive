@@ -111,9 +111,15 @@ hive daemon stop    # when done`}</code>
 
       <h2 id="upgrade">Upgrading</h2>
       <pre className="code">
-        <code>{`hive update         # installs the latest release next to the running hive
-hive                # new windows use the new version straight away`}</code>
+        <code>{`hive                # updates itself first when a newer release is out
+hive update         # or install the latest release by hand`}</code>
       </pre>
+      <p>
+        Opening <code>hive</code> checks for a newer release at most once an hour and installs it
+        before the interface starts, like Codex and Claude Code. Turn it off with{" "}
+        <code>auto_update = false</code> under <code>[general]</code>, or skip it once with{" "}
+        <code>HIVE_NO_AUTO_UPDATE=1</code>.
+      </p>
       <p>
         A running daemon keeps its version, and your sessions, until it stops. Most releases work
         with the old daemon; when one doesn&apos;t, <code>hive</code> says the protocol versions

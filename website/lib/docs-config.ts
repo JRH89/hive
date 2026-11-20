@@ -26,6 +26,7 @@ export const configSections: ConfigSection[] = [
       { key: "general.default_agent", type: "string", default: '"claude"', meaning: "Agent hive new starts when you don't name one." },
       { key: "general.theme", type: "string", default: '"hive-dark"', meaning: "hive-dark, hive-light, ansi (your terminal's 16 colours) or mono (no colour)." },
       { key: "general.sidebar_tree", type: "bool", default: "false", meaning: "Show the sidebar as one tree: each space with its agents indented under it. Space in the sidebar (or a click on the arrow) folds a space; ← and → fold and unfold. The sidebar_tree command switches it from the palette and saves it here." },
+      { key: "general.auto_update", type: "bool", default: "true", meaning: "Running hive with no subcommand installs a newer release first, the way hive update does, then opens. Checked at most once an hour; a failed check never stops hive opening. HIVE_NO_AUTO_UPDATE=1 skips it for one run. The running daemon keeps its version until hive daemon stop." },
       { key: "general.confirm_terminate", type: "bool", default: "true", meaning: "Ask before terminating a session, or closing a pane, tab or space that would stop a running agent. Pressing a (always) in the dialog sets it to false." },
     ],
   },
