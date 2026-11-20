@@ -39,7 +39,7 @@ cargo test --workspace
 - ~~No activity indicator for background sessions~~: done in Phase 7 via daemon-side detection ([[ADR-0016 Agent detection from process and herdr manifests]]).
 
 ## Website
-- Next.js static export in `website/`, deployed by Vercel from GitHub (`vercel.json`: framework nextjs, image content types for the extensionless OG/apple-icon routes).
+- Next.js static export in `website/`. **Vercel is no longer used** (2026-11-19, `vercel.json` removed); its GitHub check is noise until the Vercel app is uninstalled from the repo.
 - SEO (2026-10-30): canonical, title/description/keywords, OG and Twitter large-image cards (generated 1200×630 PNG), robots.txt, sitemap.xml, manifest, apple icon, SoftwareApplication + FAQPage JSON-LD. Content updated to the finished roadmap. Verified by headless Chromium screenshots at 1440 and 390 px and by checking the exported head tags.
-- DNS for codefrontlabs.com is on Cloudflare: `hive` is a CNAME to `cname.vercel-dns.com` (DNS only). Live since 2026-10-30, Vercel certificate valid to 2027-01-29.
+- DNS for codefrontlabs.com is on Cloudflare: `hive` was a CNAME to Vercel; check the current host before relying on this.
 - Website UI refinement (2026-10-30, local): actual SVG agent marks, fixed header, mobile navigation menu, and explicit Codefront Labs product credit. TypeScript and production static export pass; browser QA unavailable in this session. See [[Website Design]].
