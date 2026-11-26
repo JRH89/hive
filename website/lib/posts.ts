@@ -14,6 +14,15 @@ export type Post = {
 
 export const posts: Post[] = [
   {
+    slug: "hive-0-5-notes-history-sessions-that-survive",
+    title: "Hive 0.5: notes for your agents, and sessions that survive",
+    description:
+      "What changed in Hive 0.5: a notes app and hive context for agents, sessions that survive restarts, scrollback, select to copy, and Windows fixes.",
+    date: "2026-11-26T12:00:00-08:00",
+    tags: ["Release"],
+    minutes: 4,
+  },
+  {
     slug: "get-notified-when-claude-code-needs-input",
     title: "How to get notified when Claude Code or Codex needs input",
     description:
