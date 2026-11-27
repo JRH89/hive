@@ -10,6 +10,14 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    version: "0.6.1",
+    date: "2026-11-26T20:35:00-08:00",
+    title: "Packaging release",
+    changes: [
+      "No changes to Hive itself. Same as 0.6.0, released so npm, Homebrew, Arch and GitHub all carry the same version (npm blocked 0.6.0 after a dropped stage).",
+    ],
+  },
+  {
     version: "0.6.0",
     date: "2026-11-26T16:15:00-08:00",
     title: "Multi-agent orchestration & task board",

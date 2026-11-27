@@ -12,6 +12,8 @@ updated: 2026-11-01
 
 **Phase 9 (macOS) done**: CI runs clippy, tests and smoke on macos-14; release builds aarch64/x86_64-apple-darwin ([[Phase 9 - macOS]]). **Phase 10 (Windows) done** ([[Phase 10 - Windows]]); **Released v0.4.0** (2026-10-31): Linux, macOS and Windows binaries, `install.ps1`.
 
+**v0.6.1** (2026-11-26): packaging-only release (npm burned 0.6.0).
+
 **v0.6.0** (2026-11-26): Phase 12 multi-agent orchestration — `[roles.*]` with `strengths` and `hive setup`, plain-markdown task board (`hive-tasks`, `hive task`), interactive `hive board` (`Ctrl+Space B`) with Live Agents swarm tree and Auto-Pipeline (`worker -> reviewer -> done`), delegation CLI (`hive spawn`/`msg`/`wait`/`roles`), `hive mcp` (9 tools), and protocol v8.
 
 **v0.5.14** (2026-11-19): packaging-only release (npm burned 0.5.13). v0.5.13 (2026-11-19): drag to select and copy in panes; bare `hive` auto-updates ([[ADR-0029 Auto-update on launch]]). v0.5.12 (2026-11-19): shell choices for tabs and splits, a saved default shell, and parent-shell detection. See [[2026-11-19]].
