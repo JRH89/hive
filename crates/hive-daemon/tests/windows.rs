@@ -48,6 +48,9 @@ fn cmd(args: &[&str]) -> CreateSession {
         workspace: None,
         worktree: None,
         new_space: false,
+        parent_session: None,
+        role: None,
+        task_id: None,
     }
 }
 
