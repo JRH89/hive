@@ -60,6 +60,35 @@ panes = [
 ]
 ```
 
+## Multi-Agent Orchestration & Task Board
+Coordinate multiple agents across roles and a shared markdown task board without leaving the terminal.
+
+- **Roles & setup.** Define `[roles.<name>]` in `config.toml` (`agent`, `args`, `worktree`, `strengths`, `instructions`). Built-in defaults cover `lead`, `planner`, `coder` (isolated worktree), and `reviewer`. Run `hive setup` for an interactive wizard, inspect configured roles with `hive roles [--json]`, or let Hive pick the best role with `--role auto`.
+- **Task board.** Manage tasks from the CLI (`hive task add|list|show|update`) or open the interactive Kanban board with `hive board` or `Ctrl+Space B` inside Hive (`n` new, `a` assign role, `s` spawn an agent on the task, `m` / `Enter` advance status).
+- **Coordination & MCP.** Spawn workers (`hive spawn`), send messages (`hive msg`), wait for completion (`hive wait`), or expose all 9 orchestration tools (`task_list`, `task_show`, `task_add`, `task_update`, `agent_spawn`, `agent_message`, `agent_wait`, `session_list`, `role_list`) to any MCP-compatible agent via `hive mcp` over stdio.
+
+```bash
+hive setup                                                 # detect installed agents & configure [roles.*]
+hive roles                                                 # list roles, models, and routing strengths
+hive task add "Fix auth race" --role auto                  # auto-route task to the best matching role
+hive spawn --role coder --task 1 -w                        # spawn coder in an isolated git worktree
+hive msg 4 "Focus on token refresh" && hive wait 4         # message a worker and wait for completion
+hive board                                                 # open the interactive task board (or Ctrl+Space B)
+hive mcp                                                   # run the local stdio MCP server (9 tools)
+```
+
+## Notes & Agent Context
+Keep project notes in a plain markdown or Obsidian vault beside your agents—no daemon state, no lock-in.
+
+```bash
+hive notes                                                 # open the vault TUI (or Ctrl+Space N inside Hive)
+hive context search "worktree cleanup"                     # ranked full-text search for agents & scripts
+hive context get Architecture                              # print a note with its links and backlinks
+hive context add Decisions "JWTs expire after 1h"          # append a dated, signed entry
+```
+
+Sessions in a space with a vault automatically receive `HIVE_VAULT` so agents and scripts can find it.
+
 ## Install
 Linux (x86_64 and aarch64), macOS (Apple silicon and Intel) and Windows 10+ (x86_64 and Arm64); CI tests all three. On Windows, agent status comes only from agents that report it (`hive report-agent`).
 
@@ -75,7 +104,7 @@ curl -fsSL https://github.com/jrh89/hive/releases/latest/download/install.sh | s
 irm https://github.com/jrh89/hive/releases/latest/download/install.ps1 | iex
 ```
 
-The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.5.14` to pin a version. Later, `hive update` upgrades in place (then `hive daemon stop` to restart the daemon on the new version; this ends running sessions, and `Ctrl+Space R` restores them).
+The script downloads static binaries, verifies their SHA-256 checksum and installs `hive` and `hived` to `~/.local/bin`. Set `HIVE_INSTALL_DIR` to change the location or `HIVE_VERSION=v0.6.0` to pin a version. Later, `hive update` upgrades in place (then `hive daemon stop` to restart the daemon on the new version; this ends running sessions, and `Ctrl+Space R` restores them).
 
 **Package managers**
 
@@ -86,7 +115,7 @@ The script downloads static binaries, verifies their SHA-256 checksum and instal
 | pnpm | `pnpm add -g @codefrontlabs/hive` |
 | Yarn | `yarn dlx -p @codefrontlabs/hive hive` |
 | Homebrew | `brew tap jrh89/hive https://github.com/JRH89/hive`, then `brew install jrh89/hive/codefront-hive` |
-| Arch Linux | Verify the [x86_64 package](https://github.com/JRH89/hive/releases/download/v0.5.14/codefront-hive-bin-0.5.14-1-x86_64.pkg.tar.zst) with its [checksum](https://github.com/JRH89/hive/releases/download/v0.5.14/codefront-hive-bin-0.5.14-1-x86_64.pkg.tar.zst.sha256), then run `sudo pacman -U ./codefront-hive-bin-0.5.14-1-x86_64.pkg.tar.zst`. On ARM64, build the [PKGBUILD](packaging/aur/PKGBUILD) with `makepkg -si`. AUR publication is pending. |
+| Arch Linux | Verify the [x86_64 package](https://github.com/JRH89/hive/releases/download/v0.6.0/codefront-hive-bin-0.6.0-1-x86_64.pkg.tar.zst) with its [checksum](https://github.com/JRH89/hive/releases/download/v0.6.0/codefront-hive-bin-0.6.0-1-x86_64.pkg.tar.zst.sha256), then run `sudo pacman -U ./codefront-hive-bin-0.6.0-1-x86_64.pkg.tar.zst`. On ARM64, build the [PKGBUILD](packaging/aur/PKGBUILD) with `makepkg -si`. AUR publication is pending. |
 
 Use the same package manager to upgrade. Yarn may hold new versions for up to 24 hours by default.
 
@@ -132,14 +161,9 @@ hive kill 3                        # terminate it
 ```
 
 ## Supported agents
-| Agent | Name in Hive | Command |
-|---|---|---|
-| Claude Code | `claude` | `claude` |
-| Codex | `codex` | `codex` |
-| Gemini CLI | `gemini` | `gemini` |
-| OpenCode | `opencode` | `opencode` |
-| Your shell | `shell` | `$SHELL` |
-| Anything else | your choice | see [custom agents](docs/user-guide.md#custom-agents) |
+Hive has built-in support and auto-detection for **27+ AI coding agents**—including Claude Code (`claude`), Codex (`codex`), Gemini CLI (`gemini`), OpenCode (`opencode`), GitHub Copilot, Cursor Agent, Amp, Cline, Devin, Droid, Goose, Aider, Qwen Code, and more—plus your own shell (`shell`).
+
+Run `hive agents` to see which agents are installed on your `PATH`, or `hive agents -a` to list the full catalog. Add or override any command in `config.toml` (see [custom agents](docs/user-guide.md#custom-agents)).
 
 Agents run unmodified in a real terminal. Hive doesn't parse their output for anything but status, and never answers their prompts.
 
@@ -153,9 +177,18 @@ Agents run unmodified in a real terminal. Hive doesn't parse their output for an
 | `hive attach <id>` | Attach to a session |
 | `hive kill <id>` | Terminate a session |
 | `hive status` | Daemon and session summary |
+| `hive agents [-a]` | List installed agents (`-a`: all 27+ known agents) |
 | `hive report-agent --agent <name> --state <state>` | Report status from inside a session |
 | `hive workspace list\|add <dir>\|rename\|rm` | Manage spaces |
 | `hive worktree list\|rm <path> [--force]` | List or remove worktrees (refuses dirty ones without `--force`) |
+| `hive notes [dir]` | Open the markdown/Obsidian notes TUI |
+| `hive context search\|get\|list\|add\|path` | Query or append to the space's vault (`$HIVE_VAULT`) |
+| `hive setup` | Interactive wizard to configure roles and agents |
+| `hive roles [--json]` | List configured orchestration roles and defaults |
+| `hive task add\|list\|show\|update` | Manage tasks on the shared board |
+| `hive board` | Open the interactive task board |
+| `hive spawn` / `hive msg` / `hive wait` | Spawn role-based workers, message sessions, and wait for completion |
+| `hive mcp` | Run the stdio MCP server (9 tools, including `role_list`) |
 | `hive update` | Upgrade to the latest release |
 | `hive doctor` | Check config, daemon, terminal support and installed agents |
 | `hive daemon start\|stop\|status` | Manage `hived` (`stop` terminates all sessions) |
@@ -172,6 +205,7 @@ The leader is **Ctrl+Space**.
 | `Ctrl+Space c` / `t` | New terminal / new tab in this space |
 | `Ctrl+Space S` | New space (same as `+ new` in the sidebar) |
 | `Ctrl+Space L` | Open a layout: panes from `[layouts]` in a new tab |
+| `Ctrl+Space B` | Open the task board (`n` new, `a` assign role, `s` spawn, `m`/Enter advance) |
 | Right-click | Menu for a space, tab or agent: rename, split, close |
 | `Ctrl+Space C` | New terminal in its own worktree (own branch) |
 | `Ctrl+Space A` | New agent from a list |
@@ -257,6 +291,10 @@ Integration tests run real PTYs with `/bin/sh` scripts against private daemons. 
 6. ✅ Testing and distribution: CI, static Linux binaries, docs
 7. ✅ herdr parity: agent detection and status, split panes and tabs, global keys, mouse
 8. ✅ Ease of use: herdr-style spaces/agents sidebar, clickable everything, optional integrations, `hive update`
+9. ✅ macOS support: Apple silicon and Intel binaries, Homebrew tap
+10. ✅ Windows support: ConPTY, named pipes, x86_64 and Arm64 binaries
+11. ✅ Notes and context: `hive notes`, `hive context`, `HIVE_VAULT`
+12. ✅ Multi-agent orchestration: `hive setup`, `[roles.*]` + `--role auto`, `hive task`, `hive board`, `hive spawn`/`msg`/`wait`, `hive mcp`
 
 ## License
 [MIT](LICENSE)

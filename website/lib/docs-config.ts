@@ -145,4 +145,16 @@ export const configSections: ConfigSection[] = [
       { key: "panes[].label", type: "string", default: '""', meaning: "Session label; empty uses the agent's or command's name." },
     ],
   },
+  {
+    id: "roles",
+    table: "[roles.<name>]",
+    intro: "Named roles for multi-agent orchestration (hive board, hive spawn --role <name>, hive mcp). Built-in defaults exist for lead, planner, coder (worktree = true), and reviewer; run hive setup to configure interactively.",
+    options: [
+      { key: "roles.<name>.agent", type: "string", default: "general.default_agent", meaning: "Agent to run for this role (e.g. claude, codex, gemini)." },
+      { key: "roles.<name>.args", type: "string array", default: "[]", meaning: "Extra arguments passed to the agent when spawned in this role." },
+      { key: "roles.<name>.worktree", type: "bool", default: "false (true for coder)", meaning: "Launch the role in its own git worktree." },
+      { key: "roles.<name>.strengths", type: "string array", default: "[]", meaning: "Keywords describing what this role is best at, used by --role auto routing." },
+      { key: "roles.<name>.instructions", type: "string", default: '""', meaning: "Role prompt or instructions provided when spawning a worker." },
+    ],
+  },
 ];

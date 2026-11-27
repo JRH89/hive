@@ -67,6 +67,13 @@ export const docs: Doc[] = [
       "Hive's notes app for a markdown or Obsidian vault: a tree, rendered notes, links and search in a pane. And hive context, so agents can look up and record project knowledge.",
   },
   {
+    slug: "orchestration",
+    nav: "Orchestration & task board",
+    title: "Multi-agent orchestration and task board in Hive",
+    description:
+      "Configure agent roles with hive setup, auto-route tasks with --role auto, manage work on hive board, coordinate via hive spawn/msg/wait, and expose 9 tools over hive mcp.",
+  },
+  {
     slug: "daemon",
     nav: "Daemon, files and environment",
     title: "The Hive daemon, files and environment variables",

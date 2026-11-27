@@ -83,3 +83,10 @@ Full detail is in `AGENTS.md` §16. **Don't start a phase until the previous one
 - [x] Leader `N` opens it in a split; every integration splits by default
 - [x] `hive context search|get|list|add|path` for agents
 - [x] `HIVE_VAULT` in sessions
+
+## Phase 12 — Multi-Agent Orchestration (done)
+- [x] `[roles.*]` in `config.toml` (`agent`, `args`, `worktree`, `strengths`, `instructions`) with built-in defaults for `lead`, `planner`, `coder`, and `reviewer`
+- [x] `hive setup` interactive wizard
+- [x] `hive roles [--json]` and `--role auto` routing
+- [x] `hive task add|list|show|update` and `hive board` (`Ctrl+Space B` inside Hive, with `a` assign role, `s` spawn, `n` new, `m`/Enter advance)
+- [x] `hive spawn`, `hive msg`, `hive wait`, and `hive mcp` stdio server (9 tools including `role_list`)

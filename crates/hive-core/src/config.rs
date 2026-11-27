@@ -22,6 +22,24 @@ pub struct Config {
     pub agents: BTreeMap<String, AgentDef>,
     /// Pane arrangements opened together in a new tab (`Ctrl+Space L`).
     pub layouts: BTreeMap<String, Layout>,
+    /// Multi-agent orchestration roles (`[roles.<name>]`).
+    pub roles: BTreeMap<String, RoleConfig>,
+}
+
+/// `[roles.<name>]`: a named agent role or model profile for multi-agent orchestration.
+#[derive(Debug, Clone, Deserialize, serde::Serialize, Default, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct RoleConfig {
+    /// Agent name from the catalog or `[agents.*]`.
+    pub agent: String,
+    /// Extra arguments passed to the agent when spawned under this role.
+    pub args: Vec<String>,
+    /// Whether `hive spawn --role <name>` isolates the session in a new git worktree by default.
+    pub worktree: bool,
+    /// Inline role instructions or path to a markdown instructions file.
+    pub instructions: Option<String>,
+    /// Routing hints describing what this role/model is good at (e.g. `["frontend", "ui"]`).
+    pub strengths: Vec<String>,
 }
 
 /// `[layouts.<name>]`: panes opened together in a new tab of the current
@@ -576,6 +594,116 @@ impl Config {
         toml::from_str(text)
     }
 
+    pub fn role(&self, name: &str) -> Option<RoleConfig> {
+        if let Some(r) = self.roles.get(name) {
+            return Some(r.clone());
+        }
+        let default_agent = self.general.default_agent.clone();
+        match name {
+            "lead" => Some(RoleConfig {
+                agent: default_agent,
+                args: Vec::new(),
+                worktree: false,
+                instructions: Some(
+                    "Break goals into tasks on the Hive board and delegate to specialist roles."
+                        .into(),
+                ),
+                strengths: vec![
+                    "planning".into(),
+                    "orchestration".into(),
+                    "architecture".into(),
+                ],
+            }),
+            "planner" => Some(RoleConfig {
+                agent: default_agent,
+                args: Vec::new(),
+                worktree: false,
+                instructions: Some(
+                    "Design a clear implementation plan and record it on the task.".into(),
+                ),
+                strengths: vec!["planning".into(), "design".into(), "spec".into()],
+            }),
+            "coder" => Some(RoleConfig {
+                agent: default_agent,
+                args: Vec::new(),
+                worktree: true,
+                instructions: Some(
+                    "Implement the assigned task, run tests, and report back.".into(),
+                ),
+                strengths: vec![
+                    "code".into(),
+                    "implement".into(),
+                    "fix".into(),
+                    "backend".into(),
+                    "frontend".into(),
+                ],
+            }),
+            "reviewer" => Some(RoleConfig {
+                agent: default_agent,
+                args: Vec::new(),
+                worktree: false,
+                instructions: Some(
+                    "Review the task branch diff for bugs, edge cases, and style.".into(),
+                ),
+                strengths: vec!["review".into(), "audit".into(), "pr".into(), "diff".into()],
+            }),
+            _ => None,
+        }
+    }
+
+    /// All available roles: user-defined `[roles.*]` if any, otherwise the 4 built-in defaults.
+    pub fn all_roles(&self) -> BTreeMap<String, RoleConfig> {
+        if !self.roles.is_empty() {
+            return self.roles.clone();
+        }
+        let mut map = BTreeMap::new();
+        for name in ["lead", "planner", "coder", "reviewer"] {
+            if let Some(r) = self.role(name) {
+                map.insert(name.to_string(), r);
+            }
+        }
+        map
+    }
+
+    /// Auto-mode router: picks the best-matching role from `all_roles()` based
+    /// on `strengths` and role name matches against `task_text`.
+    pub fn pick_role(&self, task_text: &str) -> (String, RoleConfig) {
+        let roles = self.all_roles();
+        let hay = task_text.to_ascii_lowercase();
+        let mut best: Option<(usize, String, RoleConfig)> = None;
+        for (name, cfg) in &roles {
+            let mut score = 0usize;
+            if hay.contains(&name.to_ascii_lowercase()) {
+                score += 2;
+            }
+            for s in &cfg.strengths {
+                if !s.is_empty() && hay.contains(&s.to_ascii_lowercase()) {
+                    score += 3;
+                }
+            }
+            if best.as_ref().is_none_or(|(b, _, _)| score > *b) {
+                best = Some((score, name.clone(), cfg.clone()));
+            }
+        }
+        if let Some((score, name, cfg)) = best
+            && score > 0
+        {
+            return (name, cfg);
+        }
+        // For broad/open-ended goals that don't match a specific specialist,
+        // route to `lead` (the orchestrator) first so it can plan & delegate.
+        if let Some(lead) = roles.get("lead") {
+            return ("lead".to_string(), lead.clone());
+        }
+        if let Some(coder) = roles.get("coder") {
+            return ("coder".to_string(), coder.clone());
+        }
+        roles
+            .into_iter()
+            .next()
+            .expect("all_roles always has at least one role")
+    }
+
     /// Built-in agents overlaid with the user's `[agents.*]` tables.
     /// Every launchable agent: the known catalog (see `hive-agents`), the
     /// user's shell, and `[agents.*]`, which override built-ins of the same
@@ -864,5 +992,36 @@ panes = [{}, { run = ["npm", "run", "dev"], split = "down" }, { agent = "claude"
         assert_eq!(panes[1].run, ["npm", "run", "dev"]);
         assert_eq!(panes[2].split, SplitDir::Right);
         assert!(Config::parse("[layouts.x]\npanes = [{ split = \"left\" }]").is_err());
+    }
+
+    #[test]
+    fn roles_parse_from_toml() {
+        assert!(Config::parse("").unwrap().roles.is_empty());
+        let c = Config::parse(
+            r#"
+[roles.coder]
+agent = "codex"
+args = ["--full-auto"]
+worktree = true
+instructions = "Implement the assigned task and run tests."
+
+[roles.reviewer]
+agent = "gemini"
+"#,
+        )
+        .unwrap();
+        let coder = c.role("coder").expect("coder role");
+        assert_eq!(coder.agent, "codex");
+        assert_eq!(coder.args, ["--full-auto"]);
+        assert!(coder.worktree);
+        assert_eq!(
+            coder.instructions.as_deref(),
+            Some("Implement the assigned task and run tests.")
+        );
+        let reviewer = c.role("reviewer").expect("reviewer role");
+        assert_eq!(reviewer.agent, "gemini");
+        assert!(!reviewer.worktree);
+        assert!(reviewer.instructions.is_none());
+        assert!(c.role("nonexistent").is_none());
     }
 }

@@ -180,6 +180,35 @@ env = { AIDER_AUTO_COMMITS = "false" }
 args = ["--model", "opus"]`,
   },
   {
+    id: "notes-and-context",
+    name: "Notes and agent context",
+    summary: "A plain-markdown notes app beside your agents, plus hive context so agents can search and record project knowledge.",
+    body: [
+      "Open your repository's markdown or Obsidian vault in a split with Ctrl+Space N (or hive notes): a note tree, rendered markdown, wikilinks, backlinks, full-text search, new notes, and today's daily note. Files stay plain markdown with no daemon state.",
+      "Sessions in a space with a vault automatically receive HIVE_VAULT. Agents and scripts query it with hive context search, get, list, and add (append-only, dated entries).",
+    ],
+    code: `hive notes                                   # open the vault TUI
+hive context search "worktree cleanup"       # ranked full-text search
+hive context get Architecture                # note + links + backlinks
+hive context add Decisions "1h JWT expiry"   # append dated entry`,
+    more: { label: "Notes and agent context", href: "/docs/notes/" },
+  },
+  {
+    id: "orchestration",
+    name: "Multi-agent orchestration and task board",
+    summary: "Role-based workers, auto-routing, a Kanban task board, and a 9-tool local MCP server.",
+    body: [
+      "Run hive setup to detect installed agents and configure [roles.*] in config.toml (built-in defaults cover lead, planner, coder in an isolated worktree, and reviewer). Use --role auto to match tasks against each role's strengths.",
+      "Manage work from the CLI or the interactive board (hive board or Ctrl+Space B), coordinate workers with hive spawn, msg, and wait, or expose all 9 orchestration tools to any MCP-compatible agent via hive mcp.",
+    ],
+    code: `hive setup                                   # configure roles & agents
+hive task add "Fix auth race" --role auto    # auto-route by strengths
+hive spawn --role coder --task 1 -w          # spawn in a worktree
+hive board                                   # interactive Kanban board
+hive mcp                                     # local stdio MCP (9 tools)`,
+    more: { label: "Orchestration & task board", href: "/docs/orchestration/" },
+  },
+  {
     id: "platforms",
     name: "Linux, macOS and Windows",
     summary: "Static binaries for five platforms, a one-line installer and hive update.",

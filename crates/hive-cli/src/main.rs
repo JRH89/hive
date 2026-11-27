@@ -1,6 +1,9 @@
 //! `hive` — the command-line entry point and TUI launcher.
 
 mod context;
+mod mcp;
+mod setup;
+mod tasks;
 
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -190,6 +193,69 @@ enum Command {
         #[command(subcommand)]
         action: DaemonAction,
     },
+    /// Manage the workspace task board for multi-agent orchestration
+    Task {
+        /// Task directory (defaults to `<workspace>/.hive/tasks`)
+        #[arg(long)]
+        dir: Option<PathBuf>,
+        #[command(subcommand)]
+        action: tasks::TaskAction,
+    },
+    /// Spawn a specialist subagent using a configured `[roles.<name>]`
+    Spawn {
+        /// Role name from `[roles.*]` in config.toml
+        #[arg(short, long)]
+        role: String,
+        /// Optional task id to link and move to in_progress
+        #[arg(short, long)]
+        task: Option<u32>,
+        /// Run in a new git worktree (overrides role default if set)
+        #[arg(short, long)]
+        worktree: bool,
+        /// Branch name for the worktree
+        #[arg(short, long)]
+        branch: Option<String>,
+        /// Working directory
+        #[arg(short = 'C', long)]
+        cwd: Option<PathBuf>,
+        /// Initial prompt delivered to the spawned agent
+        #[arg(short, long)]
+        prompt: Option<String>,
+        /// Task directory (defaults to `<workspace>/.hive/tasks`)
+        #[arg(long)]
+        tasks_dir: Option<PathBuf>,
+        /// Spawn even if the task already has a running session
+        #[arg(long)]
+        force: bool,
+    },
+    /// Send a message directly to a running session
+    Msg { session: SessionId, message: String },
+    /// Wait until a session finishes or reports blocked
+    Wait {
+        session: SessionId,
+        /// Optional timeout in seconds
+        #[arg(short, long)]
+        timeout: Option<u64>,
+    },
+    /// Open the interactive Kanban task board TUI
+    Board {
+        /// Task directory (defaults to `<workspace>/.hive/tasks`)
+        dir: Option<PathBuf>,
+    },
+    /// Run a local stdio MCP server exposing Hive's task board and delegation tools
+    Mcp {
+        /// Task directory (defaults to `<workspace>/.hive/tasks`)
+        #[arg(long)]
+        dir: Option<PathBuf>,
+    },
+    /// List configured orchestration roles/models and their routing strengths
+    Roles {
+        /// Emit JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Interactive wizard to detect installed agents and configure `[roles.*]`
+    Setup,
 }
 
 #[derive(Subcommand)]
@@ -470,6 +536,9 @@ async fn run(cli: Cli, paths: Paths) -> anyhow::Result<()> {
         // Reads files only: no daemon, no config.
         return context::run(action, vault);
     }
+    if let Some(Command::Task { dir, action }) = cli.command {
+        return tasks::run_task(action, dir);
+    }
     let connect = |auto_start: bool| {
         let paths = paths.clone();
         async move { Client::connect_or_start(&paths, "hive", auto_start).await }
@@ -532,6 +601,80 @@ async fn run(cli: Cli, paths: Paths) -> anyhow::Result<()> {
             }
         }
         Some(Command::Notes { dir }) => hive_tui::notes::run(dir, &config),
+        Some(Command::Board { dir }) => hive_tui::board::run(dir, &config).await,
+        Some(Command::Mcp { dir }) => mcp::run(&paths, &config, dir).await,
+        Some(Command::Setup) => setup::run(&paths.config_file, &config),
+        Some(Command::Roles { json }) => {
+            let roles = config.all_roles();
+            if json {
+                println!("{}", serde_json::to_string_pretty(&roles)?);
+            } else {
+                for (name, r) in &roles {
+                    let wt = if r.worktree { "worktree" } else { "shared" };
+                    let strengths = if r.strengths.is_empty() {
+                        "-".to_string()
+                    } else {
+                        r.strengths.join(", ")
+                    };
+                    println!(
+                        "{:<12} agent:{:<10} {:<8} strengths: {}",
+                        name, r.agent, wt, strengths
+                    );
+                }
+            }
+            Ok(())
+        }
+        Some(Command::Spawn {
+            role,
+            task,
+            worktree,
+            branch,
+            cwd,
+            prompt,
+            tasks_dir,
+            force,
+        }) => {
+            let mut client = connect(auto).await?;
+            let info = tasks::run_spawn(
+                &mut client,
+                &config,
+                tasks::SpawnArgs {
+                    role,
+                    task,
+                    worktree,
+                    branch,
+                    cwd,
+                    prompt,
+                    size: terminal_size(),
+                    force,
+                },
+                tasks_dir,
+            )
+            .await?;
+            println!(
+                "spawned session {} ({}) role={} in {}",
+                info.id,
+                info.agent,
+                info.role.as_deref().unwrap_or("-"),
+                info.cwd
+            );
+            Ok(())
+        }
+        Some(Command::Msg { session, message }) => {
+            let mut client = connect(false).await.or_else(not_running)?;
+            tasks::run_msg(&mut client, session, message).await?;
+            println!("sent message to session {session}");
+            Ok(())
+        }
+        Some(Command::Wait { session, timeout }) => {
+            let mut client = connect(false).await.or_else(not_running)?;
+            let info = tasks::run_wait(&mut client, session, timeout).await?;
+            println!(
+                "session {} ({}) state={:?}",
+                info.id, info.agent, info.state
+            );
+            Ok(())
+        }
         Some(Command::List) => {
             let mut client = connect(false).await.or_else(not_running)?;
             let sessions = list(&mut client).await?;
@@ -620,7 +763,8 @@ async fn run(cli: Cli, paths: Paths) -> anyhow::Result<()> {
             Command::Doctor
             | Command::Update { .. }
             | Command::Daemon { .. }
-            | Command::Context { .. },
+            | Command::Context { .. }
+            | Command::Task { .. },
         ) => {
             unreachable!("handled before loading the config")
         }

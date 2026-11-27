@@ -130,6 +130,9 @@ fn sh(script: &str, size: TermSize) -> CreateSession {
         workspace: None,
         worktree: None,
         new_space: false,
+        parent_session: None,
+        role: None,
+        task_id: None,
     }
 }
 

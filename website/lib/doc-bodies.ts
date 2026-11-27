@@ -9,6 +9,7 @@ import Cli from "@/content/docs/cli";
 import AgentStatus from "@/content/docs/agent-status";
 import Worktrees from "@/content/docs/worktrees";
 import Notes from "@/content/docs/notes";
+import Orchestration from "@/content/docs/orchestration";
 import Daemon from "@/content/docs/daemon";
 import Troubleshooting from "@/content/docs/troubleshooting";
 
@@ -21,6 +22,7 @@ export const docBodies: Record<string, ComponentType> = {
   "agent-status": AgentStatus,
   worktrees: Worktrees,
   notes: Notes,
+  orchestration: Orchestration,
   daemon: Daemon,
   troubleshooting: Troubleshooting,
 };

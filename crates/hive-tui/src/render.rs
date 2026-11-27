@@ -356,11 +356,22 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
 
 /// A session's name: its label, except that an unrenamed terminal running
 /// an agent is called by the agent, like herdr (`claude`, not `shell`).
+/// Subagents spawned with a `parent_session` are visually indented, and
+/// sessions with an orchestration `role` show their role badge.
 fn display_name(s: &SessionInfo) -> String {
-    match s.presence.as_ref().filter(|_| s.state.is_alive()) {
+    let mut name = match s.presence.as_ref().filter(|_| s.state.is_alive()) {
         Some(p) if s.agent == "shell" && s.label == s.agent => p.agent.clone(),
         _ => s.label.clone(),
+    };
+    if let Some(ref role) = s.role
+        && !name.contains(role.as_str())
+    {
+        name = format!("{name} [{role}]");
     }
+    if s.parent_session.is_some() {
+        name = format!("└ {name}");
+    }
+    name
 }
 
 /// Truncates to `max` characters, ending in an ellipsis when cut.
@@ -1817,6 +1828,9 @@ mod tests {
             branch: None,
             worktree: None,
             presence: None,
+            parent_session: None,
+            role: None,
+            task_id: None,
         }
     }
 
@@ -1857,6 +1871,9 @@ mod tests {
             branch: None,
             worktree: None,
             presence: None,
+            parent_session: None,
+            role: None,
+            task_id: None,
         };
         s.worktree = None;
         app.on_server(ServerMessage::SessionList(vec![s]));

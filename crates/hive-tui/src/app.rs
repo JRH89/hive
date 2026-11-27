@@ -37,6 +37,7 @@ pub const MIN_COLS_FOR_SIDEBAR: u16 = 60;
 
 /// What the frontend does once connected.
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum Start {
     /// Attach to the most recent live session, or show the empty state.
     Auto,
@@ -1770,6 +1771,7 @@ impl App {
                     ),
                 );
             }
+            ServerMessage::MessageDelivered { .. } => {}
         }
         out.extend(self.adopt_sessions());
         self.fix_cursor();
@@ -2383,6 +2385,7 @@ impl App {
                 return self.open_notes();
             }
             Command::Notes => {}
+            Command::Board => return self.open_board(),
             Command::Review if self.config.integrations.review.enabled => {
                 return self.open_review(false);
             }
@@ -3188,6 +3191,9 @@ impl App {
             workspace: Some(info.workspace).filter(|w| self.workspaces.contains_key(w)),
             worktree: None,
             new_space: false,
+            parent_session: info.parent_session,
+            role: info.role.clone(),
+            task_id: info.task_id.clone(),
         })
     }
 
@@ -3707,6 +3713,27 @@ impl App {
         let label = format!("notes · {}", hive_workspace::default_name(&vault));
         let open_in = obsidian.open_in;
         self.open_tool(NOTES_AGENT, &def, label, vault, workspace, open_in)
+    }
+
+    /// Opens `hive board` in a split pane for the current workspace.
+    fn open_board(&mut self) -> Vec<ClientMessage> {
+        let Some((_cwd, workspace, root)) = self.context() else {
+            return Vec::new();
+        };
+        let def = hive_core::config::AgentDef {
+            command: "hive".into(),
+            args: vec!["board".into()],
+            env: Default::default(),
+        };
+        let label = format!("board · {}", self.workspace_name(workspace));
+        self.open_tool(
+            "board",
+            &def,
+            label,
+            root,
+            workspace,
+            hive_core::config::OpenIn::Split,
+        )
     }
 
     /// Review (`[integrations.review]`) or pull request checks
@@ -4297,6 +4324,9 @@ mod tests {
             branch: None,
             worktree: None,
             presence: None,
+            parent_session: None,
+            role: None,
+            task_id: None,
         }
     }
 

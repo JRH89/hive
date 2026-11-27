@@ -123,6 +123,9 @@ impl StoredSession {
             branch: None,
             worktree: self.worktree,
             presence,
+            parent_session: None,
+            role: None,
+            task_id: None,
         }
     }
 }

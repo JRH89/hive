@@ -1,6 +1,6 @@
 # Hive user guide
 
-Hive runs several interactive AI coding agents (Claude Code, Codex, Gemini CLI, OpenCode, a shell, or anything you configure) in one terminal, and keeps them running when you close it.
+Hive runs 27+ interactive AI coding agents (Claude Code, Codex, Gemini CLI, OpenCode, Copilot, Cursor Agent, a shell, or anything you configure) in one terminal, and keeps them running when you close it. Run `hive agents` to see which ones are installed on your `PATH`.
 
 This guide is also on the website, split into pages with full references: [keys](https://hive.codefrontlabs.com/docs/keys/), [configuration](https://hive.codefrontlabs.com/docs/configuration/) (every option and default), [command line](https://hive.codefrontlabs.com/docs/cli/) and [more](https://hive.codefrontlabs.com/docs/).
 
@@ -109,6 +109,7 @@ Everything you type goes to the agent, except the **leader** key (`Ctrl+Space`) 
 | `t` | New tab with a terminal in this space (or click `+` in the tab bar) |
 | `S` | New space: a terminal in your home folder, in a space of its own (or click **+ new** in the sidebar) |
 | `L` | Open a layout (only with `[layouts]` defined, see below) |
+| `B` | Open the interactive task board (`n` new, `a` assign role, `s` spawn agent, `m`/Enter advance) |
 | `I` | Integrations: a checklist to turn each one on or off (saved to `config.toml`) |
 | `]` / `[` | Next / previous tab |
 | `w` | Workspaces |
@@ -265,6 +266,50 @@ Safety rules:
 
 `hive worktree list` shows each worktree's state, and `hive worktree rm <path>` removes one.
 
+## Multi-agent orchestration & task board
+
+Coordinate multiple agents across roles and a shared markdown task board without leaving the terminal.
+
+### Roles and setup
+
+Run `hive setup` to detect installed agents and interactively configure `[roles.*]` in `config.toml`. Built-in defaults cover `lead`, `planner`, `coder` (with `worktree = true`), and `reviewer`:
+
+```toml
+[roles.coder]
+agent = "codex"
+args = []
+worktree = true
+strengths = ["implementation", "refactoring", "tests", "bugfix"]
+instructions = "Implement the assigned task on your worktree branch and run tests."
+```
+
+Inspect configured roles with `hive roles` (or `hive roles --json`). Passing `--role auto` to `hive task add` or `hive spawn` matches the task title/prompt against each role's `strengths` to pick the best fit.
+
+### Task board
+
+Manage tasks from the CLI or open the interactive Kanban board with `hive board` (or `Ctrl+Space B` inside Hive):
+
+```bash
+hive task add "Add rate limiting" --role auto --body "Per-IP sliding window"
+hive task list --ready
+hive task show 1
+hive task update 1 --status in_progress --note "Assigned to coder"
+hive board
+```
+
+Inside `hive board`: `n` creates a task, `a` assigns a role, `s` spawns an agent on the selected task, and `m` or `Enter` advances its status.
+
+### Spawning, messaging, and MCP
+
+```bash
+hive spawn --role coder --task 1 -w         # launch a specialist in an isolated worktree
+hive msg 4 "Check edge cases for IPv6"      # send a message to a running session
+hive wait 4 --timeout 300                   # wait until session 4 finishes or reports blocked
+hive mcp                                    # run the local stdio MCP server (9 tools)
+```
+
+`hive mcp` exposes 9 orchestration tools over stdio to any MCP-compatible agent: `task_list`, `task_show`, `task_add`, `task_update`, `agent_spawn`, `agent_message`, `agent_wait`, `session_list`, and `role_list`.
+
 ## Configuration
 
 The config file is `~/.config/hive/config.toml`, or `$HIVE_CONFIG`. Every key is optional. [`examples/config.toml`](../examples/config.toml) documents them all. Run `hive doctor` after editing: it validates the file without opening the interface.
@@ -328,6 +373,14 @@ Nerd Fonts are never required. Individual colours can be overridden with `#rrggb
 | `hive agents [-a]` | Agents Hive can launch, and which are installed (`-a`: all known) |
 | `hive workspace list\|add PATH [-n NAME]\|rename W NAME\|rm W` | Manage workspaces |
 | `hive worktree list [-W W]\|rm PATH [--force] [-y]` | List or remove worktrees |
+| `hive notes [DIR]` | Open the markdown/Obsidian notes app on the space's vault |
+| `hive context search\|get\|list\|add\|path` | Search, read, list, or append to the space's vault (`$HIVE_VAULT`) |
+| `hive setup` | Interactive wizard to detect installed agents and configure `[roles.*]` |
+| `hive roles [--json]` | List configured orchestration roles and routing strengths |
+| `hive task add\|list\|show\|update` | Manage tasks on the shared workspace board |
+| `hive board [DIR]` | Open the interactive Kanban task board |
+| `hive spawn` / `hive msg` / `hive wait` | Spawn role-based workers, message sessions, and wait for completion |
+| `hive mcp [--dir DIR]` | Run the local stdio MCP server (9 orchestration tools, including `role_list`) |
 | `hive report-agent` / `hive release-agent` | Set or clear an agent's status (see [Agent status](#agent-status)) |
 | `hive doctor` | Check the installation; changes nothing |
 | `hive update [--tag vX.Y.Z]` | Install a release over this one (Linux, macOS) |

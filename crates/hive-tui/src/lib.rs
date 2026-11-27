@@ -2,6 +2,7 @@
 //! so exiting or crashing here leaves every agent running.
 
 mod app;
+pub mod board;
 mod keymap;
 mod keys;
 mod layout;

@@ -137,7 +137,7 @@ jump_modifier = "alt"
 # new_tab, next_tab, prev_tab, close_tab, rename_session, kill_session,
 # take_control, detach, help, integrations, restore_sessions, move_space_up,
 # move_space_down, sidebar_tree, settings,
-# layout (with [layouts]),
+# layout (with [layouts]), board,
 # notes, review, pull_request, run_task, usage (with their [integrations.*])
 palette = [":", "P"]
 new_session = "c"
@@ -163,3 +163,22 @@ args = ["--dark-mode"]
 command = "claude"
 args = ["--model", "opus"]
 env = { CLAUDE_CODE_USE_BEDROCK = "0" }
+
+# Multi-agent orchestration roles (`hive board`, `hive spawn --role <name>`, `hive mcp`).
+# Built-in defaults exist for `lead`, `planner`, `coder` (worktree = true), and `reviewer`
+# using `[general] default_agent`. Uncomment and customize to assign different providers:
+#
+# [roles.lead]
+# agent = "claude"
+# worktree = false
+# instructions = "Break goals into tasks on the Hive board and delegate."
+#
+# [roles.coder]
+# agent = "codex"
+# worktree = true
+# instructions = "Implement the assigned task, run tests, and report back."
+#
+# [roles.reviewer]
+# agent = "gemini"
+# worktree = false
+# instructions = "Review the task branch diff for bugs, edge cases, and style."

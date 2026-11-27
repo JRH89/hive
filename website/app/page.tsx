@@ -80,7 +80,7 @@ const features = [
 const faqs = [
   [
     "Is Hive ready to use?",
-    "Yes, on Linux, macOS and Windows. Hive is young but complete: terminals and agents in split panes and tabs, live agent status, detach and reattach, automatic reconnection, spaces that follow your cd, Git worktrees, a command palette, themes and configurable keys. It is tested with real terminals in CI on all three platforms. Version 0.5.14 ships prebuilt binaries and a one-line installer; hive update upgrades in place.",
+    "Yes, on Linux, macOS and Windows. Hive is young but complete: terminals and agents in split panes and tabs, live agent status, detach and reattach, automatic reconnection, spaces that follow your cd, Git worktrees, a command palette, themes and configurable keys. It is tested with real terminals in CI on all three platforms. Version 0.6.0 ships prebuilt binaries and a one-line installer; hive update upgrades in place.",
   ],
   [
     "Which agents can I run?",
@@ -137,7 +137,7 @@ const structuredData = [
     applicationCategory: "DeveloperApplication",
     applicationSubCategory: "Terminal multiplexer",
     operatingSystem: "Linux, macOS, Windows",
-    softwareVersion: "0.5.14",
+    softwareVersion: "0.6.0",
     downloadUrl: `${repoUrl}/releases/latest`,
     installUrl: `${siteUrl}install/`,
     license: "https://opensource.org/licenses/MIT",
@@ -148,11 +148,13 @@ const structuredData = [
     screenshot: `${siteUrl}screenshots/main.png`,
     subjectOf: { "@id": `${siteUrl}#demo` },
     featureList: [
-      "Live status for 20+ AI coding agents: working, needs input, done",
+      "Live status for 27+ AI coding agents: working, needs input, done",
       "Sessions owned by a background daemon that survive closing the terminal",
       "Spaces per repository that follow your cd",
       "One-key git worktree terminals",
       "Split panes, tabs, layouts and a command palette",
+      "Built-in markdown/Obsidian notes app (hive notes) and agent context CLI (hive context)",
+      "Multi-agent orchestration: roles, auto-routing, Kanban task board (hive board), and 9-tool MCP server (hive mcp)",
       "Optional integrations: Obsidian, lazygit review, GitHub checks, tasks, notifications, git status, usage",
     ],
     author: { "@type": "Person", "@id": `${siteUrl}#author`, name: "Jared Hooker", url: "https://github.com/jrh89" },
@@ -473,7 +475,7 @@ journal = true        # log agent activity to today's note`}</code>
               <h2 id="start-title">Your terminal. Your platform.</h2>
             </div>
             <span className="development-badge">
-              <span className="tiny-square" /> v0.5.14 RELEASED
+              <span className="tiny-square" /> v0.6.0 RELEASED
             </span>
           </div>
           <ReleaseInstall />
@@ -610,7 +612,7 @@ journal = true        # log agent activity to today's note`}</code>
             <article>
               <span className="roadmap-marker current" />
               <div>
-                <span className="roadmap-status available">RELEASED · v0.5.14</span>
+                <span className="roadmap-status available">RELEASED · v0.6.0</span>
                 <h3>Everywhere, terminal first</h3>
                 <p>
                   macOS and Windows binaries. New opens a terminal, spaces
@@ -618,6 +620,24 @@ journal = true        # log agent activity to today's note`}</code>
                   right-click menus, layouts and seven integrations.{" "}
                   <a className="text-link" href="/changelog/">
                     Full changelog <Arrow />
+                  </a>
+                </p>
+              </div>
+            </article>
+            <article>
+              <span className="roadmap-marker current" />
+              <div>
+                <span className="roadmap-status available">WORKING TODAY</span>
+                <h3>Notes, context &amp; multi-agent orchestration</h3>
+                <p>
+                  Built-in markdown/Obsidian notes (<code>hive notes</code>) and
+                  agent context retrieval (<code>hive context</code>), plus
+                  role-based orchestration (<code>hive setup</code>,{" "}
+                  <code>--role auto</code>), an interactive task board (
+                  <code>hive board</code> / <code>Ctrl+Space B</code>), and a
+                  9-tool local MCP server (<code>hive mcp</code>).{" "}
+                  <a className="text-link" href="/docs/orchestration/">
+                    Orchestration docs <Arrow />
                   </a>
                 </p>
               </div>

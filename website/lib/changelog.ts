@@ -10,6 +10,18 @@ export type Release = {
 
 export const releases: Release[] = [
   {
+    version: "0.6.0",
+    date: "2026-11-26T16:15:00-08:00",
+    title: "Multi-agent orchestration & task board",
+    changes: [
+      "Orchestration roles ([roles.*]) with provider/model args, worktree defaults, strengths-based routing hints, built-in defaults (lead, planner, coder, reviewer), and an interactive `hive setup` wizard.",
+      "Plain-markdown workspace task board (`hive-tasks`, `hive task add|list|show|update`) with dependency resolution and circular-dependency detection.",
+      "Interactive `hive board` TUI (`Ctrl+Space B`) with full Hive theme, mouse support, centered modals, live `hived` session sync, Live Agents swarm tree, Auto-Pipeline (worker -> auto-spawn reviewer -> done), and one-key `gh pr create`.",
+      "Delegation CLI (`hive spawn` with `--role auto`, duplicate-spawn guard, native initial prompt flags for claude/codex/gemini/antigravity/opencode/aider, `hive msg`, `hive wait`, `hive roles`) and `hive mcp` stdio server (9 tools).",
+      "Protocol v8 (`parent_session`, `role`, `task_id`, `SendMessage`) and sidebar subagent nesting.",
+    ],
+  },
+  {
     version: "0.5.14",
     date: "2026-11-19T23:15:00-08:00",
     title: "Packaging release",

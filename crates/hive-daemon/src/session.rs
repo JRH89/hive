@@ -163,6 +163,9 @@ pub(crate) struct Session {
     command: Vec<String>,
     created_at: u64,
     pid: Option<u32>,
+    parent_session: Option<SessionId>,
+    role: Option<String>,
+    task_id: Option<String>,
     meta: Mutex<Meta>,
     term: Mutex<Term>,
     detect: Mutex<Detector>,
@@ -231,6 +234,15 @@ impl Session {
         cmd.env("COLORTERM", "truecolor");
         cmd.env("HIVE", "1");
         cmd.env("HIVE_SESSION_ID", id.to_string());
+        if let Some(parent) = req.parent_session {
+            cmd.env("HIVE_PARENT_SESSION", parent.to_string());
+        }
+        if let Some(ref role) = req.role {
+            cmd.env("HIVE_ROLE", role);
+        }
+        if let Some(ref task_id) = req.task_id {
+            cmd.env("HIVE_TASK_ID", task_id);
+        }
         if let Some(bin) = hive_bin() {
             cmd.env("HIVE_BIN_PATH", bin);
         }
@@ -264,6 +276,9 @@ impl Session {
                 .map(|d| d.as_secs())
                 .unwrap_or(0),
             pid: child.process_id(),
+            parent_session: req.parent_session,
+            role: req.role,
+            task_id: req.task_id,
             meta: Mutex::new(Meta {
                 label: req.label,
                 branch: placement.repo.as_ref().and_then(|r| r.branch()),
@@ -397,7 +412,29 @@ impl Session {
                 .filter(|r| r.is_linked_worktree())
                 .map(|r| r.worktree_root.display().to_string()),
             presence: meta.presence.clone().filter(|_| meta.state.is_alive()),
+            parent_session: self.parent_session,
+            role: self.role.clone(),
+            task_id: self.task_id.clone(),
         }
+    }
+
+    pub async fn send_message(&self, body: String) -> anyhow::Result<()> {
+        if !lock(&self.meta).state.is_alive() {
+            bail!("session {} is not running", self.id);
+        }
+        let trimmed = body.trim_end_matches(['\r', '\n']);
+        if !trimmed.is_empty() {
+            self.input
+                .send(trimmed.as_bytes().to_vec())
+                .await
+                .map_err(|_| anyhow::anyhow!("session {} input closed", self.id))?;
+            // Let TUI input boxes finish processing the pasted text before pressing Enter.
+            tokio::time::sleep(Duration::from_millis(120)).await;
+        }
+        self.input
+            .send(b"\r".to_vec())
+            .await
+            .map_err(|_| anyhow::anyhow!("session {} input closed", self.id))
     }
 
     /// The PTY's foreground process group. Windows has none, so the

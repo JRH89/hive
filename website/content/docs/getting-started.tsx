@@ -125,6 +125,11 @@ hive`}</code>
           <kbd>Ctrl+Space</kbd> <kbd>I</kbd>. See <a href="/integrations/">integrations</a>.
         </li>
         <li>
+          Browse project notes and share context with agents in{" "}
+          <a href="/docs/notes/">notes and context</a>, or coordinate specialist agents with{" "}
+          <a href="/docs/orchestration/">orchestration &amp; task board</a>.
+        </li>
+        <li>
           Change the leader, theme or agents in <a href="/docs/configuration/">configuration</a>.
         </li>
         <li>

@@ -21,6 +21,8 @@ Source: https://github.com/jrh89/hive
   - [Command line](https://hive.codefrontlabs.com/docs/cli/): Every hive command and option: new, list, attach, kill, agents, workspace, worktree, report-agent, doctor, update and daemon, with examples.
   - [Agent status](https://hive.codefrontlabs.com/docs/agent-status/): How Hive knows an agent is working, needs input or is done, which agents it recognises, the bell and notifications, and how scripts report their own status.
   - [Workspaces and worktrees](https://hive.codefrontlabs.com/docs/worktrees/): How Hive groups sessions into spaces by repository, and gives an agent its own git worktree and branch, with the rules that keep your work safe.
+  - [Notes and context](https://hive.codefrontlabs.com/docs/notes/): Hive's notes app for a markdown or Obsidian vault (hive notes, Ctrl+Space N) and hive context for agents (HIVE_VAULT).
+  - [Orchestration & task board](https://hive.codefrontlabs.com/docs/orchestration/): Multi-agent orchestration with hive setup, [roles.*] and --role auto, hive task, hive board (Ctrl+Space B), hive spawn/msg/wait, and hive mcp (9 tools).
   - [Daemon, files and environment](https://hive.codefrontlabs.com/docs/daemon/): What hived does, what survives a crash or reboot, where Hive keeps its files, the environment variables it reads and sets, upgrading and uninstalling.
   - [Troubleshooting](https://hive.codefrontlabs.com/docs/troubleshooting/): Fixes for common Hive problems: keys that do nothing, agents not found, protocol mismatches, odd glyphs or colours, lost sessions, and how to report a bug.
 

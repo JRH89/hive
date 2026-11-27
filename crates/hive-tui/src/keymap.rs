@@ -58,10 +58,11 @@ pub enum Command {
     MoveSpaceDown,
     SidebarTree,
     Settings,
+    Board,
 }
 
 impl Command {
-    pub const ALL: [Command; 46] = [
+    pub const ALL: [Command; 47] = [
         Command::Palette,
         Command::SearchSessions,
         Command::NewSession,
@@ -92,6 +93,7 @@ impl Command {
         Command::PrevTab,
         Command::CloseTab,
         Command::Notes,
+        Command::Board,
         Command::Review,
         Command::PullRequest,
         Command::RunTask,
@@ -145,6 +147,7 @@ impl Command {
             Command::PrevTab => "prev_tab",
             Command::CloseTab => "close_tab",
             Command::Notes => "notes",
+            Command::Board => "board",
             Command::Review => "review",
             Command::PullRequest => "pull_request",
             Command::RunTask => "run_task",
@@ -197,6 +200,7 @@ impl Command {
             Command::PrevTab => "Previous tab",
             Command::CloseTab => "Close the tab (terminates its sessions)",
             Command::Notes => "Open the workspace's notes (Obsidian vault)",
+            Command::Board => "Open the workspace task board (hive board)",
             Command::Review => "Review changes in the session's directory",
             Command::PullRequest => "Pull request checks for the session's branch",
             Command::RunTask => "Run a project task beside the session",
@@ -250,6 +254,7 @@ impl Command {
             Command::PrevTab => &["["],
             Command::CloseTab => &[],
             Command::Notes => &["N"],
+            Command::Board => &["B"],
             Command::Review => &["G"],
             Command::PullRequest => &["H"],
             Command::RunTask => &["T"],

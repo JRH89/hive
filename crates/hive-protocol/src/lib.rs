@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Bumped on any incompatible change to the message types below.
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 
 /// Upper bound on a single frame. Protects both sides from unbounded
 /// allocations caused by a corrupt or hostile length prefix.
@@ -83,6 +83,15 @@ pub struct SessionInfo {
     /// The agent running in the session's foreground right now, if Hive
     /// recognises one. Not persisted.
     pub presence: Option<AgentPresence>,
+    /// Parent session if this session was spawned as a subagent.
+    #[serde(default)]
+    pub parent_session: Option<SessionId>,
+    /// Orchestration role name (e.g. `coder`, `reviewer`), if spawned via a role.
+    #[serde(default)]
+    pub role: Option<String>,
+    /// Linked task board id, if spawned for a task.
+    #[serde(default)]
+    pub task_id: Option<String>,
 }
 
 /// What an agent is doing, from screen rules or its own report.
@@ -169,6 +178,15 @@ pub struct CreateSession {
     /// Put the session in a new space of its own (ignores `workspace`). The
     /// space goes away once the session moves out (`cd`) or ends.
     pub new_space: bool,
+    /// Optional parent session if spawned by another agent.
+    #[serde(default)]
+    pub parent_session: Option<SessionId>,
+    /// Optional orchestration role name.
+    #[serde(default)]
+    pub role: Option<String>,
+    /// Optional linked task board id.
+    #[serde(default)]
+    pub task_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -250,6 +268,12 @@ pub enum ClientMessage {
         session: SessionId,
         agent: String,
     },
+    /// Deliver a message directly to another session's PTY input.
+    SendMessage {
+        session: SessionId,
+        from: Option<SessionId>,
+        body: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -314,6 +338,9 @@ pub enum ServerMessage {
     },
     WorktreeRemoved {
         path: String,
+    },
+    MessageDelivered {
+        session: SessionId,
     },
 }
 

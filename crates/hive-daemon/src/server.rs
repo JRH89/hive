@@ -251,6 +251,13 @@ impl Connection {
                     s.publish();
                 }
             }
+            ClientMessage::SendMessage { session, body, .. } => match self.daemon.get(session) {
+                Some(s) => match s.send_message(body).await {
+                    Ok(()) => self.send(ServerMessage::MessageDelivered { session }).await,
+                    Err(e) => self.error(format!("{e:#}")).await,
+                },
+                None => self.error(format!("session {session} not found")).await,
+            },
         }
     }
 

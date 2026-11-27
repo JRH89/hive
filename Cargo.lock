@@ -724,7 +724,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hive-agents"
-version = "0.5.14"
+version = "0.6.0"
 dependencies = [
  "regex",
  "serde",
@@ -733,7 +733,7 @@ dependencies = [
 
 [[package]]
 name = "hive-cli"
-version = "0.5.14"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -742,6 +742,7 @@ dependencies = [
  "hive-daemon",
  "hive-notes",
  "hive-protocol",
+ "hive-tasks",
  "hive-tui",
  "hive-workspace",
  "jiff",
@@ -757,7 +758,7 @@ dependencies = [
 
 [[package]]
 name = "hive-core"
-version = "0.5.14"
+version = "0.6.0"
 dependencies = [
  "dirs",
  "hive-agents",
@@ -773,7 +774,7 @@ dependencies = [
 
 [[package]]
 name = "hive-daemon"
-version = "0.5.14"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "hive-agents",
@@ -795,7 +796,7 @@ dependencies = [
 
 [[package]]
 name = "hive-notes"
-version = "0.5.14"
+version = "0.6.0"
 dependencies = [
  "hive-workspace",
  "tempfile",
@@ -803,7 +804,7 @@ dependencies = [
 
 [[package]]
 name = "hive-protocol"
-version = "0.5.14"
+version = "0.6.0"
 dependencies = [
  "postcard",
  "serde",
@@ -812,8 +813,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hive-tasks"
+version = "0.6.0"
+dependencies = [
+ "serde",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "hive-tui"
-version = "0.5.14"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "crossterm",
@@ -822,6 +832,7 @@ dependencies = [
  "hive-core",
  "hive-notes",
  "hive-protocol",
+ "hive-tasks",
  "hive-workspace",
  "jiff",
  "pulldown-cmark",
@@ -836,7 +847,7 @@ dependencies = [
 
 [[package]]
 name = "hive-workspace"
-version = "0.5.14"
+version = "0.6.0"
 dependencies = [
  "serde_json",
  "tempfile",

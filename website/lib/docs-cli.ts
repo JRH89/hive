@@ -143,4 +143,53 @@ hive new claude -- --model opus   # arguments after -- go to the agent`,
     usage: "hive daemon status",
     summary: "Show whether the daemon is running, with its version, pid and socket.",
   },
+  {
+    usage: "hive task add <TITLE> [--role ROLE] [--depends-on ID] [--body TEXT] [--json]",
+    summary: "Add a new task to the workspace markdown task board. Pass --role auto to match against configured role strengths.",
+    examples: `hive task add "Fix auth race" --role auto --body "Check token refresh"`,
+  },
+  {
+    usage: "hive task list [--status STATUS] [--role ROLE] [--ready] [--json]",
+    summary: "List tasks on the workspace board.",
+  },
+  {
+    usage: "hive task show <ID> [--json]",
+    summary: "Show full details and activity log for a task.",
+  },
+  {
+    usage: "hive task update <ID> [--status STATUS] [--role ROLE] [--session ID] [--branch BRANCH] [--note TEXT] [--json]",
+    summary: "Update a task's status, role, linked session, or append a log note.",
+  },
+  {
+    usage: "hive spawn --role <ROLE> [--task ID] [-w] [-b BRANCH] [-C DIR] [--prompt TEXT]",
+    summary: "Spawn a specialist subagent using a configured [roles.<name>] entry (or --role auto).",
+    examples: `hive spawn --role coder --task 1 -w
+hive spawn --role auto --prompt "Review the auth diff"`,
+  },
+  {
+    usage: "hive msg <SESSION> <MESSAGE>",
+    summary: "Send a message directly to a running session.",
+    examples: `hive msg 4 "Focus on token refresh edge cases"`,
+  },
+  {
+    usage: "hive wait <SESSION> [--timeout SECS]",
+    summary: "Wait until a session finishes or reports blocked.",
+    examples: `hive wait 4 --timeout 300`,
+  },
+  {
+    usage: "hive board [DIR]",
+    summary: "Open the interactive Kanban task board TUI (also Ctrl+Space B inside Hive).",
+  },
+  {
+    usage: "hive mcp [--dir DIR]",
+    summary: "Run a local stdio MCP server exposing Hive's 9 orchestration tools (task_list, task_show, task_add, task_update, agent_spawn, agent_message, agent_wait, session_list, role_list).",
+  },
+  {
+    usage: "hive roles [--json]",
+    summary: "List configured orchestration roles/models and their routing strengths.",
+  },
+  {
+    usage: "hive setup",
+    summary: "Interactive wizard to detect installed agents and configure [roles.*] in config.toml.",
+  },
 ];

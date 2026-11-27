@@ -80,6 +80,7 @@ export const keyGroups: KeyGroup[] = [
     commands: [
       { name: "integrations", keys: ["I"], title: "Integrations: turn each one on or off" },
       { name: "notes", keys: ["N"], title: "Open the workspace's Obsidian vault", needs: "[integrations.obsidian]" },
+      { name: "board", keys: ["B"], title: "Open the workspace task board (hive board)" },
       { name: "review", keys: ["G"], title: "Review changes (lazygit, tig or git diff)", needs: "[integrations.review]" },
       { name: "pull_request", keys: ["H"], title: "Pull request checks for the branch", needs: "[integrations.github]" },
       { name: "run_task", keys: ["T"], title: "Run a project task beside the session", needs: "[integrations.tasks]" },

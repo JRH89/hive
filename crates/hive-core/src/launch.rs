@@ -68,6 +68,9 @@ pub fn request_for(
         workspace: None,
         worktree: None,
         new_space: false,
+        parent_session: None,
+        role: None,
+        task_id: None,
     })
 }
 

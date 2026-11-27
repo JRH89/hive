@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.5.14"
+version = "0.6.0"
 edition = "2024"
 rust-version = "1.89"
 license = "MIT"
@@ -18,6 +18,7 @@ hive-tui = { path = "crates/hive-tui" }
 hive-workspace = { path = "crates/hive-workspace" }
 hive-agents = { path = "crates/hive-agents" }
 hive-notes = { path = "crates/hive-notes" }
+hive-tasks = { path = "crates/hive-tasks" }
 
 [profile.release]
 lto = "thin"
