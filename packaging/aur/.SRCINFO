@@ -1,18 +1,18 @@
 pkgbase = codefront-hive-bin
 	pkgdesc = Terminal multiplexer for AI coding agents
-	pkgver = 0.6.0
+	pkgver = 0.6.1
 	pkgrel = 1
 	url = https://github.com/JRH89/hive
 	arch = x86_64
 	arch = aarch64
 	license = MIT
-	provides = hive=0.6.0
+	provides = hive=0.6.1
 	conflicts = hive
 	options = !strip
 	options = !debug
-	source_x86_64 = hive-0.6.0-x86_64.tar.gz::https://github.com/JRH89/hive/releases/download/v0.6.0/hive-x86_64-unknown-linux-musl.tar.gz
-	sha256sums_x86_64 = f7b710d2a95ca17ddb3f3f3cceddb4c6b4034372b9484c2f2221d6123b231cf7
-	source_aarch64 = hive-0.6.0-aarch64.tar.gz::https://github.com/JRH89/hive/releases/download/v0.6.0/hive-aarch64-unknown-linux-musl.tar.gz
-	sha256sums_aarch64 = 43e994dd3db2845838b4e9ea972d4676273f6ab5b5c70fb679989b9ee5f5844c
+	source_x86_64 = hive-0.6.1-x86_64.tar.gz::https://github.com/JRH89/hive/releases/download/v0.6.1/hive-x86_64-unknown-linux-musl.tar.gz
+	sha256sums_x86_64 = ae2f18befb9bc502ec1458af2ff9028676586bbf7a3c7dace971b9ebfbe7866e
+	source_aarch64 = hive-0.6.1-aarch64.tar.gz::https://github.com/JRH89/hive/releases/download/v0.6.1/hive-aarch64-unknown-linux-musl.tar.gz
+	sha256sums_aarch64 = ead2ed25db46bef2eb16fbd4866fe312e19737e0848a0170a0ec6f6325ffd33d
 
 pkgname = codefront-hive-bin
